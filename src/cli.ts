@@ -5,6 +5,7 @@ import { enrolRepo, removeRepo } from "./ingest/registry.js";
 import { syncRepo, type SyncResult } from "./ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy } from "./serve/access.js";
 import { describeFreshness, freshnessOf } from "./serve/freshness.js";
+import { findConsumers } from "./serve/tools/find-consumers.js";
 import { repoCard } from "./serve/tools/repo-card.js";
 import { SqliteStore } from "./store/sqlite.js";
 import type { Store } from "./store/store.js";
@@ -17,6 +18,7 @@ Usage:
   brain repo remove <name>                                 remove a repo and all its facts
   brain sync [<name>]                                      index the tracked branch (all repos if no name)
   brain card <name> [--detailed]                           the repo card an agent would get
+  brain consumers "<METHOD /path>" [--detailed]            who serves and who calls an endpoint
 
 Store: ${resolveDbPath()} (set BRAIN_DB to change)`;
 
@@ -68,6 +70,15 @@ async function main(argv: string[]): Promise<void> {
         console.log(result.text);
         break;
       }
+      case "consumers": {
+        if (!sub) throw new BrainError("Usage: brain consumers \"GET /api/orders/{id}\" [--detailed]");
+        const deps = { store, access: new LocalAccessPolicy() };
+        const format = values.detailed ? "detailed" : "concise";
+        const result = await findConsumers(deps, LOCAL_CALLER, { target: sub, format });
+        if (!result.ok) throw new BrainError(result.text);
+        console.log(result.text);
+        break;
+      }
       default:
         throw new BrainError(`Unknown command "${command}".\n\n${HELP}`);
     }
@@ -91,10 +102,12 @@ async function listRepos(store: Store): Promise<void> {
 
 function printSync(result: SyncResult): void {
   const from = result.previousCommit ? `${result.previousCommit.slice(0, 7)} → ` : "";
+  const extract = result.fullExtract ? "extractors changed, re-read every file" : `${result.extracted} files with seams`;
   console.log(
     `${result.repo}: ${from}${result.commit.slice(0, 7)} ` +
-      `(+${result.added} ~${result.changed} -${result.removed}, ${result.unchanged} unchanged)`,
+      `(+${result.added} ~${result.changed} -${result.removed}, ${result.unchanged} unchanged; ${extract})`,
   );
+  for (const path of result.failures) console.error(`  could not extract ${path}`);
 }
 
 main(process.argv.slice(2)).catch((error: unknown) => {

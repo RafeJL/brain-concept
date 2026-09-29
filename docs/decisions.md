@@ -43,3 +43,33 @@ Group policy on Citation laptops blocks native executables and `.cmd` shims unde
 `node_modules`. TypeScript 7 is a native binary, so we use TypeScript 6. npm scripts call `tsc`
 and `vitest` via `node`, and `bin/` launchers load tsx relative to themselves so the CLI and the
 MCP server run from any folder. Revisit if the policy changes or when we build to JavaScript for hosting.
+
+## 2026-09-29: phase 1 stacks are OpenAPI, TS/JS and C#/ASP.NET
+
+OpenAPI/AsyncAPI specs cover the serving side of any backend that publishes one. TS/JS covers
+both sides (most frontends are the callers). C#/ASP.NET is the backend stack. Other stacks are
+added when an enrolled repo needs them, and repo cards list code languages with no extractor.
+
+## 2026-09-29: tree-sitter through `@vscode/tree-sitter-wasm`
+
+One package with the WASM runtime and grammars for TS, TSX, JS, C#, Java, Python, PHP and Go,
+built and versioned together by the VS Code team. WASM avoids native builds and group policy.
+
+## 2026-09-29: endpoints match exactly or by suffix at a segment boundary
+
+Mount prefixes (`app.use('/api', router)`) and client base URLs are often configured at run time,
+so `/api/articles/{}` must be able to find `/articles/{}`. Suffix matches are labelled in every
+answer. Parameters never match literals (`/articles/feed` is not `/articles/{}`), and a key made
+only of parameters never suffix-matches, so `/{}` can't match everything.
+
+## 2026-09-29: unresolved calls are counted, never guessed
+
+A call to a known HTTP client whose URL is only known at run time is stored with no key. It never
+matches anything, but answers say how many exist so "no callers found" is not read as proof.
+Calls on receivers that don't look like HTTP clients are skipped rather than recorded.
+
+## 2026-09-29: extractor version forces a full re-extract
+
+`EXTRACTOR_VERSION` is stored per repo. When a plugin changes, bump it; each repo is fully
+re-extracted on its next sync instead of mixing old and new rules. This is also how phase 0
+databases gain seams.

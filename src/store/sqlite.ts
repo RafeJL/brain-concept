@@ -1,9 +1,10 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { Seam, SeamCoverage } from "../core/seams.js";
 import type { FileRecord, LanguageShare, RepoRecord, RepoState } from "../core/types.js";
 import { MIGRATIONS } from "./migrations.js";
-import type { Store, SyncChanges } from "./store.js";
+import type { SeamFilter, Store, SyncUpdate } from "./store.js";
 
 type Row = Record<string, unknown>;
 
@@ -66,6 +67,7 @@ export class SqliteStore implements Store {
         commit: String(row.commit_sha),
         syncedAt: String(row.synced_at),
         fileCount: Number(row.file_count),
+        extractorVersion: Number(row.extractor_version),
       }
     );
   }
@@ -82,23 +84,83 @@ export class SqliteStore implements Store {
     }));
   }
 
-  applySync(repo: string, commit: string, changes: SyncChanges, fileCount: number): void {
+  applySync(repo: string, update: SyncUpdate): void {
     const upsert = this.db.prepare(
       `INSERT INTO files (repo, path, blob, bytes, language, commit_sha) VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT (repo, path) DO UPDATE SET
          blob = excluded.blob, bytes = excluded.bytes, language = excluded.language, commit_sha = excluded.commit_sha`,
     );
     const remove = this.db.prepare("DELETE FROM files WHERE repo = ? AND path = ?");
+    const clearSeams = this.db.prepare("DELETE FROM seams WHERE repo = ? AND path = ?");
+    const insertSeam = this.db.prepare(
+      `INSERT INTO seams (repo, path, kind, method, raw_path, route_key, start_line, end_line, plugin, commit_sha)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
     const state = this.db.prepare(
-      `INSERT INTO repo_state (repo, commit_sha, synced_at, file_count) VALUES (?, ?, ?, ?)
+      `INSERT INTO repo_state (repo, commit_sha, synced_at, file_count, extractor_version) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT (repo) DO UPDATE SET
-         commit_sha = excluded.commit_sha, synced_at = excluded.synced_at, file_count = excluded.file_count`,
+         commit_sha = excluded.commit_sha, synced_at = excluded.synced_at,
+         file_count = excluded.file_count, extractor_version = excluded.extractor_version`,
     );
     this.transaction(() => {
-      for (const f of changes.upsert) upsert.run(repo, f.path, f.blob, f.bytes, f.language, f.commit);
-      for (const path of changes.remove) remove.run(repo, path);
-      state.run(repo, commit, new Date().toISOString(), fileCount);
+      // Files first: seams reference them. Removing a file cascades to its seams.
+      for (const f of update.upsert) upsert.run(repo, f.path, f.blob, f.bytes, f.language, f.commit);
+      for (const path of update.remove) remove.run(repo, path);
+      for (const path of update.seamPaths) clearSeams.run(repo, path);
+      for (const s of update.seams) {
+        insertSeam.run(repo, s.path, s.kind, s.method, s.rawPath, s.key, s.startLine, s.endLine, s.plugin, s.commit);
+      }
+      state.run(repo, update.commit, new Date().toISOString(), update.fileCount, update.extractorVersion);
     });
+  }
+
+  seams(filter: SeamFilter): Seam[] {
+    if (filter.repos.length === 0) return [];
+    const where = [`repo IN (${filter.repos.map(() => "?").join(", ")})`];
+    const params: string[] = [...filter.repos];
+    if (filter.kind) {
+      where.push("kind = ?");
+      params.push(filter.kind);
+    }
+    if (filter.path) {
+      where.push("path = ?");
+      params.push(filter.path);
+    }
+    if (!filter.includeUnresolved) where.push("route_key IS NOT NULL");
+    const rows = this.db
+      .prepare(`SELECT * FROM seams WHERE ${where.join(" AND ")} ORDER BY repo, path, start_line`)
+      .all(...params) as Row[];
+    return rows.map((row) => ({
+      repo: String(row.repo),
+      path: String(row.path),
+      kind: String(row.kind) as Seam["kind"],
+      method: String(row.method),
+      rawPath: row.raw_path === null ? null : String(row.raw_path),
+      key: row.route_key === null ? null : String(row.route_key),
+      startLine: Number(row.start_line),
+      endLine: Number(row.end_line),
+      plugin: String(row.plugin),
+      commit: String(row.commit_sha),
+    }));
+  }
+
+  seamCoverage(repo: string): SeamCoverage {
+    const counts = this.db
+      .prepare(
+        `SELECT
+           SUM(kind = 'http-route') AS routes,
+           SUM(kind = 'http-call' AND route_key IS NOT NULL) AS calls,
+           SUM(kind = 'http-call' AND route_key IS NULL) AS unresolved
+         FROM seams WHERE repo = ?`,
+      )
+      .get(repo) as Row;
+    const plugins = this.db.prepare("SELECT DISTINCT plugin FROM seams WHERE repo = ? ORDER BY plugin").all(repo) as Row[];
+    return {
+      routes: Number(counts.routes ?? 0),
+      calls: Number(counts.calls ?? 0),
+      unresolvedCalls: Number(counts.unresolved ?? 0),
+      plugins: plugins.map((row) => String(row.plugin)),
+    };
   }
 
   languageShares(repo: string): LanguageShare[] {

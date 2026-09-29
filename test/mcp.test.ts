@@ -18,12 +18,13 @@ async function connect(store: SqliteStore): Promise<Client> {
 }
 
 describe("MCP server", () => {
-  it("lists brain_repo_card as a read-only tool", async () => {
+  it("lists only read-only tools", async () => {
     const client = await connect(new SqliteStore(":memory:"));
 
     const { tools } = await client.listTools();
 
-    expect(tools.map((t) => t.name)).toEqual(["brain_repo_card"]);
+    expect(tools.map((t) => t.name)).toEqual(["brain_repo_card", "brain_find_consumers"]);
+    expect(tools.every((t) => t.annotations?.readOnlyHint === true)).toBe(true);
     expect(tools[0]?.annotations?.readOnlyHint).toBe(true);
   });
 

@@ -22,6 +22,8 @@ export interface RepoState {
   commit: string;
   syncedAt: string;
   fileCount: number;
+  /** EXTRACTOR_VERSION the seams were built with; a mismatch forces a full re-extract. */
+  extractorVersion: number;
 }
 
 /** One file in a repo's committed tree. */
