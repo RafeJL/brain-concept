@@ -6,8 +6,8 @@ export interface SeamDraft {
   kind: SeamKind;
   /** GET, POST, ... or "*" for any method. */
   method: string;
-  /** The path as written in the source, for display. Null when the URL could not be resolved. */
-  rawPath: string | null;
+  /** The path or URL expression as written in the source, for display. */
+  rawPath: string;
   /** Normalised key used for matching (see core/http.ts). Null for an unresolved call. */
   key: string | null;
   /** 1-based, inclusive. */

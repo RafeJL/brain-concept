@@ -5,7 +5,9 @@ import { enrolRepo, removeRepo } from "./ingest/registry.js";
 import { syncRepo, type SyncResult } from "./ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy } from "./serve/access.js";
 import { describeFreshness, freshnessOf } from "./serve/freshness.js";
+import type { Format, ToolDeps, ToolResult } from "./serve/tools/common.js";
 import { findConsumers } from "./serve/tools/find-consumers.js";
+import { impact } from "./serve/tools/impact.js";
 import { repoCard } from "./serve/tools/repo-card.js";
 import { SqliteStore } from "./store/sqlite.js";
 import type { Store } from "./store/store.js";
@@ -19,6 +21,8 @@ Usage:
   brain sync [<name>]                                      index the tracked branch (all repos if no name)
   brain card <name> [--detailed]                           the repo card an agent would get
   brain consumers "<METHOD /path>" [--detailed]            who serves and who calls an endpoint
+  brain impact <repo> [--path <file>] [--route "<METHOD /path>"] [--detailed]
+                                                           routes a repo or file serves, and their callers
 
 Store: ${resolveDbPath()} (set BRAIN_DB to change)`;
 
@@ -29,6 +33,8 @@ async function main(argv: string[]): Promise<void> {
     options: {
       name: { type: "string" },
       ref: { type: "string" },
+      path: { type: "string" },
+      route: { type: "string" },
       detailed: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
@@ -40,6 +46,9 @@ async function main(argv: string[]): Promise<void> {
   }
 
   const store = new SqliteStore(resolveDbPath());
+  // The CLI answers exactly what an agent would get over MCP, as the local user.
+  const tools: ToolDeps = { store, access: new LocalAccessPolicy() };
+  const format: Format = values.detailed ? "detailed" : "concise";
   try {
     switch (command) {
       case "repo":
@@ -62,23 +71,18 @@ async function main(argv: string[]): Promise<void> {
         for (const name of names) printSync(await syncRepo(store, name));
         break;
       }
-      case "card": {
+      case "card":
         if (!sub) throw new BrainError("Usage: brain card <name> [--detailed]");
-        const deps = { store, access: new LocalAccessPolicy() };
-        const result = await repoCard(deps, LOCAL_CALLER, sub, values.detailed ? "detailed" : "concise");
-        if (!result.ok) throw new BrainError(result.text);
-        console.log(result.text);
+        print(await repoCard(tools, LOCAL_CALLER, sub, format));
         break;
-      }
-      case "consumers": {
+      case "consumers":
         if (!sub) throw new BrainError("Usage: brain consumers \"GET /api/orders/{id}\" [--detailed]");
-        const deps = { store, access: new LocalAccessPolicy() };
-        const format = values.detailed ? "detailed" : "concise";
-        const result = await findConsumers(deps, LOCAL_CALLER, { target: sub, format });
-        if (!result.ok) throw new BrainError(result.text);
-        console.log(result.text);
+        print(await findConsumers(tools, LOCAL_CALLER, { target: sub, format }));
         break;
-      }
+      case "impact":
+        if (!sub) throw new BrainError("Usage: brain impact <repo> [--path <file>] [--route \"GET /path\"] [--detailed]");
+        print(await impact(tools, LOCAL_CALLER, { repo: sub, path: values.path, route: values.route, format }));
+        break;
       default:
         throw new BrainError(`Unknown command "${command}".\n\n${HELP}`);
     }
@@ -98,6 +102,11 @@ async function listRepos(store: Store): Promise<void> {
     const status = state ? describeFreshness(await freshnessOf(repo, state), repo.ref) : "not synced";
     console.log(`${repo.name.padEnd(32)} ${status.padEnd(34)} ${repo.path}`);
   }
+}
+
+function print(result: ToolResult<unknown>): void {
+  if (!result.ok) throw new BrainError(result.text);
+  console.log(result.text);
 }
 
 function printSync(result: SyncResult): void {

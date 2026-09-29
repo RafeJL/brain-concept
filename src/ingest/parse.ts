@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { dirname, extname, join } from "node:path";
-import type { Language, Parser as ParserType, Tree } from "@vscode/tree-sitter-wasm";
+import type { Parser as ParserType, Tree } from "@vscode/tree-sitter-wasm";
 
 // The package is UMD, so it is loaded through require. The grammars are WASM, which means
 // no native builds and nothing for group policy to block.
@@ -22,22 +22,20 @@ export function grammarFor(path: string): Grammar | null {
   return BY_EXTENSION[extname(path).toLowerCase()] ?? null;
 }
 
-let ready: Promise<void> | undefined;
-const languages = new Map<Grammar, Promise<Language>>();
-const parsers = new Map<Grammar, ParserType>();
+let runtime: Promise<void> | undefined;
+const parsers = new Map<Grammar, Promise<ParserType>>();
 
-async function parserFor(grammar: Grammar): Promise<ParserType> {
-  ready ??= treeSitter.Parser.init();
-  await ready;
-  let language = languages.get(grammar);
-  if (!language) {
-    language = treeSitter.Language.load(join(WASM_DIR, `tree-sitter-${grammar}.wasm`));
-    languages.set(grammar, language);
-  }
+/** One parser per grammar, created on first use. The WASM runtime starts once. */
+function parserFor(grammar: Grammar): Promise<ParserType> {
   let parser = parsers.get(grammar);
   if (!parser) {
-    parser = new treeSitter.Parser();
-    parser.setLanguage(await language);
+    parser = (async () => {
+      runtime ??= treeSitter.Parser.init();
+      await runtime;
+      const created = new treeSitter.Parser();
+      created.setLanguage(await treeSitter.Language.load(join(WASM_DIR, `tree-sitter-${grammar}.wasm`)));
+      return created;
+    })();
     parsers.set(grammar, parser);
   }
   return parser;

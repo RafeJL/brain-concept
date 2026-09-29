@@ -12,6 +12,9 @@ describe("normalisePath", () => {
     ["//double//slashes/", "/double/slashes"],
     ["/v{version}/items", "/{}/items"],
     ["/", "/"],
+    ["/api/catalog/items/42", "/api/catalog/items/{}"],
+    ["/orders/3f2504e0-4f89-11d3-9a0c-0305e82c3301/lines", "/orders/{}/lines"],
+    ["/v2/items", "/v2/items"],
   ])("%s → %s", (raw, key) => {
     expect(normalisePath(raw)).toBe(key);
   });

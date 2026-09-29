@@ -1,0 +1,14 @@
+# OpenAPI 3: paths and methods under the first server's base path; non-method keys such as
+# "parameters" are skipped.
+openapi: 3.0.1
+servers:
+  - url: https://api.example.com/api
+paths:
+  /articles/{slug}:
+    parameters: []
+    get: # seam: route GET /api/articles/{}
+      summary: Get an article
+    delete: # seam: route DELETE /api/articles/{}
+      summary: Delete it
+  /tags:
+    get: {} # seam: route GET /api/tags

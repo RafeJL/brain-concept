@@ -1,0 +1,4 @@
+# JSON cannot hold comments, so expectations for swagger2.json live here: "<line>: <seam>".
+# Swagger 2 paths sit under basePath.
+6: route GET /v2/pets/{}
+7: route PUT /v2/pets/{}

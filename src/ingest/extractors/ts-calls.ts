@@ -1,12 +1,12 @@
 import type { Node } from "@vscode/tree-sitter-wasm";
 import { methodFromVerb } from "../../core/http.js";
 import type { SeamDraft } from "../../core/seams.js";
-import type { ExtractorPlugin } from "./plugin.js";
+import { callSeams, lines, type ExtractorPlugin } from "./plugin.js";
+import type { Consts } from "./strings.js";
 import {
-  collectStringConsts,
+  collectConsts,
   isClientName,
   isRouteRegistration,
-  lines,
   namedArgs,
   objectProperty,
   receiverName,
@@ -14,56 +14,48 @@ import {
   routeChainPath,
   staticString,
   wantsTsOrJs,
-} from "./ts-shared.js";
+} from "./ts-syntax.js";
+
+const PLUGIN = "ts-calls";
 
 /**
- * HTTP calls a TS/JS repo makes: `fetch`, `axios`, and `<client>.get|post|...(url)`.
- * A call whose URL is only known at run time is recorded as unresolved when the receiver is
- * clearly an HTTP client, and skipped otherwise, so coverage gaps are visible but never guessed.
+ * HTTP calls a TS/JS repo makes: `fetch`, `axios`, and `<client>.get|post|...(url)` where the
+ * receiver is named like an HTTP client (`api`, `http`, `requests`, `ordersClient`, ...).
+ * A call whose URL is only known at run time is recorded as unresolved, so coverage gaps are
+ * visible but never guessed.
  */
 function extractCalls(root: Node): SeamDraft[] {
-  const consts = collectStringConsts(root);
-  const found: SeamDraft[] = [];
+  const consts = collectConsts(root);
+  return root.descendantsOfType("call_expression").flatMap((call) => (call ? callAt(call, consts) : []));
+}
 
-  const record = (call: Node, urlNode: Node | undefined, method: string, sureItIsHttp: boolean) => {
-    if (!urlNode) return;
-    const url = resolveUrl(urlNode, consts);
-    if (url.status === "path") {
-      found.push({ kind: "http-call", method, rawPath: url.raw, key: url.key, ...lines(call), plugin: "ts-calls" });
-    } else if (url.status === "dynamic" && sureItIsHttp) {
-      found.push({ kind: "http-call", method, rawPath: url.raw, key: null, ...lines(call), plugin: "ts-calls" });
-    }
-  };
+function callAt(call: Node, consts: Consts): SeamDraft[] {
+  const fn = call.childForFieldName("function");
+  if (!fn) return [];
+  const args = namedArgs(call);
+  const record = (url: Node | null | undefined, method: string) =>
+    url ? callSeams(PLUGIN, method, resolveUrl(url, consts), lines(call)) : [];
 
-  for (const call of root.descendantsOfType("call_expression")) {
-    const fn = call?.childForFieldName("function");
-    if (!call || !fn) continue;
-    const args = namedArgs(call);
-    const callee = fn.type === "member_expression" ? fn.childForFieldName("property")?.text ?? "" : fn.text;
-    const receiver = fn.type === "member_expression" ? receiverName(fn) : "";
-
-    if (callee === "fetch" && (fn.type === "identifier" || /^(window|globalThis|self)$/.test(receiver))) {
-      record(call, args[0], optionMethod(args[1]) ?? "GET", true);
-      continue;
-    }
-    if (fn.type === "identifier" && callee === "axios") {
-      if (args[0]?.type === "object") {
-        record(call, objectProperty(args[0], "url") ?? undefined, optionMethod(args[0]) ?? "GET", true);
-      } else {
-        record(call, args[0], optionMethod(args[1]) ?? "GET", true);
-      }
-      continue;
-    }
-    if (fn.type !== "member_expression") continue;
-
-    const method = methodFromVerb(callee);
-    if (!method || method === "*" || args.length === 0) continue;
-    const object = fn.childForFieldName("object");
-    if (object?.type === "call_expression" && routeChainPath(object) !== null) continue;
-    if (isRouteRegistration(fn, args)) continue;
-    record(call, args[0], method, isClientName(receiver));
+  if (fn.type === "identifier") {
+    if (fn.text === "fetch") return record(args[0], optionMethod(args[1]) ?? "GET");
+    if (fn.text !== "axios") return [];
+    return args[0]?.type === "object"
+      ? record(objectProperty(args[0], "url"), optionMethod(args[0]) ?? "GET")
+      : record(args[0], optionMethod(args[1]) ?? "GET");
   }
-  return found;
+  if (fn.type !== "member_expression") return [];
+
+  const callee = fn.childForFieldName("property")?.text ?? "";
+  const receiver = receiverName(fn);
+  if (callee === "fetch" && /^(window|globalThis|self)$/.test(receiver)) return record(args[0], optionMethod(args[1]) ?? "GET");
+
+  const method = methodFromVerb(callee);
+  if (!method || method === "*" || args.length === 0) return [];
+  const object = fn.childForFieldName("object");
+  if (object?.type === "call_expression" && routeChainPath(object) !== null) return [];
+  // `cache.get("/key")` is not HTTP: only receivers named like a client count.
+  if (!isClientName(receiver) || isRouteRegistration(fn, args)) return [];
+  return record(args[0], method);
 }
 
 /** `{ method: 'POST' }` in fetch/axios options. */
@@ -75,7 +67,8 @@ function optionMethod(options: Node | undefined): string | null {
 }
 
 export const tsCalls: ExtractorPlugin = {
-  name: "ts-calls",
+  name: PLUGIN,
+  languages: ["TypeScript", "JavaScript"],
   wants: wantsTsOrJs,
   needsTree: true,
   extract: ({ tree }) => (tree ? extractCalls(tree.rootNode) : []),

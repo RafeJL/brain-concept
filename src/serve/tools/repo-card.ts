@@ -1,9 +1,10 @@
+import { CODE_LANGUAGES } from "../../core/languages.js";
 import type { SeamCoverage } from "../../core/seams.js";
 import type { Freshness, LanguageShare, Tier } from "../../core/types.js";
-import { CODE_LANGUAGES, SEAM_LANGUAGES } from "../../ingest/extractors/index.js";
+import { SEAM_LANGUAGES } from "../../ingest/extractors/index.js";
 import type { Caller } from "../access.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
-import { readableRepos, type Format, type ToolDeps, type ToolResult } from "./common.js";
+import { requireSyncedRepo, type Format, type ToolDeps, type ToolResult } from "./common.js";
 
 export interface RepoCard {
   repo: string;
@@ -23,18 +24,9 @@ const CONCISE_LANGUAGES = 5;
 
 /** What a repo is, from facts the brain holds about it. Backs `brain_repo_card` and `brain card`. */
 export async function repoCard(deps: ToolDeps, caller: Caller, name: string, format: Format): Promise<ToolResult<RepoCard>> {
-  const names = await readableRepos(deps, caller);
-  const repo = names.includes(name) ? deps.store.getRepo(name) : undefined;
-  if (!repo) {
-    // Same answer for "doesn't exist" and "not allowed", so existence never leaks.
-    const list = names.length ? `Repos you can read: ${names.join(", ")}.` : "No repos are enrolled yet.";
-    return { ok: false, text: `No readable repo named "${name}". ${list}` };
-  }
-
-  const state = deps.store.getState(name);
-  if (!state) {
-    return { ok: false, text: `"${name}" is enrolled but has not been synced yet. Run: brain sync ${name}` };
-  }
+  const found = await requireSyncedRepo(deps, caller, name);
+  if (!found.ok) return found;
+  const { repo, state } = found;
 
   const languages = deps.store.languageShares(name);
   const card: RepoCard = {

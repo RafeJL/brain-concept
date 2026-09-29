@@ -1,26 +1,14 @@
 import type { Node } from "@vscode/tree-sitter-wasm";
-import { joinPaths, methodFromVerb, normalisePath } from "../../core/http.js";
+import { joinPaths, methodFromVerb } from "../../core/http.js";
 import type { SeamDraft } from "../../core/seams.js";
-import type { ExtractorPlugin } from "./plugin.js";
-import {
-  isHandler,
-  isRouteRegistration,
-  lines,
-  namedArgs,
-  objectProperty,
-  routeChainPath,
-  staticString,
-  wantsTsOrJs,
-} from "./ts-shared.js";
+import { lines, routeSeam, type ExtractorPlugin } from "./plugin.js";
+import { isHandler, isRouteRegistration, namedArgs, objectProperty, routeChainPath, staticString, wantsTsOrJs } from "./ts-syntax.js";
+
+const PLUGIN = "ts-routes";
 
 const NEST_METHODS: Record<string, string> = {
   Get: "GET", Post: "POST", Put: "PUT", Patch: "PATCH", Delete: "DELETE", Head: "HEAD", Options: "OPTIONS", All: "*",
 };
-
-function route(method: string, raw: string, node: Node): SeamDraft | null {
-  const key = normalisePath(raw);
-  return key === null ? null : { kind: "http-route", method, rawPath: raw, key, ...lines(node), plugin: "ts-routes" };
-}
 
 /** Express/Fastify-style `x.get('/path', handler)`, `x.route('/path').get(...)`, `fastify.route({...})`. */
 function callRoutes(root: Node): SeamDraft[] {
@@ -32,29 +20,33 @@ function callRoutes(root: Node): SeamDraft[] {
     const args = namedArgs(call);
 
     if (verb === "route" && args[0]?.type === "object") {
-      const url = objectProperty(args[0], "url") ?? objectProperty(args[0], "path");
-      const methodNode = objectProperty(args[0], "method");
-      const path = url ? staticString(url) : null;
-      const methods = methodNode?.type === "array" ? methodNode.namedChildren : [methodNode];
-      for (const m of methods) {
-        const method = m ? methodFromVerb(staticString(m) ?? "") : null;
-        const seam = path?.startsWith("/") && method ? route(method, path, call) : null;
-        if (seam) found.push(seam);
-      }
+      found.push(...fastifyRoutes(args[0], call));
       continue;
     }
-
     const method = methodFromVerb(verb);
     if (!method) continue;
     const object = fn.childForFieldName("object");
     const chained = object?.type === "call_expression" ? routeChainPath(object) : null;
     if (chained !== null) {
-      if (args.length > 0 && isHandler(args[args.length - 1]!)) push(found, route(method, chained, call));
+      if (args.length > 0 && isHandler(args[args.length - 1]!)) found.push(routeSeam(PLUGIN, method, chained, lines(call)));
     } else if (isRouteRegistration(fn, args)) {
-      push(found, route(method, staticString(args[0]!)!, call));
+      found.push(routeSeam(PLUGIN, method, staticString(args[0]!)!, lines(call)));
     }
   }
   return found;
+}
+
+/** `fastify.route({ method: ["GET", "HEAD"], url: "/health", handler })`. */
+function fastifyRoutes(options: Node, call: Node): SeamDraft[] {
+  const url = objectProperty(options, "url") ?? objectProperty(options, "path");
+  const path = url ? staticString(url) : null;
+  if (!path?.startsWith("/")) return [];
+  const methodNode = objectProperty(options, "method");
+  const methodNodes = methodNode?.type === "array" ? methodNode.namedChildren : [methodNode];
+  return methodNodes.flatMap((node) => {
+    const method = node ? methodFromVerb(staticString(node) ?? "") : null;
+    return method ? [routeSeam(PLUGIN, method, path, lines(call))] : [];
+  });
 }
 
 /** NestJS `@Controller('cats')` on the class plus `@Get(':id')` on the method. */
@@ -64,13 +56,12 @@ function nestRoutes(root: Node): SeamDraft[] {
     const call = decorator?.namedChildren[0];
     if (!decorator || call?.type !== "call_expression") continue;
     const method = NEST_METHODS[call.childForFieldName("function")?.text ?? ""];
-    if (!method || decorator.parent?.type !== "class_body") continue;
-    const cls = decorator.parent.parent;
+    const cls = decorator.parent?.type === "class_body" ? decorator.parent.parent : null;
     const first = namedArgs(call)[0];
     const sub = first ? staticString(first) : "";
-    if (sub === null || !cls) continue;
-    const target = nextMethod(decorator) ?? decorator;
-    push(found, route(method, joinPaths(controllerPrefix(cls), sub), target));
+    if (!method || !cls || sub === null) continue;
+    const cited = nextMethod(decorator) ?? decorator;
+    found.push(routeSeam(PLUGIN, method, joinPaths(controllerPrefix(cls), sub), lines(cited)));
   }
   return found;
 }
@@ -83,28 +74,22 @@ function nextMethod(decorator: Node): Node | null {
   return null;
 }
 
+/** The path in `@Controller('cats')` or `@Controller({ path: 'cats' })`; "" when there is none. */
 function controllerPrefix(cls: Node): string {
   const decorators = [...cls.namedChildren, ...(cls.parent?.type === "export_statement" ? cls.parent.namedChildren : [])];
   for (const decorator of decorators) {
     const call = decorator?.type === "decorator" ? decorator.namedChildren[0] : null;
     if (call?.type !== "call_expression" || call.childForFieldName("function")?.text !== "Controller") continue;
     const arg = namedArgs(call)[0];
-    if (!arg) return "";
-    if (arg.type === "object") {
-      const path = objectProperty(arg, "path");
-      return (path && staticString(path)) ?? "";
-    }
-    return staticString(arg) ?? "";
+    const path = arg?.type === "object" ? objectProperty(arg, "path") : arg;
+    return (path && staticString(path)) ?? "";
   }
   return "";
 }
 
-function push(list: SeamDraft[], seam: SeamDraft | null): void {
-  if (seam) list.push(seam);
-}
-
 export const tsRoutes: ExtractorPlugin = {
-  name: "ts-routes",
+  name: PLUGIN,
+  languages: ["TypeScript", "JavaScript"],
   wants: wantsTsOrJs,
   needsTree: true,
   extract: ({ tree }) => (tree ? [...callRoutes(tree.rootNode), ...nestRoutes(tree.rootNode)] : []),

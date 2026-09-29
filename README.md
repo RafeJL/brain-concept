@@ -10,9 +10,9 @@ Citation delivery harness calls it; it never moves code out of the harness.
 Read [`docs/architecture.md`](docs/architecture.md) first. The evidence behind the design is in
 [`docs/research.md`](docs/research.md), and dated decisions in [`docs/decisions.md`](docs/decisions.md).
 
-**Status:** phase 1a. Repos can be enrolled and synced; HTTP routes and calls are extracted from
-TS/JS code and OpenAPI/Swagger specs; `brain_repo_card` and `brain_find_consumers` work over MCP.
-C#/ASP.NET extraction and `brain_impact` (phase 1b) come next.
+**Status:** phase 1 (seam graph) complete. HTTP routes and calls are extracted from TS/JS and
+C#/ASP.NET code and from OpenAPI/Swagger specs. `brain_repo_card`, `brain_find_consumers` and
+`brain_impact` work over MCP. Phase 2 (proving it with harness evals) is next.
 
 ## Requirements
 
@@ -40,6 +40,7 @@ Run from this folder with `npm run brain -- <command>`, or from anywhere with
 | `sync [<name>]` | Index the tracked branch's committed tree (not your working copy). All repos if no name. |
 | `card <name> [--detailed]` | Print exactly what an agent gets from `brain_repo_card`. |
 | `consumers "<METHOD /path>" [--detailed]` | Print what an agent gets from `brain_find_consumers`: who serves and who calls an endpoint. |
+| `impact <repo> [--path file] [--route "<METHOD /path>"] [--detailed]` | Print what an agent gets from `brain_impact`: the routes a repo or file serves, and who calls each one. |
 
 The store lives at `%USERPROFILE%\.brain\brain.db`. Set `BRAIN_DB` to use a different file,
 for example a throwaway one while testing.
@@ -100,6 +101,27 @@ make ready-made cross-repo test data.
    one caller.
 5. Start a **new** Claude Code session and ask: *"If I change the GET /articles/:slug endpoint in
    express-api, what else would break?"* It should call `brain_find_consumers`.
+
+## Try it (phase 1b test script: C#)
+
+1. Enrol the ASP.NET RealWorld backend alongside the two repos above:
+   ```
+   git clone https://github.com/gothinkster/aspnetcore-realworld-example-app C:\Users\Rafe.Loveday\Repos\brain-test-repos\aspnetcore-realworld-example-app
+   npm run brain -- repo add C:\Users\Rafe.Loveday\Repos\brain-test-repos\aspnetcore-realworld-example-app --name aspnet-api
+   npm run brain -- sync
+   ```
+   `card aspnet-api` should show 19 routes via cs-routes.
+2. `npm run brain -- consumers "GET /api/articles/:slug"` should now list **two** servers
+   (the C# `ArticlesController` and the Express controller) for the one React caller. The
+   run-time URL note should point at `react-web · src/agent.js:20-26`, the superagent wrapper.
+3. `npm run brain -- impact aspnet-api --path src/Conduit/Features/Articles/ArticlesController.cs`
+   should list 6 routes and 9 callers, all in `react-web · src/agent.js`.
+4. A bigger C# check: clone `https://github.com/dotnet/eShop` into `brain-test-repos`, enrol it
+   as `eshop`, sync, and run `impact eshop --route "GET /api/catalog/items/{id}"`. Expect one
+   route (from the minimal API, with the two OpenAPI specs listed as "also declared in") and
+   the functional tests as callers.
+5. In a **new** Claude Code session ask: *"What would break if I removed the DELETE endpoint in
+   aspnet-api's ArticlesController?"* It should call `brain_impact` or `brain_find_consumers`.
 
 ## Layout
 

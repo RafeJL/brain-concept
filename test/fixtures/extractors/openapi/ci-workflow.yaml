@@ -1,0 +1,6 @@
+# YAML with a "paths" map that is not an OpenAPI spec (no openapi/swagger key). Expect no seams.
+name: ci
+on: push
+paths:
+  /x:
+    get: {}

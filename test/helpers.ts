@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach } from "vitest";
 
 const created: string[] = [];
@@ -17,7 +18,7 @@ export function tempDir(): string {
 }
 
 function git(dir: string, ...args: string[]): string {
-  return execFileSync("git", ["-C", dir, "-c", "user.name=Test", "-c", "user.email=test@example.com", ...args], {
+  return execFileSync("git", ["-C", dir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "core.autocrlf=false", ...args], {
     encoding: "utf8",
   }).trim();
 }
@@ -36,6 +37,29 @@ export function makeRepo(files: Record<string, string>): string {
   git(dir, "init", "--quiet", "--initial-branch=main");
   commit(dir, files, "initial");
   return dir;
+}
+
+const FIXTURE_REPOS = fileURLToPath(new URL("./fixtures/repos/", import.meta.url));
+const FIXTURE_CHANGES = fileURLToPath(new URL("./fixtures/changes/", import.meta.url));
+
+function readTree(root: string, dir = root): Record<string, string> {
+  const files: Record<string, string> = {};
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) Object.assign(files, readTree(root, full));
+    else files[relative(root, full).replace(/\\/g, "/")] = readFileSync(full, "utf8");
+  }
+  return files;
+}
+
+/** A throwaway git repo holding a copy of test/fixtures/repos/<name>. */
+export function repoFromFixture(name: string): string {
+  return makeRepo(readTree(join(FIXTURE_REPOS, name)));
+}
+
+/** Commits test/fixtures/changes/<name> on top of a repo, returns the new sha. */
+export function commitFixture(dir: string, name: string): string {
+  return commit(dir, readTree(join(FIXTURE_CHANGES, name)), name);
 }
 
 /** Writes `files`, deletes `remove`, commits everything, returns the new sha. */
