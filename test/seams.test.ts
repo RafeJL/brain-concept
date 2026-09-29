@@ -63,7 +63,7 @@ describe("seam sync", () => {
 
     const card = await repoCard(deps, LOCAL_CALLER, "web", "concise");
 
-    expect(card.text).toContain("Seams: 0 routes, 1 calls (+1 with run-time URLs) via ts-calls");
+    expect(card.text).toContain("Seams: 0 routes, 1 call (+1 with run-time URLs) via ts-calls");
   });
 });
 
@@ -105,6 +105,16 @@ describe("brain_find_consumers", () => {
 
     expect(result.text).not.toContain("api ·");
     expect(result.text).toContain("0 servers, 1 caller in 1 repo");
+  });
+
+  it("points first at run-time URLs in the repos the answer involves", async () => {
+    const { store, deps } = await twoRepos();
+    await enrolRepo(store, { path: repoFromFixture("shop-web"), name: "shop" });
+    await syncRepo(store, "shop");
+
+    const result = await findConsumers(deps, LOCAL_CALLER, { target: "GET /articles/{slug}", format: "concise" });
+
+    expect(result.text).toContain("2 calls use URLs only known at run time (web · src/agent.js:3, shop · src/api.ts:2)");
   });
 
   it("says when nothing matched, and why that isn't proof", async () => {

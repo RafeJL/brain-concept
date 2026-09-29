@@ -113,3 +113,18 @@ Running both TS plugins over whole fixture files showed `cache.get("/key", fallb
 an HTTP call. Member calls now count only when the receiver is named like a client (`api`,
 `http`, `requests`, `axios`, `*Client`, `*Api`, ...). `fetch` and `axios(...)` always count.
 Seam counts on the RealWorld repos and eShop were unchanged.
+
+## 2026-09-29: a trailing run-time path makes the URL run-time
+
+`API + url`, `` `${API}${path}` `` and `$"{Base}/{relativePath}"` used to produce made-up keys
+like `/api/{}`. A run-time value at the end of a URL now makes the whole URL "run-time" when it
+is glued to text with no separator, or when its name says it holds a URL or path (`url`, `uri`,
+`path`, `endpoint`, `route`, `resource`, `href`, `address`), unless it sits in the query
+string. `"/orders/" + id` is still an ordinary parameter. TS template substitutions now resolve
+same-file constants, as concatenation and C# interpolation already did.
+
+## 2026-09-29: run-time URL notes lead with the repos in the answer
+
+The note still counts every searched repo (any could hold a hidden caller), but files in repos
+the answer is about are listed first, so an unrelated repo's run-time URLs don't hide the
+wrapper that matters.

@@ -78,18 +78,22 @@ export async function freshnessByRepo(deps: ToolDeps, repos: Iterable<string>): 
 
 /**
  * Where the calls with run-time URLs are, so an agent can tell a wrapper (one file, a few
- * lines) from callers the index might be missing. Empty when there are none.
+ * lines) from callers the index might be missing. Files in `relevant` repos (the ones the answer
+ * is about) are listed first; the count covers every repo searched. Empty when there are none.
  */
-export function unresolvedNote(deps: ToolDeps, repos: readonly string[]): string {
+export function unresolvedNote(deps: ToolDeps, repos: readonly string[], relevant: Iterable<string> = []): string {
   const calls = deps.store.seams({ repos, kind: "http-call", includeUnresolved: true }).filter((s) => s.key === null);
   if (calls.length === 0) return "";
   const byFile = new Map<string, { start: number; end: number }>();
+  const repoOf = (place: string) => place.split(" · ")[0]!;
   for (const call of calls) {
     const place = `${call.repo} · ${call.path}`;
     const seen = byFile.get(place);
     byFile.set(place, { start: Math.min(seen?.start ?? call.startLine, call.startLine), end: Math.max(seen?.end ?? call.endLine, call.endLine) });
   }
-  const places = [...byFile].slice(0, 3).map(([place, r]) => `${place}:${lineRange(r.start, r.end)}`);
+  const first = new Set(relevant);
+  const ranked = [...byFile].sort(([a], [b]) => Number(!first.has(repoOf(a))) - Number(!first.has(repoOf(b))));
+  const places = ranked.slice(0, 3).map(([place, r]) => `${place}:${lineRange(r.start, r.end)}`);
   const more = byFile.size > 3 ? `, +${byFile.size - 3} more files` : "";
   const subject = calls.length === 1 ? "1 call uses a URL" : `${calls.length} calls use URLs`;
   return `${subject} only known at run time (${places.join(", ")}${more}), so a missing caller isn't proof there is none.`;
@@ -106,6 +110,8 @@ export interface FooterOptions {
   freshnessRepos: Iterable<string>;
   /** Repos whose run-time URLs to point out. */
   unresolvedIn: readonly string[];
+  /** Repos the answer is about; their run-time URLs are listed first. */
+  relevantRepos: Iterable<string>;
   closing: string;
 }
 
@@ -120,7 +126,7 @@ export async function footer(deps: ToolDeps, options: FooterOptions): Promise<st
   const freshness = await freshnessByRepo(deps, options.freshnessRepos);
   const indexed = [...freshness].map(([name, f]) => `${name} ${describeFreshness(f, deps.store.getRepo(name)?.ref ?? "?")}`);
   lines.push(`Indexed: ${indexed.join("; ")}`);
-  const gap = unresolvedNote(deps, options.unresolvedIn);
+  const gap = unresolvedNote(deps, options.unresolvedIn, options.relevantRepos);
   if (gap) lines.push(gap);
   lines.push(options.closing);
   return lines;
