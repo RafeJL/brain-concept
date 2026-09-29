@@ -1,0 +1,31 @@
+{
+  "name": "brain-concept",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Organisation-wide engineering context for coding agents, served over MCP.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "bin": {
+    "brain": "bin/brain.mjs",
+    "brain-mcp": "bin/brain-mcp.mjs"
+  },
+  "scripts": {
+    "brain": "node bin/brain.mjs",
+    "mcp": "node bin/brain-mcp.mjs",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
+    "test": "node node_modules/vitest/vitest.mjs run",
+    "check": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.2"
+  }
+}
