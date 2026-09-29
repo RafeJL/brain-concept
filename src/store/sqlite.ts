@@ -135,7 +135,7 @@ export class SqliteStore implements Store {
       path: String(row.path),
       kind: String(row.kind) as Seam["kind"],
       method: String(row.method),
-      rawPath: row.raw_path === null ? null : String(row.raw_path),
+      rawPath: String(row.raw_path),
       key: row.route_key === null ? null : String(row.route_key),
       startLine: Number(row.start_line),
       endLine: Number(row.end_line),

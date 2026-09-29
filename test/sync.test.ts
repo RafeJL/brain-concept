@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import { enrolRepo } from "../src/ingest/registry.js";
 import { syncRepo } from "../src/ingest/sync.js";
 import { SqliteStore } from "../src/store/sqlite.js";
-import { commit, makeRepo, writeFiles } from "./helpers.js";
+import { commit, makeRepo, repoFromFixture, writeFiles } from "./helpers.js";
 
 describe("sync", () => {
   it("indexes every file in the committed tree with its language", async () => {
     const store = new SqliteStore(":memory:");
-    const dir = makeRepo({ "src/app.ts": "export {}", "src/Api.cs": "class A {}", "README.md": "# r", "logo.bin": "x" });
+    const dir = repoFromFixture("mixed-languages");
     await enrolRepo(store, { path: dir, name: "r" });
 
     const result = await syncRepo(store, "r");

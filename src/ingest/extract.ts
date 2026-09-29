@@ -12,7 +12,20 @@ export interface ExtractionResult {
   failures: string[];
 }
 
-/** Runs every interested plugin over each entry. Only files some plugin wants are read. */
+/** Runs every plugin that wants this file over its source, parsing it at most once. */
+export async function extractSource(path: string, source: string): Promise<SeamDraft[]> {
+  const plugins = PLUGINS.filter((p) => p.wants(path));
+  if (plugins.length === 0) return [];
+  const grammar = grammarFor(path);
+  const tree = grammar && plugins.some((p) => p.needsTree) ? await parse(grammar, source) : null;
+  try {
+    return plugins.flatMap((plugin) => plugin.extract({ path, source, tree }));
+  } finally {
+    tree?.delete();
+  }
+}
+
+/** Extracts seams from each entry. Only files some plugin wants are read. */
 export async function extractSeams(repoPath: string, entries: readonly TreeEntry[]): Promise<ExtractionResult> {
   const wanted = entries.filter((e) => e.bytes <= MAX_EXTRACT_BYTES && PLUGINS.some((p) => p.wants(e.path)));
   const blobs = await readBlobs(repoPath, [...new Set(wanted.map((e) => e.blob))]);
@@ -22,17 +35,11 @@ export async function extractSeams(repoPath: string, entries: readonly TreeEntry
   for (const entry of wanted) {
     const content = blobs.get(entry.blob);
     if (!content || content.includes(0)) continue;
-    const source = content.toString("utf8");
-    const plugins = PLUGINS.filter((p) => p.wants(entry.path));
-    const grammar = grammarFor(entry.path);
-    const tree = grammar && plugins.some((p) => p.needsTree) ? await parse(grammar, source) : null;
     try {
-      const found = plugins.flatMap((plugin) => plugin.extract({ path: entry.path, source, tree }));
+      const found = await extractSource(entry.path, content.toString("utf8"));
       if (found.length > 0) seams.set(entry.path, found);
     } catch {
       failures.push(entry.path);
-    } finally {
-      tree?.delete();
     }
   }
   return { seams, failures };

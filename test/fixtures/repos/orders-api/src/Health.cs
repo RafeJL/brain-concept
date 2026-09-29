@@ -1,0 +1,1 @@
+app.MapGet("/health", () => "ok");

@@ -2,29 +2,17 @@ import { describe, expect, it } from "vitest";
 import { enrolRepo } from "../src/ingest/registry.js";
 import { syncRepo } from "../src/ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy, type AccessPolicy } from "../src/serve/access.js";
-import { findConsumers, parseTarget } from "../src/serve/tools/find-consumers.js";
+import { parseEndpoint } from "../src/core/http.js";
+import { findConsumers } from "../src/serve/tools/find-consumers.js";
 import { repoCard } from "../src/serve/tools/repo-card.js";
 import { SqliteStore } from "../src/store/sqlite.js";
-import { commit, makeRepo } from "./helpers.js";
+import { commit, commitFixture, repoFromFixture } from "./helpers.js";
 
-const API_SOURCE = [
-  "import { Router } from 'express';",
-  "const router = Router();",
-  "router.get('/articles/:slug', auth.optional, handler);",
-  "router.delete('/articles/:slug', auth.required, remove);",
-  "export default router;",
-].join("\n");
-
-const WEB_SOURCE = [
-  "const API_ROOT = 'https://conduit.example.com/api';",
-  "export const get = (slug) => requests.get(`/articles/${slug}`);",
-  "export const raw = (url) => superagent.get(`${API_ROOT}${url}`);",
-].join("\n");
-
+/** test/fixtures/repos/articles-api and articles-web, enrolled as "api" and "web". */
 async function twoRepos() {
   const store = new SqliteStore(":memory:");
-  const apiDir = makeRepo({ "src/articles.ts": API_SOURCE, "README.md": "# api" });
-  const webDir = makeRepo({ "src/agent.js": WEB_SOURCE });
+  const apiDir = repoFromFixture("articles-api");
+  const webDir = repoFromFixture("articles-web");
   await enrolRepo(store, { path: apiDir, name: "api" });
   await enrolRepo(store, { path: webDir, name: "web" });
   await syncRepo(store, "api");
@@ -48,7 +36,7 @@ describe("seam sync", () => {
   it("replaces seams of changed files and drops seams of deleted files", async () => {
     const { store, apiDir } = await twoRepos();
 
-    commit(apiDir, { "src/articles.ts": "router.put('/articles/:slug', auth, update);", "src/tags.ts": "router.get('/tags', list);" });
+    commitFixture(apiDir, "articles-api-v2");
     await syncRepo(store, "api");
     expect(store.seams({ repos: ["api"] }).map((s) => `${s.method} ${s.key}`)).toEqual(["PUT /articles/{}", "GET /tags"]);
 
@@ -81,9 +69,9 @@ describe("seam sync", () => {
 
 describe("brain_find_consumers", () => {
   it("parses targets in any style", () => {
-    expect(parseTarget("GET /api/articles/:slug")).toEqual({ method: "GET", key: "/api/articles/{}" });
-    expect(parseTarget("https://x.com/articles/{slug}", "delete")).toEqual({ method: "DELETE", key: "/articles/{}" });
-    expect(parseTarget("/")).toBeNull();
+    expect(parseEndpoint("GET /api/articles/:slug")).toEqual({ method: "GET", key: "/api/articles/{}" });
+    expect(parseEndpoint("https://x.com/articles/{slug}", "delete")).toEqual({ method: "DELETE", key: "/articles/{}" });
+    expect(parseEndpoint("/")).toBeNull();
   });
 
   it("finds the server and the caller across repos", async () => {
@@ -95,7 +83,7 @@ describe("brain_find_consumers", () => {
     expect(result.text).toContain("GET /articles/{} · 1 server, 1 caller in 2 repos · parser-built");
     expect(result.text).toContain("api · src/articles.ts:3 · GET /articles/:slug");
     expect(result.text).toContain("web · src/agent.js:2 · GET `/articles/${slug}`");
-    expect(result.text).toContain("1 call in these repos use URLs only known at run time");
+    expect(result.text).toContain("1 call uses a URL only known at run time (web · src/agent.js:3)");
   });
 
   it("matches across a base path and filters by method", async () => {
