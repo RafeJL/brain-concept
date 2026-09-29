@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { BrainError } from "./types.js";
 
@@ -67,6 +67,40 @@ export async function listTree(repoPath: string, commit: string): Promise<TreeEn
     entries.push({ path: record.slice(tab + 1), blob: object, bytes: Number(size) || 0 });
   }
   return entries;
+}
+
+/**
+ * Reads many blobs through one `git cat-file --batch` process, instead of one process per file
+ * (which costs ~20ms each on Windows). Missing blobs are left out of the result.
+ */
+export async function readBlobs(repoPath: string, blobs: readonly string[]): Promise<Map<string, Buffer>> {
+  const result = new Map<string, Buffer>();
+  if (blobs.length === 0) return result;
+
+  const child = spawn("git", ["-C", repoPath, "cat-file", "--batch"], { windowsHide: true });
+  const chunks: Buffer[] = [];
+  child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+  const done = new Promise<void>((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`git cat-file exited with ${code}`))));
+  });
+  child.stdin.end(blobs.join("\n") + "\n");
+  await done;
+
+  // Each answer is "<sha> blob <size>\n<content>\n" or "<sha> missing\n".
+  const out = Buffer.concat(chunks);
+  let offset = 0;
+  while (offset < out.length) {
+    const newline = out.indexOf(0x0a, offset);
+    if (newline < 0) break;
+    const [sha, type, size] = out.subarray(offset, newline).toString("utf8").split(" ");
+    offset = newline + 1;
+    if (type === "missing" || !sha) continue;
+    const length = Number(size);
+    result.set(sha, out.subarray(offset, offset + length));
+    offset += length + 1;
+  }
+  return result;
 }
 
 /** Commits reachable from `to` but not from `from`, or null if either is unknown. */

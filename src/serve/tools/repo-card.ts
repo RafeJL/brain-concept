@@ -1,14 +1,9 @@
+import type { SeamCoverage } from "../../core/seams.js";
 import type { Freshness, LanguageShare, Tier } from "../../core/types.js";
-import type { Store } from "../../store/store.js";
-import type { AccessPolicy, Caller } from "../access.js";
+import { CODE_LANGUAGES, SEAM_LANGUAGES } from "../../ingest/extractors/index.js";
+import type { Caller } from "../access.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
-
-export type Format = "concise" | "detailed";
-
-export interface ToolDeps {
-  store: Store;
-  access: AccessPolicy;
-}
+import { readableRepos, type Format, type ToolDeps, type ToolResult } from "./common.js";
 
 export interface RepoCard {
   repo: string;
@@ -19,20 +14,19 @@ export interface RepoCard {
   freshness: Freshness;
   files: number;
   languages: LanguageShare[];
+  seams: SeamCoverage;
+  /** Code languages present in the repo that no extractor reads yet. */
+  unsupportedLanguages: string[];
 }
-
-export type ToolResult<T> = { ok: true; data: T; text: string } | { ok: false; text: string };
 
 const CONCISE_LANGUAGES = 5;
 
 /** What a repo is, from facts the brain holds about it. Backs `brain_repo_card` and `brain card`. */
 export async function repoCard(deps: ToolDeps, caller: Caller, name: string, format: Format): Promise<ToolResult<RepoCard>> {
-  const enrolled = deps.store.listRepos().map((repo) => repo.name);
-  const readable = await deps.access.readableRepos(caller, enrolled);
-  const repo = readable.has(name) ? deps.store.getRepo(name) : undefined;
+  const names = await readableRepos(deps, caller);
+  const repo = names.includes(name) ? deps.store.getRepo(name) : undefined;
   if (!repo) {
     // Same answer for "doesn't exist" and "not allowed", so existence never leaks.
-    const names = [...readable].sort();
     const list = names.length ? `Repos you can read: ${names.join(", ")}.` : "No repos are enrolled yet.";
     return { ok: false, text: `No readable repo named "${name}". ${list}` };
   }
@@ -42,6 +36,7 @@ export async function repoCard(deps: ToolDeps, caller: Caller, name: string, for
     return { ok: false, text: `"${name}" is enrolled but has not been synced yet. Run: brain sync ${name}` };
   }
 
+  const languages = deps.store.languageShares(name);
   const card: RepoCard = {
     repo: repo.name,
     path: repo.path,
@@ -50,7 +45,11 @@ export async function repoCard(deps: ToolDeps, caller: Caller, name: string, for
     tier: "parser-built",
     freshness: await freshnessOf(repo, state),
     files: state.fileCount,
-    languages: deps.store.languageShares(name),
+    languages,
+    seams: deps.store.seamCoverage(name),
+    unsupportedLanguages: languages
+      .map((l) => l.language)
+      .filter((language) => CODE_LANGUAGES.has(language) && !SEAM_LANGUAGES.has(language)),
   };
   return { ok: true, data: card, text: format === "detailed" ? detailedText(card) : conciseText(card) };
 }
@@ -63,7 +62,7 @@ function conciseText(card: RepoCard): string {
     `Remote: ${card.remote ?? "none"}`,
     `Files: ${card.files} on ${card.ref}`,
     `Languages: ${shown.join(" · ")}${more > 0 ? ` (+${more} more)` : ""}`,
-    "Seams: not extracted yet",
+    seamsLine(card),
     "Owner, purpose: not set",
   ].join("\n");
 }
@@ -80,9 +79,19 @@ function detailedText(card: RepoCard): string {
     `Files: ${card.files}`,
     "Languages:",
     ...rows,
-    "Seams: not extracted yet",
+    seamsLine(card),
     "Owner, purpose: not set",
   ].join("\n");
+}
+
+function seamsLine(card: RepoCard): string {
+  const { routes, calls, unresolvedCalls, plugins } = card.seams;
+  const found =
+    routes + calls + unresolvedCalls === 0
+      ? "none found"
+      : `${routes} routes, ${calls} calls${unresolvedCalls ? ` (+${unresolvedCalls} with run-time URLs)` : ""} via ${plugins.join(", ")}`;
+  const gaps = card.unsupportedLanguages.length ? ` · not extracted: ${card.unsupportedLanguages.join(", ")}` : "";
+  return `Seams: ${found}${gaps}`;
 }
 
 function formatBytes(bytes: number): string {

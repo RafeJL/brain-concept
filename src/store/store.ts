@@ -1,8 +1,25 @@
+import type { Seam, SeamCoverage, SeamKind } from "../core/seams.js";
 import type { FileRecord, LanguageShare, RepoRecord, RepoState } from "../core/types.js";
 
-export interface SyncChanges {
+/** Everything one sync changes, applied atomically. */
+export interface SyncUpdate {
+  commit: string;
+  fileCount: number;
+  extractorVersion: number;
   upsert: FileRecord[];
   remove: string[];
+  /** Files whose seams are replaced: old seams for these paths are dropped, `seams` inserted. */
+  seamPaths: string[];
+  seams: Seam[];
+}
+
+export interface SeamFilter {
+  /** Only these repos. Always pass the caller's readable set. */
+  repos: readonly string[];
+  kind?: SeamKind;
+  path?: string;
+  /** Include unresolved calls (no key). Default false. */
+  includeUnresolved?: boolean;
 }
 
 /**
@@ -18,9 +35,11 @@ export interface Store {
 
   getState(repo: string): RepoState | undefined;
   getFiles(repo: string): FileRecord[];
-  /** Applies one sync atomically: file changes plus the new indexed commit. */
-  applySync(repo: string, commit: string, changes: SyncChanges, fileCount: number): void;
+  applySync(repo: string, update: SyncUpdate): void;
   languageShares(repo: string): LanguageShare[];
+
+  seams(filter: SeamFilter): Seam[];
+  seamCoverage(repo: string): SeamCoverage;
 
   close(): void;
 }
