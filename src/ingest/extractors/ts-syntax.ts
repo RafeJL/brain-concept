@@ -1,7 +1,7 @@
 import type { Node } from "@vscode/tree-sitter-wasm";
 import { methodFromVerb } from "../../core/http.js";
 import { grammarFor } from "../parse.js";
-import { stringReader, type Part } from "./strings.js";
+import { expressionPart, stringReader, type Part } from "./strings.js";
 
 /** Syntax helpers for TypeScript and JavaScript trees, shared by ts-routes and ts-calls. */
 
@@ -11,12 +11,12 @@ export function wantsTsOrJs(path: string): boolean {
 }
 
 export const { staticString, collectConsts, resolveUrl } = stringReader({
-  literal(node): Part[] | null {
+  literal(node, consts): Part[] | null {
     if (node.type === "string") return [{ text: node.text.slice(1, -1) }];
     if (node.type !== "template_string") return null;
     return node.namedChildren.flatMap((child): Part[] => {
       if (!child) return [];
-      return child.type === "template_substitution" ? [{ dynamic: true }] : [{ text: child.text }];
+      return child.type === "template_substitution" ? [expressionPart(child.namedChildren[0], consts)] : [{ text: child.text }];
     });
   },
   declaratorValue: (declarator) => declarator.childForFieldName("value"),

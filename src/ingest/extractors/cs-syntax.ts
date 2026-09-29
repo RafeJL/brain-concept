@@ -1,6 +1,6 @@
 import type { Node } from "@vscode/tree-sitter-wasm";
 import { grammarFor } from "../parse.js";
-import { stringReader, type Part } from "./strings.js";
+import { expressionPart, stringReader, type Part } from "./strings.js";
 
 /** Syntax helpers for C# trees, shared by cs-routes and cs-calls. */
 
@@ -27,9 +27,7 @@ export const { staticString, collectConsts, resolveUrl } = stringReader({
         return node.namedChildren.flatMap((child): Part[] => {
           if (child?.type === "string_content" || child?.type === "escape_sequence") return [{ text: child.text }];
           if (child?.type !== "interpolation") return [];
-          const expression = child.namedChildren.find((n) => n !== null && !n.type.startsWith("interpolation_"));
-          const value = expression?.type === "identifier" ? consts.get(expression.text) : undefined;
-          return value === undefined ? [{ dynamic: true }] : [{ text: value }];
+          return [expressionPart(child.namedChildren.find((n) => n !== null && !n.type.startsWith("interpolation_")), consts)];
         });
       default:
         return null;

@@ -1,11 +1,27 @@
 import type { Node } from "@vscode/tree-sitter-wasm";
 import { normalisePath, PARAM } from "../../core/http.js";
 
-/** A piece of a string expression: known text, or something only known at run time. */
-export type Part = { text: string } | { dynamic: true };
+/**
+ * A piece of a string expression: known text, or something only known at run time. A run-time
+ * part keeps the name it was read from (`url` in `${url}`, `relativeUrl` in `opts.relativeUrl`),
+ * because the name is often the only clue to what it holds.
+ */
+export type Part = { text: string } | { dynamic: true; name?: string };
 
 /** Same-file string constants, by name. */
 export type Consts = ReadonlyMap<string, string>;
+
+/**
+ * An expression embedded in a string (`${x}`, `{x}`, `+ x`): a constant's text if it is one,
+ * otherwise a run-time part named after the expression's last identifier.
+ */
+export function expressionPart(expression: Node | null | undefined, consts: Consts): Part {
+  if (expression?.type === "identifier") {
+    const value = consts.get(expression.text);
+    if (value !== undefined) return { text: value };
+  }
+  return { dynamic: true, name: expression?.text.match(/(\w+)\W*$/)?.[1] };
+}
 
 export type UrlResolution =
   | { status: "path"; raw: string; key: string }
@@ -38,9 +54,27 @@ export interface StringReader {
   resolveUrl(node: Node, consts: Consts): UrlResolution;
 }
 
-const DYNAMIC: Part[] = [{ dynamic: true }];
 const NO_CONSTS: Consts = new Map();
 const RELATIVE_PATH = /^[A-Za-z0-9_~.-]+(\/|$)/;
+/** Names of values that hold a URL or a path rather than one parameter. */
+const PATH_NAME = /(url|uri|path|endpoint|route|resource|href|address)s?$/i;
+/** Text after which a run-time value is a path parameter or query value, not the rest of the path. */
+const SEPARATOR = /[/?&=#]$/;
+
+/**
+ * Whether a trailing run-time value supplies the rest of the path: it is glued to text with no
+ * separator (`${API}${url}`, `API + path`), or it is named like a path (`${API}/${relativeUrl}`).
+ * `"/orders/" + id` is an ordinary parameter.
+ */
+function endsInRunTimePath(parts: readonly Part[]): boolean {
+  const last = parts.at(-1);
+  const before = parts.at(-2);
+  if (!last || !before || !("dynamic" in last)) return false;
+  const inQuery = parts.some((p) => "text" in p && p.text.includes("?"));
+  if (inQuery) return false;
+  const glued = "text" in before && !SEPARATOR.test(before.text);
+  return glued || PATH_NAME.test(last.name ?? "");
+}
 
 export function stringReader(syntax: StringSyntax): StringReader {
   const partsOf = (node: Node, consts: Consts): Part[] | null => {
@@ -49,17 +83,15 @@ export function stringReader(syntax: StringSyntax): StringReader {
     switch (node.type) {
       case "binary_expression": {
         if (node.childForFieldName("operator")?.text !== "+") return null;
-        const side = (child: Node | null) => (child ? partsOf(child, consts) ?? DYNAMIC : []);
+        const side = (child: Node | null) => (child ? partsOf(child, consts) ?? [expressionPart(child, consts)] : []);
         return [...side(node.childForFieldName("left")), ...side(node.childForFieldName("right"))];
       }
       case "parenthesized_expression": {
         const inner = node.namedChildren[0];
         return inner ? partsOf(inner, consts) : null;
       }
-      case "identifier": {
-        const value = consts.get(node.text);
-        return value === undefined ? DYNAMIC : [{ text: value }];
-      }
+      case "identifier":
+        return [expressionPart(node, consts)];
       default:
         return null;
     }
@@ -105,6 +137,7 @@ export function resolveParts(parts: readonly Part[] | null, sourceText: string, 
   if (start > 0 && !first.startsWith("/")) return { status: "dynamic", raw };
   const absolute = first.startsWith("/") || /^https?:\/\//i.test(first);
   if (start === 0 && !absolute && !(allowRelative && RELATIVE_PATH.test(first))) return { status: "not-url" };
+  if (endsInRunTimePath(parts.slice(start))) return { status: "dynamic", raw };
 
   const joined = parts
     .slice(start)

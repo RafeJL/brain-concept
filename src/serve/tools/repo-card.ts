@@ -4,7 +4,7 @@ import type { Freshness, LanguageShare, Tier } from "../../core/types.js";
 import { SEAM_LANGUAGES } from "../../ingest/extractors/index.js";
 import type { Caller } from "../access.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
-import { requireSyncedRepo, type Format, type ToolDeps, type ToolResult } from "./common.js";
+import { count, requireSyncedRepo, type Format, type ToolDeps, type ToolResult } from "./common.js";
 
 export interface RepoCard {
   repo: string;
@@ -81,7 +81,7 @@ function seamsLine(card: RepoCard): string {
   const found =
     routes + calls + unresolvedCalls === 0
       ? "none found"
-      : `${routes} routes, ${calls} calls${unresolvedCalls ? ` (+${unresolvedCalls} with run-time URLs)` : ""} via ${plugins.join(", ")}`;
+      : `${count(routes, "route")}, ${count(calls, "call")}${unresolvedCalls ?` (+${unresolvedCalls} with run-time URLs)` : ""} via ${plugins.join(", ")}`;
   const gaps = card.unsupportedLanguages.length ? ` · not extracted: ${card.unsupportedLanguages.join(", ")}` : "";
   return `Seams: ${found}${gaps}`;
 }

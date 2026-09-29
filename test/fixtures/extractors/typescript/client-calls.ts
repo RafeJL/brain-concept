@@ -5,6 +5,8 @@ const API = "https://api.example.com/v1";
 requests.get("/user"); // seam: call GET /user
 requests.del(`/articles/${slug}/comments/${id}`); // seam: call DELETE /articles/{}/comments/{}
 axios.post(API + "/orders/" + id, body); // seam: call POST /v1/orders/{}
+axios.get(`${API}/orders/${id}`); // seam: call GET /v1/orders/{}
+requests.get(`/files?path=${path}`); // seam: call GET /files
 fetch(`${API_ROOT}/tags?limit=${n}`); // seam: call GET /tags
 fetch("/login", { method: "POST" }); // seam: call POST /login
 this.http.put(`/profiles/${name}`, body); // seam: call PUT /profiles/{}

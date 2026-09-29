@@ -96,6 +96,7 @@ async function render(deps: ToolDeps, { target, hits }: Consumers, scope: string
       suffix: hits.some((h) => h.match === "suffix"),
       freshnessRepos: page.map((h) => h.seam.repo),
       unresolvedIn: scope,
+      relevantRepos: repos,
       closing: "Confirm in the repo before editing.",
     })),
   );

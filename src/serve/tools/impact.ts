@@ -108,6 +108,7 @@ async function render(deps: ToolDeps, { repo, path, routes, outgoingCalls }: Imp
       suffix: withCallers.some((r) => r.callers.some((c) => c.match === "suffix")),
       freshnessRepos: [repo, ...callerRepos],
       unresolvedIn: readable,
+      relevantRepos: [repo, ...callerRepos],
       closing: "Only enrolled repos are covered. Confirm in the repo before editing.",
     })),
   );
