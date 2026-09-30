@@ -30,6 +30,8 @@ export interface Store {
   addRepo(repo: RepoRecord): void;
   getRepo(name: string): RepoRecord | undefined;
   listRepos(): RepoRecord[];
+  /** Changes which ref a repo's facts are read from; the next sync catches up. */
+  setRepoRef(name: string, ref: string): boolean;
   /** Deletes the repo and every row that belongs to it. */
   removeRepo(name: string): boolean;
 

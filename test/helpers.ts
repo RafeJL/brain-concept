@@ -8,7 +8,8 @@ import { afterEach } from "vitest";
 const created: string[] = [];
 
 afterEach(() => {
-  for (const dir of created.splice(0)) rmSync(dir, { recursive: true, force: true });
+  // Retries: on Windows a background sync can still hold a file for a moment after it finishes.
+  for (const dir of created.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 });
 
 export function tempDir(): string {
@@ -17,7 +18,8 @@ export function tempDir(): string {
   return dir;
 }
 
-function git(dir: string, ...args: string[]): string {
+/** Runs git in a test repo with a fixed identity and line endings, whatever the machine's config. */
+export function git(dir: string, ...args: string[]): string {
   return execFileSync("git", ["-C", dir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "core.autocrlf=false", ...args], {
     encoding: "utf8",
   }).trim();
@@ -69,6 +71,22 @@ export function commit(dir: string, files: Record<string, string>, message = "ch
   git(dir, "add", "--all");
   git(dir, "commit", "--quiet", "--allow-empty", "-m", message);
   return git(dir, "rev-parse", "HEAD");
+}
+
+/** A clone of `source`, so it has an `origin` and `origin/HEAD` like a real checkout. */
+export function cloneRepo(source: string): string {
+  const dir = tempDir();
+  execFileSync("git", ["-c", "core.autocrlf=false", "clone", "--quiet", source, dir]);
+  return dir;
+}
+
+/** Polls until `condition` holds, for things that happen in the background. */
+export async function waitFor(condition: () => boolean, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error(`Timed out after ${timeoutMs}ms`);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
 }
 
 export function setRemote(dir: string, url: string): void {

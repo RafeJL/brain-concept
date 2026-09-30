@@ -37,3 +37,19 @@ export async function enrolRepo(store: Store, options: EnrolOptions): Promise<Re
 export function removeRepo(store: Store, name: string): void {
   if (!store.removeRepo(name)) throw new BrainError(`No repo named "${name}" is enrolled.`);
 }
+
+export function requireRepo(store: Store, name: string): RepoRecord {
+  const repo = store.getRepo(name);
+  if (!repo) throw new BrainError(`No repo named "${name}" is enrolled.`);
+  return repo;
+}
+
+/**
+ * Points a repo at a different ref, e.g. from `main` to `origin/main`. Facts stay until the next
+ * sync, which only re-reads what differs.
+ */
+export async function setRepoRef(store: Store, name: string, ref: string): Promise<void> {
+  const repo = requireRepo(store, name);
+  await resolveCommit(repo.path, ref);
+  store.setRepoRef(name, ref);
+}

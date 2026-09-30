@@ -1,10 +1,11 @@
 import { listTree, resolveCommit, type TreeEntry } from "../core/git.js";
 import { detectLanguage } from "../core/languages.js";
 import type { Seam } from "../core/seams.js";
-import { BrainError, type FileRecord } from "../core/types.js";
+import type { FileRecord } from "../core/types.js";
 import type { Store } from "../store/store.js";
 import { extractSeams } from "./extract.js";
 import { EXTRACTOR_VERSION } from "./extractors/index.js";
+import { requireRepo } from "./registry.js";
 
 export interface SyncResult {
   repo: string;
@@ -27,8 +28,7 @@ export interface SyncResult {
  * themselves changed, in which case every file is re-extracted.
  */
 export async function syncRepo(store: Store, name: string): Promise<SyncResult> {
-  const repo = store.getRepo(name);
-  if (!repo) throw new BrainError(`No repo named "${name}" is enrolled.`);
+  const repo = requireRepo(store, name);
 
   const commit = await resolveCommit(repo.path, repo.ref);
   const previous = store.getState(name);

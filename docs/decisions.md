@@ -128,3 +128,22 @@ same-file constants, as concatenation and C# interpolation already did.
 The note still counts every searched repo (any could hold a hidden caller), but files in repos
 the answer is about are listed first, so an unrelated repo's run-time URLs don't hide the
 wrapper that matters.
+
+## 2026-09-29: repos track origin's default branch by default
+
+The brain describes what has been merged. Tracking the local `main` meant a branch you never
+check out never moved, and the index went stale while reporting "up to date", because freshness
+was measured against the same stale branch. New enrolments track what `origin/HEAD` points at
+(usually `origin/main`), so a fetch brings merges in and "N commits behind" stays honest.
+Without a remote, the checked-out branch is used as before. `brain repo set-ref` moves repos
+enrolled earlier.
+
+## 2026-09-29: freshness through a git reference-transaction hook
+
+`brain hooks install` adds a `reference-transaction` hook that starts a background
+`brain sync <name>` when the tracked ref moves. That catches fetches, which have no hook of
+their own, as well as pulls, merges and rebases. The hook returns at once and logs to
+`~/.brain/hooks.log`. It is never added to an existing `reference-transaction` hook (the two
+would have to share stdin) or to a `core.hooksPath` inside the repo (husky), because that would
+change tracked files. SQLite waits up to 10s for a lock, so overlapping syncs queue rather than
+fail. Hosted, a GitHub webhook replaces the hook; the sync is the same.

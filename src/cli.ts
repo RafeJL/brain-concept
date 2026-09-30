@@ -1,7 +1,10 @@
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { resolveDbPath } from "./config.js";
 import { BrainError } from "./core/types.js";
-import { enrolRepo, removeRepo } from "./ingest/registry.js";
+import { hookStatus, installHook, removeHook, type HookCommand } from "./ingest/hooks.js";
+import { enrolRepo, removeRepo, setRepoRef } from "./ingest/registry.js";
 import { syncRepo, type SyncResult } from "./ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy } from "./serve/access.js";
 import { describeFreshness, freshnessOf } from "./serve/freshness.js";
@@ -17,8 +20,11 @@ const HELP = `brain: organisation-wide context for coding agents
 Usage:
   brain repo add <path> [--name <name>] [--ref <branch>]   enrol a local clone
   brain repo list                                          enrolled repos and freshness
-  brain repo remove <name>                                 remove a repo and all its facts
+  brain repo set-ref <name> <ref>                          index a different ref, e.g. origin/main
+  brain repo remove <name>                                 remove a repo, its facts and its hook
   brain sync [<name>]                                      index the tracked branch (all repos if no name)
+  brain hooks install|remove [<name>]                      re-sync automatically when the tracked ref moves
+  brain hooks status                                       which repos sync automatically
   brain card <name> [--detailed]                           the repo card an agent would get
   brain consumers "<METHOD /path>" [--detailed]            who serves and who calls an endpoint
   brain impact <repo> [--path <file>] [--route "<METHOD /path>"] [--detailed]
@@ -39,7 +45,7 @@ async function main(argv: string[]): Promise<void> {
       help: { type: "boolean", short: "h", default: false },
     },
   });
-  const [command, sub, arg] = positionals;
+  const [command, sub, arg, extra] = positionals;
   if (!command || values.help || command === "help") {
     console.log(HELP);
     return;
@@ -58,11 +64,16 @@ async function main(argv: string[]): Promise<void> {
           console.log(`Next: brain sync ${repo.name}`);
         } else if (sub === "list") {
           await listRepos(store);
+        } else if (sub === "set-ref" && arg && extra) {
+          await setRepoRef(store, arg, extra);
+          console.log(`${arg} now tracks ${extra}. Next: brain sync ${arg}`);
+          if ((await hookStatus(store, arg)).installed) await installHook(store, arg, hookCommand());
         } else if (sub === "remove" && arg) {
+          if (store.getRepo(arg)) await removeHook(store, arg);
           removeRepo(store, arg);
-          console.log(`Removed ${arg} and all of its facts.`);
+          console.log(`Removed ${arg}, its facts and its hook.`);
         } else {
-          throw new BrainError("Usage: brain repo add <path> | brain repo list | brain repo remove <name>");
+          throw new BrainError("Usage: brain repo add <path> | list | set-ref <name> <ref> | remove <name>");
         }
         break;
       case "sync": {
@@ -71,6 +82,9 @@ async function main(argv: string[]): Promise<void> {
         for (const name of names) printSync(await syncRepo(store, name));
         break;
       }
+      case "hooks":
+        await hooks(store, sub, arg);
+        break;
       case "card":
         if (!sub) throw new BrainError("Usage: brain card <name> [--detailed]");
         print(await repoCard(tools, LOCAL_CALLER, sub, format));
@@ -88,6 +102,37 @@ async function main(argv: string[]): Promise<void> {
     }
   } finally {
     store.close();
+  }
+}
+
+/** How the hook should run this CLI: absolute paths, since hooks get no predictable PATH. */
+function hookCommand(): HookCommand {
+  return {
+    node: process.execPath,
+    brain: fileURLToPath(new URL("../bin/brain.mjs", import.meta.url)),
+    dbPath: process.env.BRAIN_DB,
+    logPath: join(dirname(resolveDbPath()), "hooks.log"),
+  };
+}
+
+async function hooks(store: Store, action: string | undefined, name: string | undefined): Promise<void> {
+  const names = name ? [name] : store.listRepos().map((repo) => repo.name);
+  if (action === "status") {
+    for (const repoName of names) {
+      const status = await hookStatus(store, repoName);
+      const state = status.installed ? "syncs automatically" : status.problem ? `can't install: ${status.problem}` : "manual sync only";
+      console.log(`${repoName.padEnd(32)} ${state}`);
+    }
+  } else if (action === "install") {
+    for (const repoName of names) {
+      const path = await installHook(store, repoName, hookCommand());
+      console.log(`${repoName}: installed ${path}`);
+    }
+    console.log(`Background syncs log to ${hookCommand().logPath}`);
+  } else if (action === "remove") {
+    for (const repoName of names) console.log(`${repoName}: ${(await removeHook(store, repoName)) ? "removed" : "no hook installed"}`);
+  } else {
+    throw new BrainError("Usage: brain hooks install [<name>] | brain hooks remove [<name>] | brain hooks status");
   }
 }
 

@@ -34,16 +34,32 @@ Run from this folder with `npm run brain -- <command>`, or from anywhere with
 
 | Command | Does |
 |---|---|
-| `repo add <path> [--name n] [--ref branch]` | Enrol a local clone. The name defaults to the folder; the ref defaults to the branch `origin/HEAD` points at. |
+| `repo add <path> [--name n] [--ref ref]` | Enrol a local clone. The name defaults to the folder; the ref defaults to what `origin/HEAD` points at (usually `origin/main`, i.e. what has been merged), or the checked-out branch if there is no remote. |
 | `repo list` | Enrolled repos, the commit each is indexed at, and how far behind it is. |
-| `repo remove <name>` | Remove a repo and every fact about it. |
+| `repo set-ref <name> <ref>` | Index a different ref, e.g. move a repo enrolled on `main` to `origin/main`. |
+| `repo remove <name>` | Remove a repo, every fact about it, and its hook. |
 | `sync [<name>]` | Index the tracked branch's committed tree (not your working copy). All repos if no name. |
+| `hooks install [<name>]` | Re-sync automatically whenever the tracked ref moves: pull, merge, rebase or a plain fetch. All repos if no name. |
+| `hooks remove [<name>]` / `hooks status` | Stop automatic syncing / see which repos sync automatically. |
 | `card <name> [--detailed]` | Print exactly what an agent gets from `brain_repo_card`. |
 | `consumers "<METHOD /path>" [--detailed]` | Print what an agent gets from `brain_find_consumers`: who serves and who calls an endpoint. |
 | `impact <repo> [--path file] [--route "<METHOD /path>"] [--detailed]` | Print what an agent gets from `brain_impact`: the routes a repo or file serves, and who calls each one. |
 
 The store lives at `%USERPROFILE%\.brain\brain.db`. Set `BRAIN_DB` to use a different file,
 for example a throwaway one while testing.
+
+## Keeping it fresh
+
+`brain hooks install` puts a git `reference-transaction` hook in each enrolled repo. When the
+tracked ref moves (including on a plain `git fetch`, which has no hook of its own) it starts
+`brain sync <name>` in the background and returns straight away, so git is never slowed down.
+Runs are logged to `%USERPROFILE%\.brain\hooks.log`. With a repo tracking `origin/main`, your
+editor's auto-fetch is enough to keep it current; "up to date" always means "as of the last
+fetch".
+
+The hook won't be installed if the repo already has its own `reference-transaction` hook, or if
+`core.hooksPath` points inside the repo (as husky does), because it would change tracked files.
+`hooks status` says why. Run `brain sync <name>` from your own hook manager instead.
 
 ## Use it from Claude Code
 
@@ -122,6 +138,24 @@ make ready-made cross-repo test data.
    the functional tests as callers.
 5. In a **new** Claude Code session ask: *"What would break if I removed the DELETE endpoint in
    aspnet-api's ArticlesController?"* It should call `brain_impact` or `brain_find_consumers`.
+
+## Try it (automatic freshness)
+
+1. Repos enrolled before this change track the local branch. Move them to what has been merged:
+   ```
+   npm run brain -- repo set-ref react-web origin/master
+   npm run brain -- repo set-ref express-api origin/master
+   npm run brain -- repo set-ref aspnet-api origin/master
+   npm run brain -- repo set-ref eshop origin/main
+   ```
+   (`repo list` shows each repo's branch; RealWorld repos use `master`.)
+2. `npm run brain -- hooks install` then `npm run brain -- hooks status`: every repo should say
+   `syncs automatically`.
+3. Make any commit on a tracked repo's branch, or `git fetch` one that has new commits upstream.
+   About a second later `npm run brain -- repo list` shows it at the new commit without a sync,
+   and `%USERPROFILE%\.brain\hooks.log` shows the run.
+4. A commit on another branch changes nothing.
+5. `npm run brain -- hooks remove` takes the hooks out again.
 
 ## Layout
 
