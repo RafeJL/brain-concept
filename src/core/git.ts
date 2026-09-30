@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { BrainError } from "./types.js";
 
@@ -29,17 +30,30 @@ export async function repoRoot(path: string): Promise<string> {
 }
 
 /**
- * The branch to index when none is given: the branch origin/HEAD points at if it exists locally
- * (usually main), otherwise the branch currently checked out.
+ * The ref to index when none is given: what origin/HEAD points at (usually `origin/main`), because
+ * the brain describes what has been merged, and a fetch keeps it current even if the local branch
+ * is never checked out. Without a remote, the branch currently checked out.
  */
 export async function defaultRef(repoPath: string): Promise<string> {
   const originHead = await tryGit(repoPath, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
-  if (originHead) {
-    const branch = originHead.replace(/^origin\//, "");
-    if (await tryGit(repoPath, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`])) return branch;
-  }
+  if (originHead && (await tryGit(repoPath, ["rev-parse", "--verify", "--quiet", `${originHead}^{commit}`]))) return originHead;
   const current = await tryGit(repoPath, ["rev-parse", "--abbrev-ref", "HEAD"]);
   return current && current !== "HEAD" ? current : "HEAD";
+}
+
+/** `main` → `refs/heads/main`, `origin/main` → `refs/remotes/origin/main`; null if it isn't a ref. */
+export async function fullRefName(repoPath: string, ref: string): Promise<string | null> {
+  return (await tryGit(repoPath, ["rev-parse", "--symbolic-full-name", ref])) || null;
+}
+
+/** Where git looks for this repo's hooks, honouring `core.hooksPath`. Absolute. */
+export async function hooksDir(repoPath: string): Promise<string> {
+  return resolve(repoPath, (await git(repoPath, ["rev-parse", "--git-path", "hooks"])).trim());
+}
+
+/** The repo's .git directory, absolute (the common one for worktrees). */
+export async function gitDir(repoPath: string): Promise<string> {
+  return resolve(repoPath, (await git(repoPath, ["rev-parse", "--git-common-dir"])).trim());
 }
 
 export async function resolveCommit(repoPath: string, ref: string): Promise<string> {

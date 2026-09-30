@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { enrolRepo, removeRepo } from "../src/ingest/registry.js";
+import { enrolRepo, removeRepo, setRepoRef } from "../src/ingest/registry.js";
 import { syncRepo } from "../src/ingest/sync.js";
 import { SqliteStore } from "../src/store/sqlite.js";
-import { makeRepo, setRemote, tempDir } from "./helpers.js";
+import { cloneRepo, commit, git, makeRepo, setRemote, tempDir } from "./helpers.js";
 
 describe("registry", () => {
   it("enrols a repo by path, naming it after its folder and tracking main", async () => {
@@ -14,6 +14,32 @@ describe("registry", () => {
     expect(repo.name).toMatch(/^brain-test-/);
     expect(repo.ref).toBe("main");
     expect(store.listRepos().map((r) => r.name)).toEqual([repo.name]);
+  });
+
+  it("tracks origin's default branch in a clone, so a fetch brings new merges in", async () => {
+    const store = new SqliteStore(":memory:");
+    const clone = cloneRepo(makeRepo({ "README.md": "# origin" }));
+
+    const repo = await enrolRepo(store, { path: clone, name: "cloned" });
+
+    expect(repo.ref).toBe("origin/main");
+  });
+
+  it("set-ref changes what the next sync reads, and rejects refs that don't exist", async () => {
+    const store = new SqliteStore(":memory:");
+    const dir = makeRepo({ "a.ts": "1" });
+    git(dir, "switch", "--quiet", "-c", "release");
+    commit(dir, { "release.ts": "2" }, "release only");
+    git(dir, "switch", "--quiet", "main");
+    await enrolRepo(store, { path: dir, name: "r" });
+    await syncRepo(store, "r");
+
+    await setRepoRef(store, "r", "release");
+    await syncRepo(store, "r");
+
+    expect(store.getRepo("r")?.ref).toBe("release");
+    expect(store.getFiles("r").map((f) => f.path)).toEqual(["a.ts", "release.ts"]);
+    await expect(setRepoRef(store, "r", "nope")).rejects.toThrow(/does not resolve/);
   });
 
   it("strips credentials from the stored remote", async () => {

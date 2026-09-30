@@ -15,7 +15,9 @@ export class SqliteStore implements Store {
   constructor(file: string) {
     if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
-    this.db.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;");
+    // busy_timeout: background syncs started by git hooks can overlap (a pull fires a fetch and a
+    // merge); the second waits for the first instead of failing.
+    this.db.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 10000;");
     this.migrate();
   }
 
@@ -53,6 +55,10 @@ export class SqliteStore implements Store {
 
   listRepos(): RepoRecord[] {
     return (this.db.prepare("SELECT * FROM repos ORDER BY name").all() as Row[]).map(toRepo);
+  }
+
+  setRepoRef(name: string, ref: string): boolean {
+    return Number(this.db.prepare("UPDATE repos SET ref = ? WHERE name = ?").run(ref, name).changes) > 0;
   }
 
   removeRepo(name: string): boolean {
