@@ -150,6 +150,8 @@ fail. Hosted, a GitHub webhook replaces the hook; the sync is the same.
 
 ## 2026-09-30: repo cards read what a repo declares, and never run it
 
+*Superseded on 2026-10-05: the wiki's pages replaced the fact readers.*
+
 Build and test commands come from `package.json` scripts (the package manager from the nearest
 lockfile) and .NET solutions and projects. Owners come from CODEOWNERS, found the way GitHub
 finds it. "About" is the README's first real paragraph. All of it is parser-built and cited to
@@ -157,6 +159,8 @@ file and line, and the brain never runs a command to check it works. Curated pur
 will sit alongside these as human-reviewed facts rather than replace them.
 
 ## 2026-09-30: facts go through the same pipeline as seams
+
+*Superseded on 2026-10-05: the fact readers and the `facts` table were removed.*
 
 Readers in `src/ingest/facts/` are pure, one file at a time, like extractor plugins. Their facts
 go in a `facts` table that cascades from `files`, so only changed blobs are re-read, each fact
@@ -175,3 +179,38 @@ card share one matching function (`linkCalls`).
 `/` and `/{}` don't say which service is meant; every web app serves `/`. Across repos they now
 link nothing. Found as express-api's e2e test (`GET /` against its own server) making it look like
 a caller of eShop. `brain_find_consumers` still answers an explicit question about `/`.
+
+## 2026-10-05: the wiki is AI-first; deterministic checks verify it
+
+Add a repo, get a wiki, in any language, the way DeepWiki and Google Code Wiki work. Claude Code
+reads the code and writes pages in which every sentence cites `[path:lines]`. Teaching the brain
+each framework in TypeScript didn't scale to Citation's 20+ languages. AI wikis are known to be
+confidently wrong, so the defences are:
+- citations on every claim, checked automatically from W2;
+- `llm-generated` labels;
+- keeping the last good page;
+- isolated, read-only runs.
+
+The W0 trial found every RealWorld endpoint in C#, TypeScript, JavaScript, PHP and Python, with
+no invented ones, and wrote accurate cited pages. This supersedes "parser-built before LLM-built"
+as the ordering. The parser extractors stay only as the answer key until AI-found seams replace
+them (W4).
+
+## 2026-10-05: Claude Code headless is the AI engine
+
+Runs are `claude -p --output-format json --json-schema …` with:
+- `--safe-mode --strict-mcp-config`: no user settings, memory, hooks or MCP servers, so a run
+  can't call the brain or anything else;
+- `--allowedTools Read,Grep,Glob` and `--permission-mode dontAsk`;
+- a model per task, defaulting to Sonnet. W0 found it as good as Opus at a quarter of the cost.
+
+Locally it uses the developer's Claude Code login. The same command runs in cloud containers
+later. Each run happens in a temporary git worktree at the indexed commit, so pages describe
+exactly what every other fact describes (repo @ commit), never uncommitted work.
+
+## 2026-10-05: clean up as we go
+
+Each change deletes the code, tests, fixtures and docs it replaces, and updates the README, the
+manual-testing guide and the vault in the same PR. Old code is deleted only once its replacement
+is shown to work: W1 removed the fact readers after real wikis for C#, PHP and Python, and a
+fresh Claude Code session answering from them. Manual-test scaffolding stays out of the repo.

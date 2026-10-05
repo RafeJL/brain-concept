@@ -11,6 +11,5 @@ numbers in these files: keep existing lines where they are.
 | `orders-api` | An ASP.NET API: a controller, a minimal API, an OpenAPI spec and its own tests calling it |
 | `shop-web` | A TS frontend calling `orders-api`, plus one run-time URL |
 | `mixed-languages` | TypeScript, C#, Markdown and an unknown file type, for language detection |
-| `polyglot-service` | A repo with pnpm and npm packages, a .NET solution, CODEOWNERS in two places and a README, for repo card facts |
 | `status-api` | Serves `/` and `/status` |
 | `status-checks` | Calls `/` and `/status`; only `/status` says which service it means |

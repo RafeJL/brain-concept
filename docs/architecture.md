@@ -43,9 +43,9 @@ Every fact records how it was made, and every answer carries that label.
 
 | Tier | Built by | Holds | Agent should |
 |---|---|---|---|
-| **parser-built** | Tree-sitter and framework extractors, OpenAPI/AsyncAPI readers. No LLM. | Seam graph, symbol maps, file inventory, what manifests declare (scripts, .NET projects, CODEOWNERS, README summary) | Rely on it; confirm with grep before editing |
+| **parser-built** | Tree-sitter and framework extractors, OpenAPI/AsyncAPI readers. No LLM. | Seam graph, file inventory | Rely on it; confirm with grep before editing |
 | **human-reviewed** | People, or an agent draft merged through a PR by an owner | Glossary, customers, features, ADRs, repo purposes | Treat as the team's stated intent |
-| **llm-generated** | Claude, from code, with a citation on every claim | Deep wiki pages | Use as a map to where to look, never as proof |
+| **llm-generated** | Claude Code (headless, isolated, read-only) from the code at the indexed commit, with a citation on every claim | Wiki pages (W1); routes and calls in any language (W4) | Use as a map to where to look; confirm at the citation before relying on it |
 
 Why: generated context files lowered agent success in a controlled study, and public
 DeepWiki pages were often wrong, while parser-built structure helped (see `research.md`).

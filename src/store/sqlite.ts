@@ -1,9 +1,8 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { Fact } from "../core/facts.js";
 import type { Seam, SeamCoverage } from "../core/seams.js";
-import type { FileRecord, LanguageShare, RepoRecord, RepoState } from "../core/types.js";
+import type { FileRecord, LanguageShare, RepoRecord, RepoState, WikiPage } from "../core/types.js";
 import { MIGRATIONS } from "./migrations.js";
 import type { SeamFilter, Store, SyncUpdate } from "./store.js";
 
@@ -99,13 +98,9 @@ export class SqliteStore implements Store {
     );
     const remove = this.db.prepare("DELETE FROM files WHERE repo = ? AND path = ?");
     const clearSeams = this.db.prepare("DELETE FROM seams WHERE repo = ? AND path = ?");
-    const clearFacts = this.db.prepare("DELETE FROM facts WHERE repo = ? AND path = ?");
     const insertSeam = this.db.prepare(
       `INSERT INTO seams (repo, path, kind, method, raw_path, route_key, start_line, end_line, plugin, commit_sha)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    const insertFact = this.db.prepare(
-      "INSERT INTO facts (repo, path, kind, name, value, line, commit_sha) VALUES (?, ?, ?, ?, ?, ?, ?)",
     );
     const state = this.db.prepare(
       `INSERT INTO repo_state (repo, commit_sha, synced_at, file_count, extractor_version) VALUES (?, ?, ?, ?, ?)
@@ -114,17 +109,13 @@ export class SqliteStore implements Store {
          file_count = excluded.file_count, extractor_version = excluded.extractor_version`,
     );
     this.transaction(() => {
-      // Files first: seams and facts reference them. Removing a file cascades to both.
+      // Files first: seams reference them. Removing a file cascades to its seams.
       for (const f of update.upsert) upsert.run(repo, f.path, f.blob, f.bytes, f.language, f.commit);
       for (const path of update.remove) remove.run(repo, path);
-      for (const path of update.extractedPaths) {
-        clearSeams.run(repo, path);
-        clearFacts.run(repo, path);
-      }
+      for (const path of update.extractedPaths) clearSeams.run(repo, path);
       for (const s of update.seams) {
         insertSeam.run(repo, s.path, s.kind, s.method, s.rawPath, s.key, s.startLine, s.endLine, s.plugin, s.commit);
       }
-      for (const f of update.facts) insertFact.run(repo, f.path, f.kind, f.name, f.value, f.line, f.commit);
       state.run(repo, update.commit, new Date().toISOString(), update.fileCount, update.extractorVersion);
     });
   }
@@ -178,19 +169,6 @@ export class SqliteStore implements Store {
     };
   }
 
-  facts(repo: string): Fact[] {
-    const rows = this.db.prepare("SELECT * FROM facts WHERE repo = ? ORDER BY path, id").all(repo) as Row[];
-    return rows.map((row) => ({
-      repo: String(row.repo),
-      path: String(row.path),
-      kind: String(row.kind) as Fact["kind"],
-      name: String(row.name),
-      value: String(row.value),
-      line: row.line === null ? null : Number(row.line),
-      commit: String(row.commit_sha),
-    }));
-  }
-
   languageShares(repo: string): LanguageShare[] {
     const rows = this.db
       .prepare(
@@ -199,6 +177,31 @@ export class SqliteStore implements Store {
       )
       .all(repo) as Row[];
     return rows.map((row) => ({ language: String(row.language), files: Number(row.files), bytes: Number(row.bytes) }));
+  }
+
+  replacePages(repo: string, pages: readonly WikiPage[]): void {
+    const insert = this.db.prepare(
+      `INSERT INTO pages (repo, slug, position, title, markdown, commit_sha, model, cost_usd, generated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM pages WHERE repo = ?").run(repo);
+      pages.forEach((p, i) => insert.run(repo, p.slug, i, p.title, p.markdown, p.commit, p.model, p.costUsd, p.generatedAt));
+    });
+  }
+
+  pages(repo: string): WikiPage[] {
+    const rows = this.db.prepare("SELECT * FROM pages WHERE repo = ? ORDER BY position").all(repo) as Row[];
+    return rows.map((row) => ({
+      repo: String(row.repo),
+      slug: String(row.slug),
+      title: String(row.title),
+      markdown: String(row.markdown),
+      commit: String(row.commit_sha),
+      model: String(row.model),
+      costUsd: Number(row.cost_usd),
+      generatedAt: String(row.generated_at),
+    }));
   }
 
   close(): void {

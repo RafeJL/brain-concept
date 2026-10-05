@@ -10,9 +10,12 @@ import { LOCAL_CALLER, LocalAccessPolicy } from "./serve/access.js";
 import { describeFreshness, freshnessOf } from "./serve/freshness.js";
 import type { Format, ToolDeps, ToolResult } from "./serve/tools/common.js";
 import { findConsumers } from "./serve/tools/find-consumers.js";
+import { getPage } from "./serve/tools/get-page.js";
 import { impact } from "./serve/tools/impact.js";
 import { repoCard } from "./serve/tools/repo-card.js";
 import { SqliteStore } from "./store/sqlite.js";
+import { DEFAULT_MODEL, generateWiki } from "./wiki/generate.js";
+import { claudeRunner } from "./wiki/runner.js";
 import type { Store } from "./store/store.js";
 
 const HELP = `brain: organisation-wide context for coding agents
@@ -25,6 +28,8 @@ Usage:
   brain sync [<name>]                                      index the tracked branch (all repos if no name)
   brain hooks install|remove [<name>]                      re-sync automatically when the tracked ref moves
   brain hooks status                                       which repos sync automatically
+  brain wiki <name> [--model <model>]                      have Claude Code write the repo's wiki (default ${DEFAULT_MODEL})
+  brain page <name> [<page>]                               a wiki page (or the page list) as an agent gets it
   brain card <name> [--detailed]                           the repo card an agent would get
   brain consumers "<METHOD /path>" [--detailed]            who serves and who calls an endpoint
   brain impact <repo> [--path <file>] [--route "<METHOD /path>"] [--detailed]
@@ -41,6 +46,7 @@ async function main(argv: string[]): Promise<void> {
       ref: { type: "string" },
       path: { type: "string" },
       route: { type: "string" },
+      model: { type: "string" },
       detailed: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
@@ -87,6 +93,21 @@ async function main(argv: string[]): Promise<void> {
       }
       case "hooks":
         await hooks(store, sub, arg);
+        break;
+      case "wiki": {
+        if (!sub) throw new BrainError("Usage: brain wiki <name> [--model <model>]");
+        console.log(`Writing ${sub}'s wiki with Claude Code (${values.model ?? DEFAULT_MODEL}); this takes a few minutes...`);
+        const wiki = await generateWiki(store, claudeRunner, sub, values.model);
+        console.log(
+          `${wiki.repo}: ${wiki.pages.length} pages at @${wiki.commit.slice(0, 7)} ` +
+            `(${wiki.pages.map((p) => p.slug).join(", ")}) · $${wiki.costUsd.toFixed(2)} · ${Math.round(wiki.durationMs / 1000)}s`,
+        );
+        console.log(`Read them with: brain page ${wiki.repo}`);
+        break;
+      }
+      case "page":
+        if (!sub) throw new BrainError("Usage: brain page <name> [<page>]");
+        print(await getPage(tools, LOCAL_CALLER, { repo: sub, page: arg }));
         break;
       case "card":
         if (!sub) throw new BrainError("Usage: brain card <name> [--detailed]");

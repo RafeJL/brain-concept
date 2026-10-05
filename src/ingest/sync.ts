@@ -1,6 +1,5 @@
 import { listTree, resolveCommit, type TreeEntry } from "../core/git.js";
 import { detectLanguage } from "../core/languages.js";
-import type { Fact } from "../core/facts.js";
 import type { Seam } from "../core/seams.js";
 import type { FileRecord } from "../core/types.js";
 import type { Store } from "../store/store.js";
@@ -65,10 +64,6 @@ export async function syncRepo(store: Store, name: string): Promise<SyncResult> 
   for (const [path, drafts] of extraction.seams) {
     for (const draft of drafts) seams.push({ ...draft, repo: name, path, commit });
   }
-  const facts: Fact[] = [];
-  for (const [path, drafts] of extraction.facts) {
-    for (const draft of drafts) facts.push({ ...draft, repo: name, path, commit });
-  }
 
   store.applySync(name, {
     commit,
@@ -78,7 +73,6 @@ export async function syncRepo(store: Store, name: string): Promise<SyncResult> 
     remove,
     extractedPaths: toExtract.map((entry) => entry.path),
     seams,
-    facts,
   });
   return {
     repo: name,

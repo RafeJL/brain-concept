@@ -47,7 +47,7 @@ const FIXTURE_CHANGES = fileURLToPath(new URL("./fixtures/changes/", import.meta
 const BUILD_OUTPUT = new Set(["bin", "obj"]);
 
 /** Every file under `root`, keyed by its path relative to it with forward slashes. */
-export function readTree(root: string, dir = root): Record<string, string> {
+function readTree(root: string, dir = root): Record<string, string> {
   const files: Record<string, string> = {};
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);

@@ -1,5 +1,7 @@
 import { execFile, spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { BrainError } from "./types.js";
 
@@ -138,5 +140,21 @@ export function stripCredentials(url: string): string {
     return parsed.toString();
   } catch {
     return url;
+  }
+}
+
+/**
+ * Runs `work` in a temporary, detached worktree of `repoPath` at `commit`, then removes it. Lets
+ * tools that read files from disk see exactly the committed tree the brain indexed, never the
+ * developer's uncommitted work.
+ */
+export async function withWorktree<T>(repoPath: string, commit: string, work: (dir: string) => Promise<T>): Promise<T> {
+  const dir = await mkdtemp(join(tmpdir(), "brain-worktree-"));
+  await git(repoPath, ["worktree", "add", "--detach", "--quiet", dir, commit]);
+  try {
+    return await work(dir);
+  } finally {
+    await tryGit(repoPath, ["worktree", "remove", "--force", dir]);
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 }

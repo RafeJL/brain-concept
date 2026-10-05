@@ -1,6 +1,5 @@
-import type { Fact } from "../core/facts.js";
 import type { Seam, SeamCoverage, SeamKind } from "../core/seams.js";
-import type { FileRecord, LanguageShare, RepoRecord, RepoState } from "../core/types.js";
+import type { FileRecord, LanguageShare, RepoRecord, RepoState, WikiPage } from "../core/types.js";
 
 /** Everything one sync changes, applied atomically. */
 export interface SyncUpdate {
@@ -9,10 +8,9 @@ export interface SyncUpdate {
   extractorVersion: number;
   upsert: FileRecord[];
   remove: string[];
-  /** Files re-read in this sync: their old seams and facts are dropped, `seams` and `facts` inserted. */
+  /** Files re-read in this sync: their old seams are dropped, `seams` inserted. */
   extractedPaths: string[];
   seams: Seam[];
-  facts: Fact[];
 }
 
 export interface SeamFilter {
@@ -45,8 +43,10 @@ export interface Store {
   seams(filter: SeamFilter): Seam[];
   seamCoverage(repo: string): SeamCoverage;
 
-  /** Every fact read from the repo's well-known files, ordered by path and line. */
-  facts(repo: string): Fact[];
+  /** Replaces a repo's whole wiki in one step, keeping the pages' order. */
+  replacePages(repo: string, pages: readonly WikiPage[]): void;
+  /** A repo's wiki pages in the order they were written. */
+  pages(repo: string): WikiPage[];
 
   close(): void;
 }

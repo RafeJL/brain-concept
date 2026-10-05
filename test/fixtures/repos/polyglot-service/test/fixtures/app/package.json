@@ -1,6 +1,0 @@
-{
-  "name": "a-test-input",
-  "scripts": {
-    "build": "not the repo's own build"
-  }
-}

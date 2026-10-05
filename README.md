@@ -2,57 +2,84 @@
 
 Organisation-wide engineering context for coding agents, served over MCP.
 
-The brain indexes the organisation's repositories and answers narrow questions with small, cited
-answers: *what is this repo, how do I build it, who owns it, who calls this endpoint, what breaks
-if I change this file?* An agent asks for exactly what it needs instead of cloning and reading
-whole repositories. Every answer says which commit it describes, how far behind the tracked
-branch that is, and how the fact was made, so the agent knows how far to trust it.
+**Add a repo, get a wiki.** The brain has Claude Code read each enrolled repository, in any
+language, and write wiki pages in which every sentence cites the lines it is based on. Agents ask
+for exactly what they need (*what is this repo, how do I build and test it, how does this module
+work, who calls this endpoint, what breaks if I change this file?*) instead of cloning and
+reading whole repositories. Every answer says which commit it describes, how far behind the
+tracked branch that is, and how it was made, so the agent knows how far to trust it.
 
 It is a separate service. The Citation delivery harness (`citation-harness-library`) calls it
 over MCP and keeps all of its own skills.
 
-**Status:** local proof of concept. Three MCP tools work, and enrolled repos keep themselves up
-to date. See [Where it's going](#where-its-going).
+**Status:** local proof of concept, part-way through the switch to AI-written wikis (W1 of W0–W5:
+pages are generated and served; checking every citation automatically is next). See
+[Where it's going](#where-its-going).
 
 ## What it can do today
 
 | Question | Tool | What answers it |
 |---|---|---|
-| What is this repo, how do I build and test it, who owns it, what does it talk to? | `brain_repo_card` | README, package.json scripts and lockfiles, .NET solutions and projects, CODEOWNERS, the seam graph |
-| Who serves this endpoint, and who calls it? | `brain_find_consumers` | HTTP routes and calls extracted from code and OpenAPI specs in every enrolled repo |
+| What is this repo, how do I build and test it, what API does it serve, how do its key modules work? | `brain_get` | The repo's AI-written wiki pages, each sentence cited to code |
+| What repos does it talk to, and is there a wiki? | `brain_repo_card` | The index: freshness, languages, the seam graph, the wiki's pages |
+| Who serves this endpoint, and who calls it? | `brain_find_consumers` | HTTP routes and calls in every enrolled repo |
 | What would break if I changed this repo, file or endpoint? | `brain_impact` | The routes declared there, and every caller of each one across repos |
 
-All three are read-only. They answer in a few lines by default, and `format: "detailed"` (or
-`--detailed` on the CLI) gives more. The examples below are real output from the
+All four are read-only. The examples below are real output from the
 [RealWorld](https://github.com/gothinkster/realworld) example apps.
+
+### "How do I build and test it?": `brain_get`
+
+`brain wiki <repo>` has Claude Code write four pages (overview, build-run-test, api, and one on
+the most important module). `brain_get` with no page lists them; with a page, it returns it:
+
+```
+aspnet-api · build-run-test · @a397d11 · up to date · llm-generated
+
+# Build, Run & Test
+
+## Build driver (Bullseye)
+
+The build is itself a C# console program, `build/build.csproj`, using Bullseye targets rather than
+shell scripts [build/Program.cs:1-7][readme.md:23]. It defines five targets: `clean` …
+[build/Program.cs:14-35], `format` (`dotnet tool restore` then `dotnet csharpier format .`)
+[build/Program.cs:37-44], `build` (`dotnet build Conduit.slnx -c Release`, depends on `format`)
+[build/Program.cs:46], `test` (runs `dotnet test` against every `tests/**/*.csproj`, depends on
+`build`) [build/Program.cs:48-60] …
+
+AI-written (llm-generated). Each [path:lines] cites the code a sentence is based on; confirm there before relying on it.
+```
+
+- **Any language:** the trial generated correct wikis for C#, PHP (Laravel) and Python (Flask)
+  repos. No per-language setup is needed.
+- **Commit-exact:** Claude Code runs in a temporary git worktree at the commit the brain indexed,
+  so pages never describe uncommitted work. The worktree is removed afterwards.
+- **Isolated and read-only:** each run uses `--safe-mode --strict-mcp-config`, with Read, Grep
+  and Glob only. No MCP servers, user settings or memory, so it can't call the brain or anything
+  else.
+- **Cost:** about $0.65–1.00 and 1–3 minutes per repo with Sonnet. Locally it uses your Claude
+  Code allowance. The cost of each run is reported.
 
 ### "What is this repo?": `brain_repo_card`
 
 ```
 aspnet-api  @a397d11 · up to date · parser-built
 Remote: https://github.com/gothinkster/aspnetcore-realworld-example-app.git
-About: ASP.NET Core codebase containing real world examples (CRUD, auth, advanced patterns, etc.) that adheres to the RealWorld spec and API.
+Wiki: 4 pages (overview, build-run-test, api, articles) · read with brain_get
 Files: 114 on origin/master
 Languages: C# 78 · Other 9 · Markdown 8 · JSON 6 · MSBuild 5 (+5 more)
-.NET: dotnet build Conduit.slnx · dotnet test Conduit.slnx · 3 projects (1 web, 1 app, 1 test)
-Owners: not declared (no CODEOWNERS)
 Seams: 19 routes, 0 calls via cs-routes
 Called by: react-web (22 calls)
 
 brain_impact and brain_find_consumers give the endpoints and file:line pointers.
-Commands are as the repo declares them; the brain never runs them.
 ```
 
-| Line | Where it comes from |
-|---|---|
-| **About** | The README's first real paragraph. Badges, headings, code and "Run this:" lead-ins are skipped. |
-| **.NET** | The shallowest `.sln`/`.slnx`. `dotnet test` only appears when a test project exists. Projects are counted as web, app, library or test. |
-| **Scripts** | `package.json` scripts (build, test, lint, typecheck, start, dev first), run with the package manager of the nearest lockfile: `npm run`, `pnpm run`, `yarn run` or `bun run`. A script in a subfolder shows as `in evals/: npm run test`. |
-| **Owners** | CODEOWNERS, found the way GitHub finds it (`.github/`, the root, then `docs/`). Shows the owners of `*` and how many path rules there are. |
-| **Seams** | How many HTTP routes and calls were found, and by which extractors. Code languages with no extractor yet show as `not extracted: Python`. |
-| **Calls / Called by** | Repos this one calls and repos that call it, among the repos you can read. Worked out on each request, so always current. |
-
-An unknown name returns the list of enrolled repos, which is how an agent finds out what exists.
+- **Wiki:** its pages, or `not generated yet (brain wiki <repo>)`. If the wiki is older than the
+  index, it says so.
+- **Calls / Called by:** the repos this one calls and the repos that call it, among the repos you
+  can read, worked out on each request.
+- **Unknown names:** an unknown name returns the list of enrolled repos, which is how an agent
+  finds out what exists.
 
 ### "Who serves and who calls this endpoint?": `brain_find_consumers`
 
@@ -73,8 +100,8 @@ Indexed: aspnet-api @a397d11 · up to date; express-api @30b68e1 · up to date; 
 
 - **Path styles:** `GET /api/articles/:slug`, `/articles/{slug}` or a full URL all work.
   `:slug`, `{slug}`, `${slug}`, numbers and GUIDs all count as parameters.
-- **Base paths:** matches can ignore a base path such as `/api`, which is often added at run time,
-  and are labelled `suffix` when they do.
+- **Base paths:** matches can ignore a base path such as `/api`, and are labelled `suffix` when
+  they do.
 - **Duplicates:** an endpoint declared in code and in an OpenAPI spec is shown once, citing the
   code.
 
@@ -98,23 +125,28 @@ come first, and callers in the same repo (its own tests) are marked `same repo`.
 
 - **`@a397d11 · up to date`**: the commit the answer describes, and how many commits behind the
   tracked branch that is (`2 commits behind origin/main`).
-- **`parser-built`**: made by parsers, with no LLM involved. Later phases add `human-reviewed`
-  and `llm-generated` facts, each labelled.
-- **File and line pointers**, never pasted code. Confirm in the repo before editing.
+- **`parser-built`**: made by parsers, with no AI involved.
+- **`llm-generated`**: written by Claude Code, with a citation on every sentence. Confirm at the
+  citation before relying on it. From W2, every citation is checked automatically.
+- **File and line pointers**, never pasted code.
 - **Gaps are stated:** calls whose URL is only known at run time are counted and located, never
-  guessed, so "no callers found" is never taken as proof.
-- **Permissions:** an answer only includes repos the caller may read. Locally that is every
-  repo you enrolled; hosted, it will follow GitHub permissions.
+  guessed.
+- **Permissions:** an answer only includes repos the caller may read. Locally that is every repo
+  you enrolled; hosted, it will follow GitHub permissions.
 
 ### It keeps itself up to date
 
 `brain hooks install` adds a git hook to each enrolled repo. Whenever the branch it tracks moves
 (a fetch, pull, merge or rebase), the brain re-syncs that repo in the background. Repos track
 what has been merged (`origin/main`), so your editor's auto-fetch is enough, and your own
-unpushed commits never leak into answers. Only files that changed are re-read. See
-[Keeping it fresh](#keeping-it-fresh).
+unpushed commits never leak into answers. Regenerating wiki pages on change comes in W3; for now,
+run `brain wiki <repo>` again. See [Keeping it fresh](#keeping-it-fresh).
 
 ## What it reads
+
+- **Wiki pages:** any language. Claude Code reads the repo itself.
+- **Routes and calls** (for `brain_find_consumers`, `brain_impact` and card neighbours) are still
+  parser-built during the switch:
 
 | | Routes (served) | Calls (made) |
 |---|---|---|
@@ -122,40 +154,31 @@ unpushed commits never leak into answers. Only files that changed are re-read. S
 | **C# / ASP.NET** | Attribute-routed controllers, minimal APIs (including `MapGroup`) | `HttpClient` (and its JSON extensions), `HttpRequestMessage`, RestSharp, Refit |
 | **Any language** | OpenAPI 3 and Swagger 2 specs | |
 
-| Repo facts | From |
-|---|---|
-| Build and test | `package.json`, `package-lock.json` / `pnpm-lock.yaml` / `yarn.lock` / `bun.lock`, `.sln`, `.slnx`, `.csproj` |
-| Owners | `CODEOWNERS` |
-| Summary | Root `README.md` |
-
-Every other file still counts towards the repo's file and language inventory. Files under
-`node_modules`, `vendor` and test-fixture folders are not treated as the repo's own manifests.
+In W4 Claude Code takes these over for every language. The trial found every RealWorld endpoint
+in C#, TypeScript, JavaScript, PHP and Python.
 
 ## What it can't do yet
 
-- **Other languages' seams:** Python, Java, Go and PHP are inventoried and flagged as
-  `not extracted`, but their routes and calls aren't read yet.
-- **Other kinds of link:** only HTTP. Message queues, events and gRPC are not linked.
-- **Symbol-level questions** ("who calls this method?"): phase 3b, symbol maps.
-- **Search and full documents:** `brain_search` and `brain_get` are planned.
-- **Curated knowledge:** glossary, ADRs, confirmed owners and purposes come in phase 4.
-- **Generated wiki pages:** phase 5.
-- **Running anything:** commands are reported as the repo declares them and never run.
-- **Some routes are skipped on purpose:** conventionally routed MVC actions (the route table
-  isn't in the file), and calls whose URL is built at run time (counted instead).
-- **Hosting:** today it runs on your machine against your local clones. Hosted (Azure,
-  GitHub-backed permissions, webhooks) is phase 6.
+- **Automatic citation checks:** pages are cited, but the citations aren't verified yet. That's
+  W2.
+- **Regenerating pages on change:** W3. Re-run `brain wiki <repo>` for now.
+- **Routes and calls outside TS/JS, C# and OpenAPI:** W4, by Claude Code.
+- **Search across wikis:** `brain_search`, in W5.
+- **Curated knowledge** (people correcting and confirming facts): phase 4.
+- **Hosting:** today it runs on your machine against your local clones. Hosted (Azure, cloud
+  containers for the runs, GitHub-backed permissions) is phase 6.
 
 ## Quick start
 
-Requires Node 22.13 or later (for the built-in `node:sqlite`, so there are no native builds) and
-git on `PATH`.
+Requires Node 22.13 or later (for the built-in `node:sqlite`, so there are no native builds), git
+on `PATH`, and Claude Code (`claude`) on `PATH` for wiki pages.
 
 ```
 npm ci
 npm run check                                        # typecheck + tests
 npm run brain -- repo add ..\some-repo               # enrol a local clone
 npm run brain -- sync                                # index it
+npm run brain -- wiki some-repo                      # have Claude Code write its wiki
 npm run brain -- hooks install                       # keep it fresh from now on
 npm run brain -- card some-repo                      # what an agent will see
 ```
@@ -174,8 +197,9 @@ claude mcp add --scope user citation-brain -- node C:\Users\<you>\Repos\brain-co
 Run `/mcp` in a session to check it is connected. The server tells Claude when to use it, so you
 don't need to name the tools. Questions like these go to the brain:
 
-- *How do I run the tests in aspnet-api?*
-- *Who owns orders-api, and what calls it?*
+- *How do I run the tests in aspnet-api?* A fresh session answered this from `brain_repo_card`
+  then `brain_get`, with no file or web searches.
+- *How does laravel-api handle authentication?*
 - *If I change `GET /articles/:slug` in express-api, what else breaks?*
 - *What would break if I removed the DELETE endpoint in ArticlesController?*
 
@@ -184,19 +208,21 @@ Start a new session after the brain changes, so it picks up new tool description
 ## Commands
 
 Run from this folder with `npm run brain -- <command>`, or from anywhere with
-`node <path-to>\brain-concept\bin\brain.mjs <command>`. The `card`, `consumers` and `impact`
-commands print exactly what an agent gets over MCP.
+`node <path-to>\brain-concept\bin\brain.mjs <command>`. The `page`, `card`, `consumers` and
+`impact` commands print exactly what an agent gets over MCP.
 
 | Command | Does |
 |---|---|
 | `repo add <path> [--name n] [--ref ref]` | Enrol a local clone. The name defaults to the folder; the ref defaults to what `origin/HEAD` points at (usually `origin/main`), or the checked-out branch if there is no remote. |
 | `repo list` | Enrolled repos, the commit each is indexed at, and how far behind it is. |
 | `repo set-ref <name> <ref>` | Index a different branch, e.g. `origin/release`. Updates the repo's hook if it has one. |
-| `repo remove <name>` | Remove a repo, every fact about it, and its hook. |
+| `repo remove <name>` | Remove a repo, everything the brain holds about it, and its hook. |
 | `sync [<name>]` | Index the tracked branch's committed tree (never your working copy). All repos if no name. |
+| `wiki <name> [--model m]` | Have Claude Code write the repo's wiki at the indexed commit. Default model `sonnet`. Replaces the previous pages only if the new ones are well-formed. |
+| `page <name> [<page>]` | `brain_get`: the page list, or one page. |
 | `hooks install [<name>]` | Re-sync automatically whenever the tracked branch moves. All repos if no name. |
 | `hooks remove [<name>]` / `hooks status` | Stop automatic syncing / see which repos sync automatically, or why one can't. |
-| `card <name> [--detailed]` | `brain_repo_card`. `--detailed` adds every script with its command and line, and a language table. |
+| `card <name> [--detailed]` | `brain_repo_card`. `--detailed` adds the full commit and a language table. |
 | `consumers "<METHOD /path>" [--detailed]` | `brain_find_consumers`. |
 | `impact <repo> [--path file] [--route "<METHOD /path>"] [--detailed]` | `brain_impact`. |
 
@@ -210,7 +236,8 @@ tracked ref moves, including on a plain `git fetch`, which has no hook of its ow
 `brain sync <name>` in the background and returns at once, so git is never slowed down. Runs are
 logged to `%USERPROFILE%\.brain\hooks.log`. Read it with `-Encoding utf8` in Windows PowerShell.
 
-This works with any remote, not just GitHub. "Up to date" means "as of the last fetch".
+This works with any remote, not just GitHub. "Up to date" means "as of the last fetch". The card
+and every page say when the wiki is older than the index.
 
 The hook won't be installed if the repo already has its own `reference-transaction` hook, or if
 `core.hooksPath` points inside the repo (as husky does), because that would change tracked files.
@@ -221,25 +248,26 @@ Hooks run whichever brain code is checked out in this folder.
 ## Testing
 
 - `npm run check`: typecheck and the full test suite. Each test builds its own throwaway git
-  repos from `test/fixtures/`.
-- [`docs/manual-testing.md`](docs/manual-testing.md): try every feature by hand. It covers a
-  playground built from real repos with a local stand-in for GitHub (git commands only, nothing
-  added to this project), real open-source repos, and checks that Claude Code uses the brain
-  unprompted. Run it before merging changes to what the brain extracts or answers.
+  repos from `test/fixtures/`. Wiki tests use a recorded Claude Code result, so they never call
+  the AI.
+- [`docs/manual-testing.md`](docs/manual-testing.md): try every feature by hand. It covers
+  generating and reading real wikis, a playground built from real repos with a local stand-in for
+  GitHub (git commands only, nothing added to this project), real open-source repos, and checks
+  that Claude Code uses the brain unprompted. Run it before merging changes to what the brain
+  extracts or answers.
 
 ## Where it's going
 
 | Phase | | Status |
 |---|---|---|
-| 0 | Walking skeleton: enrol, sync, repo card over MCP | ✅ |
-| 1 | Seam graph: HTTP routes and calls in TS/JS, C# and OpenAPI; `brain_find_consumers`, `brain_impact` | ✅ |
-| | Auto-sync through a git hook | ✅ |
-| 3a | Richer repo cards: build, test, owners, summary, neighbours | ✅ |
-| 2 | Evals proving the harness does better with the brain | Waiting on the decision to integrate with the harness |
-| 3b | Symbol maps: symbol-level impact, `brain_get` | Next |
-| 4 | Curated context: glossary, ADRs, confirmed owners and purposes (human-reviewed) | Planned |
-| 5 | Deep wiki pages: generated, cited and checked (llm-generated) | Planned |
-| 6 | Hosted on Azure: Postgres, GitHub App webhooks, per-user permissions | Planned |
+| 0, 1, 3a | Index, seam graph, `brain_find_consumers`, `brain_impact`, repo cards, auto-sync | ✅ |
+| W0 | Trial: Claude Code finds every RealWorld endpoint in 5 repos and 5 languages; pages accurate | ✅ |
+| W1 | Wiki pages: `brain wiki`, `brain_get`; the old fact readers removed | ✅ (this branch) |
+| W2 | Every citation checked automatically; tiers on pages and claims | Next |
+| W3 | Pages regenerated on change, only what changed; the last good page kept | Planned |
+| W4 | Routes and calls in any language by Claude Code; the parsers removed | Planned |
+| W5 | `brain_search` across wikis; final docs | Planned |
+| 2, 4, 6 | Harness evals, curated context, hosting | After the switch |
 
 Read [`docs/architecture.md`](docs/architecture.md) for the design,
 [`docs/research.md`](docs/research.md) for the evidence behind it, and
@@ -251,7 +279,8 @@ Read [`docs/architecture.md`](docs/architecture.md) for the design,
 bin/            launchers that run the TypeScript from any folder
 src/core/       types, git access, language detection, HTTP path matching
 src/store/      Store interface, SQLite implementation, migrations
-src/ingest/     registry, sync, hooks, extractor plugins and fact readers (the write side)
+src/ingest/     registry, sync, hooks, extractor plugins (the write side)
+src/wiki/       Claude Code runner and wiki generation
 src/serve/      access policy, freshness, tools, MCP server (the read side)
 test/           vitest; fixtures are real files in their own languages
 docs/           architecture, research, decisions, manual testing
