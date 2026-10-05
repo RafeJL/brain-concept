@@ -81,61 +81,6 @@ async function enrolled(...names: string[]) {
   return store;
 }
 
-describe("repo card facts", () => {
-  it("says how to build and test the repo, who owns it and what it is", async () => {
-    const store = await enrolled("polyglot-service");
-
-    const result = await repoCard({ store, access: local }, LOCAL_CALLER, "polyglot-service", "concise");
-
-    expect(result.ok && result.data).toMatchObject({
-      summary: { value: "Takes payments for the shop: a .NET API with a small web dashboard.", path: "README.md", line: 3 },
-      dotnet: { solution: "Service.slnx", projects: { web: 1, app: 0, library: 0, test: 1 } },
-      owners: { path: ".github/CODEOWNERS", fallback: { value: ["@acme/payments"], line: 1 }, pathRules: 1 },
-      packages: [
-        { path: "package.json", manager: "pnpm", common: [{ name: "build", line: 5 }, { name: "test", line: 6 }], others: [{ name: "release" }] },
-        { path: "tools/package.json", manager: "pnpm", common: [], others: [{ name: "codegen" }] },
-        { path: "web/package.json", manager: "npm", common: [{ name: "build" }, { name: "test" }, { name: "dev" }], others: [] },
-      ],
-    });
-    expect(result.text).toContain(
-      [
-        "About: Takes payments for the shop: a .NET API with a small web dashboard.",
-        "Files: 13 on main",
-      ].join("\n"),
-    );
-    expect(result.text).toContain(
-      [
-        ".NET: dotnet build Service.slnx · dotnet test Service.slnx · 2 projects (1 web, 1 test)",
-        "Scripts: pnpm run build · pnpm run test (+1 more)",
-        "         in web/: npm run build · npm run test · npm run dev",
-        "         in tools/: pnpm run codegen",
-        "Owners: @acme/payments (.github/CODEOWNERS:1), +1 path rule",
-      ].join("\n"),
-    );
-    expect(result.text).toContain("Commands are as the repo declares them; the brain never runs them.");
-  });
-
-  it("lists every script with its command and line when detailed", async () => {
-    const store = await enrolled("polyglot-service");
-
-    const result = await repoCard({ store, access: local }, LOCAL_CALLER, "polyglot-service", "detailed");
-
-    expect(result.text).toContain("About (README.md:3): Takes payments");
-    expect(result.text).toMatch(/Scripts in web\/package.json \(npm\):\n {2}npm run build +vite build {2}\(line 5\)/);
-  });
-
-  it("says plainly when the repo declares none of it", async () => {
-    const store = new SqliteStore(":memory:");
-    await enrolRepo(store, { path: makeRepo({ "a.ts": "1" }), name: "bare" });
-    await syncRepo(store, "bare");
-
-    const result = await repoCard({ store, access: local }, LOCAL_CALLER, "bare", "concise");
-
-    expect(result.text).toContain("Owners: not declared (no CODEOWNERS)");
-    expect(result.text).not.toMatch(/About|Scripts|\.NET|Commands are/);
-  });
-});
-
 describe("repo card neighbours", () => {
   it("names the repos it calls and the repos that call it, not counting its own tests", async () => {
     const store = await enrolled("orders-api", "shop-web");

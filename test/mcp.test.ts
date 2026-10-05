@@ -23,7 +23,7 @@ describe("MCP server", () => {
 
     const { tools } = await client.listTools();
 
-    expect(tools.map((t) => t.name)).toEqual(["brain_repo_card", "brain_find_consumers", "brain_impact"]);
+    expect(tools.map((t) => t.name)).toEqual(["brain_repo_card", "brain_find_consumers", "brain_impact", "brain_get"]);
     expect(tools.every((t) => t.annotations?.readOnlyHint === true)).toBe(true);
     expect(tools[0]?.annotations?.readOnlyHint).toBe(true);
   });

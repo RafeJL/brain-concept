@@ -38,6 +38,20 @@ export interface FileRecord {
   commit: string;
 }
 
+/** One AI-written wiki page about a repo, describing the commit it was generated from. */
+export interface WikiPage {
+  repo: string;
+  /** Stable id within the repo, e.g. "overview", "build-run-test". */
+  slug: string;
+  title: string;
+  /** Markdown in which every claim cites `[path:start-end]`. */
+  markdown: string;
+  commit: string;
+  model: string;
+  costUsd: number;
+  generatedAt: string;
+}
+
 export interface LanguageShare {
   language: string;
   files: number;

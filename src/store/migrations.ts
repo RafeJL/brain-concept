@@ -63,4 +63,22 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX facts_by_file ON facts(repo, path);
   `,
+  `
+  CREATE TABLE pages (
+    repo         TEXT NOT NULL REFERENCES repos(name) ON DELETE CASCADE,
+    slug         TEXT NOT NULL,
+    position     INTEGER NOT NULL,
+    title        TEXT NOT NULL,
+    markdown     TEXT NOT NULL,
+    commit_sha   TEXT NOT NULL,
+    model        TEXT NOT NULL,
+    cost_usd     REAL NOT NULL,
+    generated_at TEXT NOT NULL,
+    PRIMARY KEY (repo, slug)
+  );
+  `,
+  // The fact readers were replaced by the wiki (W1).
+  `
+  DROP TABLE IF EXISTS facts;
+  `,
 ];

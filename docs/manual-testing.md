@@ -27,6 +27,8 @@ git clone https://github.com/gothinkster/node-express-realworld-example-app brai
 git clone https://github.com/gothinkster/react-redux-realworld-example-app brain-test-repos\react-redux-realworld-example-app
 git clone https://github.com/gothinkster/aspnetcore-realworld-example-app brain-test-repos\aspnetcore-realworld-example-app
 git clone https://github.com/dotnet/eShop brain-test-repos\eShop
+git clone https://github.com/gothinkster/laravel-realworld-example-app brain-test-repos\laravel-realworld-example-app
+git clone https://github.com/gothinkster/flask-realworld-example-app brain-test-repos\flask-realworld-example-app
 ```
 
 ## Part A: the playground
@@ -79,7 +81,7 @@ npm run brain -- hooks status
   local branch;
 - `hooks status` says `syncs automatically` for both.
 
-### A2. Repo cards
+### A2. Repo cards and the wiki
 
 ```
 npm run brain -- card pg-aspnet-api
@@ -90,28 +92,38 @@ npm run brain -- card pg-react-web
 
 | Line | Shows |
 |---|---|
-| `About: ASP.NET Core codebase containing real world examples …` | The README summary skips the heading and badges |
-| `.NET: dotnet build Conduit.slnx · dotnet test Conduit.slnx · 3 projects (1 web, 1 app, 1 test)` | The solution is found and project kinds are told apart. `dotnet test` only appears because a test project exists |
-| `Owners: not declared (no CODEOWNERS)` | No CODEOWNERS yet. A3 adds one |
+| `Wiki: not generated yet (brain wiki pg-aspnet-api)` | No wiki yet |
 | `Seams: 19 routes, 0 calls via cs-routes` | Routes from the controllers |
 | `Called by: pg-react-web (22 calls)` | Neighbours, from the seam graph |
 
 **pg-react-web:**
-- `Scripts: npm run build · npm run test · npm run start (+1 more)`.
 - `Calls: pg-aspnet-api (19 endpoints)`.
 - `(+4 with run-time URLs)`: calls inside the superagent wrapper whose URL is only known at run
   time, counted, never guessed.
 
+Now have Claude Code write the API's wiki. It takes 1–3 minutes and uses your Claude Code
+allowance, about $0.65:
+
+```
+npm run brain -- wiki pg-aspnet-api
+npm run brain -- page pg-aspnet-api
+npm run brain -- page pg-aspnet-api build-run-test
+npm run brain -- card pg-aspnet-api
+git -C $P\aspnet-api worktree list
+```
+
+**Expect:**
+- `pg-aspnet-api: 4 pages at @a397d11 (overview, build-run-test, api, …) · $… · …s`;
+- the page list stamped `@a397d11 · up to date · llm-generated`;
+- a build page that names `build/build.csproj`, the Bullseye targets and
+  `dotnet build Conduit.slnx`, each with `[path:lines]` citations. Open two or three citations
+  and check they say what the sentence claims;
+- the card now says `Wiki: 4 pages (…) · read with brain_get`;
+- `worktree list` shows one line: the temporary worktree Claude Code ran in was removed.
+
 ### A3. A teammate pushes, you fetch, and the brain updates itself
 
-As the teammate, add a CODEOWNERS file and a new endpoint.
-
-```
-New-Item -ItemType Directory -Force $P\teammate\aspnet-api\.github
-Set-Content $P\teammate\aspnet-api\.github\CODEOWNERS '*    @acme/conduit-team'
-```
-
-Open `$P\teammate\aspnet-api\src\Conduit\Features\Articles\ArticlesController.cs` and add this
+As the teammate, add a new endpoint. Open `$P\teammate\aspnet-api\src\Conduit\Features\Articles\ArticlesController.cs` and add this
 just above the final `}`:
 
 ```csharp
@@ -119,11 +131,10 @@ just above the final `}`:
     public IActionResult Archive(string slug) => NoContent();
 ```
 
-Commit and push as the teammate. CODEOWNERS is a new file, hence `add`:
+Commit and push as the teammate:
 
 ```
-git -C $P\teammate\aspnet-api add -A
-git -C $P\teammate\aspnet-api commit -m "Conduit team owns it; add archive"
+git -C $P\teammate\aspnet-api commit -am "Add archive"
 git -C $P\teammate\aspnet-api push
 npm run brain -- repo list
 ```
@@ -146,10 +157,13 @@ npm run brain -- card pg-aspnet-api
 
 **Expect:**
 - a new commit;
-- `Owners: @acme/conduit-team (.github/CODEOWNERS:1)`;
-- `Seams: 20 routes`.
+- `Seams: 20 routes`;
+- `Wiki: 4 pages (…) · read with brain_get · written at @a397d11, older than the index`. The wiki
+  hasn't been regenerated, and the card says so rather than pretending it is current.
 
-Nobody ran `sync`.
+Nobody ran `sync`. Regenerating pages automatically comes in W3. For now,
+`npm run brain -- wiki pg-aspnet-api` brings the wiki up to the new commit, and the "older"
+note disappears.
 
 ### A4. A change in one repo updates another repo's card
 
@@ -199,17 +213,19 @@ npm run brain -- repo list
 **Expect** pg-aspnet-api on the same commit as A3: your local `master` moved, `origin/master`
 didn't.
 
-### A6. Deleted files take their facts with them
+### A6. Removed code takes its seams with it
+
+As the teammate, delete the archive endpoint you added in A3, then commit, push and fetch:
 
 ```
-git -C $P\teammate\aspnet-api rm readme.md
-git -C $P\teammate\aspnet-api commit -m "Drop the readme"
+git -C $P\teammate\aspnet-api commit -am "Remove archive"
 git -C $P\teammate\aspnet-api push
 git -C $P\aspnet-api fetch
 npm run brain -- card pg-aspnet-api
+npm run brain -- impact pg-aspnet-api --route "POST /articles/{slug}/archive"
 ```
 
-**Expect** no `About:` line.
+**Expect** `Seams: 19 routes` again, and `No matching routes are declared in pg-aspnet-api.`
 
 ### A7. The hook's log
 
@@ -243,7 +259,7 @@ Remove-Item Env:BRAIN_DB
 Remove-Item -Recurse -Force $P
 ```
 
-`repo remove` deletes the repo's facts and its hook. Clearing `BRAIN_DB` points the CLI back at
+`repo remove` deletes everything the brain holds about the repo (its wiki included) and its hook. Clearing `BRAIN_DB` points the CLI back at
 your real store.
 
 ## Part B: real repositories
@@ -256,6 +272,8 @@ npm run brain -- repo add $T\node-express-realworld-example-app --name express-a
 npm run brain -- repo add $T\react-redux-realworld-example-app --name react-web
 npm run brain -- repo add $T\aspnetcore-realworld-example-app --name aspnet-api
 npm run brain -- repo add $T\eShop --name eshop
+npm run brain -- repo add $T\laravel-realworld-example-app --name laravel-api
+npm run brain -- repo add $T\flask-realworld-example-app --name flask-api
 npm run brain -- repo add ..\citation-harness-library
 npm run brain -- sync
 npm run brain -- hooks install
@@ -263,11 +281,13 @@ npm run brain -- hooks install
 
 | Command | Expect |
 |---|---|
-| `card aspnet-api` | The README's description; `.NET: dotnet build Conduit.slnx · dotnet test Conduit.slnx · 3 projects (1 web, 1 app, 1 test)`; `Seams: 19 routes`; `Called by: react-web (22 calls)` |
-| `card react-web` | `Scripts: npm run build · npm run test · npm run start`; `22 calls (+4 with run-time URLs)`; `Calls: aspnet-api (19 endpoints) · express-api (19 endpoints)` |
+| `wiki laravel-api`, then `page laravel-api api` | Four pages for a PHP repo the parsers can't read; the API page lists the RealWorld endpoints, each cited to `routes/api.php` |
+| `wiki flask-api`, then `page flask-api api` | The same for Python: blueprints in `conduit/*/views.py`, `JWT_HEADER_TYPE = 'Token'` cited to `conduit/settings.py` |
+| `card aspnet-api` | `Wiki: 4 pages (…)` once generated; `Seams: 19 routes`; `Called by: react-web (22 calls)` |
+| `card react-web` | `22 calls (+4 with run-time URLs)`; `Calls: aspnet-api (19 endpoints) · express-api (19 endpoints)` |
 | `card express-api` | `Called by: react-web` and **not** eshop. Both serve or call `/`, which says nothing about which service is meant |
 | `card eshop` | `dotnet build eShop.slnx` (not the nested `ClientApp.sln`); `28 projects (8 web, 2 app, 9 library, 9 test)`; the root package.json's Playwright scripts |
-| `card citation-harness-library` | `Scripts: in evals/: npm run test · npm run typecheck`; `not extracted: Python` |
+| `card citation-harness-library` | `Seams: none found · not extracted: Python` |
 | `consumers "GET /api/articles/:slug"` | Two servers (the C# `ArticlesController` and the Express controller) and one caller, `react-web · src/agent.js:62`, all marked `suffix` because `/api` is a base path neither declares |
 | `consumers "DELETE /profiles/{username}/follow"` | A method filter: two servers, one caller |
 | `impact aspnet-api --path src/Conduit/Features/Articles/ArticlesController.cs` | 6 routes and 9 callers, all in `react-web · src/agent.js` |
@@ -282,7 +302,8 @@ changes to the server's instructions. Ask in plain words, without naming tools:
 
 | Ask | It should |
 |---|---|
-| *How do I run the tests in aspnet-api?* | call `brain_repo_card` and answer `dotnet test Conduit.slnx` |
+| *How do I run the tests in aspnet-api?* | call `brain_repo_card`, then `brain_get` for `build-run-test`, and answer from the page (seen on 2026-10-05, with no file or web searches) |
+| *How does laravel-api handle authentication?* | call `brain_get` and answer from the wiki, citing the PHP code |
 | *What talks to express-api?* | call `brain_repo_card` and name react-web |
 | *If I change GET /articles/:slug in express-api, what else breaks?* | call `brain_find_consumers` or `brain_impact` and point at `react-web · src/agent.js` |
 | *What would break if I removed the DELETE endpoint in aspnet-api's ArticlesController?* | call `brain_impact` |

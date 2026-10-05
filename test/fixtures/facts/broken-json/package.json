@@ -1,4 +1,0 @@
-{
-  "name": "half-written",
-  "scripts": {
-    "build": "tsc",
