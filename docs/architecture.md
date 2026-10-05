@@ -76,13 +76,13 @@ Two halves share only the store:
 A few broad, read-only tools. Short answers by default, `format: "detailed"` on request,
 paginated lists, pointers rather than pasted code. No free-text "ask" tool.
 
-| Tool | Answers | Harness stage |
-|---|---|---|
-| `brain_find_consumers` | Who produces or consumes an endpoint, event or package, across repos | Contract review, technical planning |
-| `brain_impact` | What depends on a route, symbol or file, in the repo and across repos | Technical planning, scope drift, maintainability review |
-| `brain_repo_card` | What a repo is: stack, owner, commands, neighbours, extraction coverage | Technical planning |
-| `brain_search` | Ranked pointers to facts and pages | Any |
-| `brain_get` | One item in full (page, glossary entry, ADR, symbol map) with citations | Feature planning, development |
+| Tool | Answers | Harness stage | Status |
+|---|---|---|---|
+| `brain_find_consumers` | Who produces or consumes an endpoint, event or package, across repos | Contract review, technical planning | Built for HTTP endpoints |
+| `brain_impact` | What depends on a route, symbol or file, in the repo and across repos | Technical planning, scope drift, maintainability review | Built for routes and files; symbols in phase 3b |
+| `brain_repo_card` | What a repo is: stack, owner, commands, neighbours, extraction coverage | Technical planning | Built |
+| `brain_search` | Ranked pointers to facts and pages | Any | Planned |
+| `brain_get` | One item in full (page, glossary entry, ADR, symbol map) with citations | Feature planning, development | Planned |
 
 A hit looks like: `orders-web · src/api/orders.ts:42-58 · @9f3c1e2 · 2 commits behind · parser-built`.
 
@@ -91,7 +91,7 @@ A hit looks like: `orders-web · src/api/orders.ts:42-58 · @9f3c1e2 · 2 commit
 | Part | Local POC | Hosted |
 |---|---|---|
 | Store | SQLite (`node:sqlite`) | Azure Database for PostgreSQL |
-| Trigger | Post-merge git hook or `brain sync` | GitHub App webhook → Azure Service Bus |
+| Trigger | `reference-transaction` git hook (fires on fetch, pull, merge) or `brain sync` | GitHub App webhook → Azure Service Bus |
 | Workers | In the CLI process | Azure Container Apps jobs |
 | MCP transport | stdio | Streamable HTTP behind Entra ID |
 | Source code | Existing local clones | Shallow clones cached per repo |
