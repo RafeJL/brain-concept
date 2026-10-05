@@ -147,3 +147,31 @@ their own, as well as pulls, merges and rebases. The hook returns at once and lo
 would have to share stdin) or to a `core.hooksPath` inside the repo (husky), because that would
 change tracked files. SQLite waits up to 10s for a lock, so overlapping syncs queue rather than
 fail. Hosted, a GitHub webhook replaces the hook; the sync is the same.
+
+## 2026-09-30: repo cards read what a repo declares, and never run it
+
+Build and test commands come from `package.json` scripts (the package manager from the nearest
+lockfile) and .NET solutions and projects. Owners come from CODEOWNERS, found the way GitHub
+finds it. "About" is the README's first real paragraph. All of it is parser-built and cited to
+file and line, and the brain never runs a command to check it works. Curated purposes (phase 4)
+will sit alongside these as human-reviewed facts rather than replace them.
+
+## 2026-09-30: facts go through the same pipeline as seams
+
+Readers in `src/ingest/facts/` are pure, one file at a time, like extractor plugins. Their facts
+go in a `facts` table that cascades from `files`, so only changed blobs are re-read, each fact
+names its commit, and a deleted file takes its facts with it. `EXTRACTOR_VERSION` 4 fills them in
+for repos indexed earlier. Lockfiles are recognised by name and never read, because they can be
+many megabytes.
+
+## 2026-09-30: neighbours are worked out when asked, not stored
+
+"Calls" and "called by" on a repo card come from the seam graph on each request, among the repos
+the caller can read, because they change whenever any other repo syncs. `brain_impact` and the
+card share one matching function (`linkCalls`).
+
+## 2026-09-30: a key with no literal segment only links within its own repo
+
+`/` and `/{}` don't say which service is meant; every web app serves `/`. Across repos they now
+link nothing. Found as express-api's e2e test (`GET /` against its own server) making it look like
+a caller of eShop. `brain_find_consumers` still answers an explicit question about `/`.

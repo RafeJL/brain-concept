@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="src/Orders.Api/Orders.Api.csproj" />
+  <Project Path="src/Orders.Domain/Orders.Domain.csproj" />
+  <Project Path="tests/Orders.Tests/Orders.Tests.csproj" />
+  <Project Path="tests/Orders.Contracts/Orders.Contracts.csproj" />
+  <Project Path="tools/Migrator/Migrator.csproj" />
+</Solution>

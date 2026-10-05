@@ -1,0 +1,9 @@
+{
+  "name": "polyglot-service",
+  "private": true,
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "release": "changeset publish"
+  }
+}

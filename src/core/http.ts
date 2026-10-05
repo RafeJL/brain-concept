@@ -52,6 +52,11 @@ export function joinPaths(prefix: string, path: string): string {
 
 export type MatchQuality = "exact" | "suffix";
 
+/** Whether a key names something (`/orders/{}`) rather than only parameters or the root (`/{}`, `/`). */
+export function hasLiteralSegment(key: string): boolean {
+  return key.split("/").some((segment) => segment && segment !== PARAM);
+}
+
 /**
  * Compares two keys. "suffix" means one ends with the other at a segment boundary, which is how a
  * client calling `/api/articles/{}` finds a server that declares `/articles/{}` under an unknown
@@ -60,7 +65,7 @@ export type MatchQuality = "exact" | "suffix";
 export function matchKeys(a: string, b: string): MatchQuality | null {
   if (a === b) return "exact";
   const [short, long] = a.length <= b.length ? [a, b] : [b, a];
-  if (!short.split("/").some((segment) => segment && segment !== PARAM)) return null;
+  if (!hasLiteralSegment(short)) return null;
   // Both keys start with "/", so endsWith can only succeed at a segment boundary.
   return long.endsWith(short) ? "suffix" : null;
 }

@@ -43,8 +43,8 @@ Every fact records how it was made, and every answer carries that label.
 
 | Tier | Built by | Holds | Agent should |
 |---|---|---|---|
-| **parser-built** | Tree-sitter and framework extractors, OpenAPI/AsyncAPI readers. No LLM. | Seam graph, symbol maps, file inventory | Rely on it; confirm with grep before editing |
-| **human-reviewed** | People, or an agent draft merged through a PR by an owner | Glossary, customers, features, ADRs, repo cards | Treat as the team's stated intent |
+| **parser-built** | Tree-sitter and framework extractors, OpenAPI/AsyncAPI readers. No LLM. | Seam graph, symbol maps, file inventory, what manifests declare (scripts, .NET projects, CODEOWNERS, README summary) | Rely on it; confirm with grep before editing |
+| **human-reviewed** | People, or an agent draft merged through a PR by an owner | Glossary, customers, features, ADRs, repo purposes | Treat as the team's stated intent |
 | **llm-generated** | Claude, from code, with a citation on every claim | Deep wiki pages | Use as a map to where to look, never as proof |
 
 Why: generated context files lowered agent success in a controlled study, and public

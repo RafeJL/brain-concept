@@ -4,7 +4,7 @@ import { syncRepo } from "../src/ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy, type AccessPolicy } from "../src/serve/access.js";
 import { repoCard } from "../src/serve/tools/repo-card.js";
 import { SqliteStore } from "../src/store/sqlite.js";
-import { commit, makeRepo } from "./helpers.js";
+import { commit, makeRepo, repoFromFixture } from "./helpers.js";
 
 const local = new LocalAccessPolicy();
 
@@ -68,5 +68,104 @@ describe("repo card", () => {
     expect(denied.ok).toBe(false);
     expect(denied.text).toBe('No readable repo named "secret-payroll". Repos you can read: public-api.');
     expect(unknown.text).toBe('No readable repo named "nope". Repos you can read: public-api.');
+  });
+});
+
+/** Enrols and syncs fixture repos under their own names. */
+async function enrolled(...names: string[]) {
+  const store = new SqliteStore(":memory:");
+  for (const name of names) {
+    await enrolRepo(store, { path: repoFromFixture(name), name });
+    await syncRepo(store, name);
+  }
+  return store;
+}
+
+describe("repo card facts", () => {
+  it("says how to build and test the repo, who owns it and what it is", async () => {
+    const store = await enrolled("polyglot-service");
+
+    const result = await repoCard({ store, access: local }, LOCAL_CALLER, "polyglot-service", "concise");
+
+    expect(result.ok && result.data).toMatchObject({
+      summary: { value: "Takes payments for the shop: a .NET API with a small web dashboard.", path: "README.md", line: 3 },
+      dotnet: { solution: "Service.slnx", projects: { web: 1, app: 0, library: 0, test: 1 } },
+      owners: { path: ".github/CODEOWNERS", fallback: { value: ["@acme/payments"], line: 1 }, pathRules: 1 },
+      packages: [
+        { path: "package.json", manager: "pnpm", common: [{ name: "build", line: 5 }, { name: "test", line: 6 }], others: [{ name: "release" }] },
+        { path: "tools/package.json", manager: "pnpm", common: [], others: [{ name: "codegen" }] },
+        { path: "web/package.json", manager: "npm", common: [{ name: "build" }, { name: "test" }, { name: "dev" }], others: [] },
+      ],
+    });
+    expect(result.text).toContain(
+      [
+        "About: Takes payments for the shop: a .NET API with a small web dashboard.",
+        "Files: 13 on main",
+      ].join("\n"),
+    );
+    expect(result.text).toContain(
+      [
+        ".NET: dotnet build Service.slnx · dotnet test Service.slnx · 2 projects (1 web, 1 test)",
+        "Scripts: pnpm run build · pnpm run test (+1 more)",
+        "         in web/: npm run build · npm run test · npm run dev",
+        "         in tools/: pnpm run codegen",
+        "Owners: @acme/payments (.github/CODEOWNERS:1), +1 path rule",
+      ].join("\n"),
+    );
+    expect(result.text).toContain("Commands are as the repo declares them; the brain never runs them.");
+  });
+
+  it("lists every script with its command and line when detailed", async () => {
+    const store = await enrolled("polyglot-service");
+
+    const result = await repoCard({ store, access: local }, LOCAL_CALLER, "polyglot-service", "detailed");
+
+    expect(result.text).toContain("About (README.md:3): Takes payments");
+    expect(result.text).toMatch(/Scripts in web\/package.json \(npm\):\n {2}npm run build +vite build {2}\(line 5\)/);
+  });
+
+  it("says plainly when the repo declares none of it", async () => {
+    const store = new SqliteStore(":memory:");
+    await enrolRepo(store, { path: makeRepo({ "a.ts": "1" }), name: "bare" });
+    await syncRepo(store, "bare");
+
+    const result = await repoCard({ store, access: local }, LOCAL_CALLER, "bare", "concise");
+
+    expect(result.text).toContain("Owners: not declared (no CODEOWNERS)");
+    expect(result.text).not.toMatch(/About|Scripts|\.NET|Commands are/);
+  });
+});
+
+describe("repo card neighbours", () => {
+  it("names the repos it calls and the repos that call it, not counting its own tests", async () => {
+    const store = await enrolled("orders-api", "shop-web");
+    const deps = { store, access: local };
+
+    const api = await repoCard(deps, LOCAL_CALLER, "orders-api", "concise");
+    const web = await repoCard(deps, LOCAL_CALLER, "shop-web", "concise");
+
+    expect(api.ok && api.data.neighbours).toEqual({ calls: [], calledBy: [{ repo: "shop-web", count: 1, suffix: false }] });
+    expect(api.text).toContain("Called by: shop-web (1 call)");
+    expect(web.ok && web.data.neighbours).toEqual({ calls: [{ repo: "orders-api", count: 1, suffix: false }], calledBy: [] });
+    expect(web.text).toContain("Calls: orders-api (1 endpoint)");
+  });
+
+  it("doesn't link repos just because both use the root path", async () => {
+    const store = await enrolled("status-api", "status-checks");
+
+    const result = await repoCard({ store, access: local }, LOCAL_CALLER, "status-checks", "concise");
+
+    // Both endpoints are called, but only /status names status-api; every web app serves "/".
+    expect(result.ok && result.data.neighbours.calls).toEqual([{ repo: "status-api", count: 1, suffix: false }]);
+  });
+
+  it("never names a repo the caller can't read", async () => {
+    const store = await enrolled("orders-api", "shop-web");
+    const onlyApi: AccessPolicy = { readableRepos: async () => new Set(["orders-api"]) };
+
+    const result = await repoCard({ store, access: onlyApi }, LOCAL_CALLER, "orders-api", "concise");
+
+    expect(result.text).not.toContain("shop-web");
+    expect(result.text).toContain("Neighbours: none found among enrolled repos");
   });
 });
