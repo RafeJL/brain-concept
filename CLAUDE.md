@@ -56,6 +56,9 @@ calls it; nothing is ever moved out of the harness into here.
   from folders in `test/fixtures/repos/` (`repoFromFixture`); don't depend on repos on the
   developer's machine. `test/fixtures` is excluded from the typecheck: fixtures are samples, not
   project code.
+- Changes to what the brain extracts or answers also get a pass through
+  `docs/manual-testing.md` (playground, real repos, a fresh Claude Code session). Keep its
+  expected outputs, and the README's examples and capability lists, in step with the code.
 - The MCP server writes protocol frames only to stdout. Logs go to stderr.
 - On Citation laptops the `node_modules/.bin` shims are blocked by group policy. Run tools
   through `node` (see the npm scripts) and use TypeScript 6, because TypeScript 7 is a native binary.

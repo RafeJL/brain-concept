@@ -2,192 +2,257 @@
 
 Organisation-wide engineering context for coding agents, served over MCP.
 
-The brain indexes the organisation's repositories and answers narrow questions ("what is this
-repo?", "who calls this endpoint?") with small, cited answers. Each answer names the commit
-it describes, how far behind the tracked branch that is, and how the fact was made. The
-Citation delivery harness calls it; it never moves code out of the harness.
+The brain indexes the organisation's repositories and answers narrow questions with small, cited
+answers: *what is this repo, how do I build it, who owns it, who calls this endpoint, what breaks
+if I change this file?* An agent asks for exactly what it needs instead of cloning and reading
+whole repositories. Every answer says which commit it describes, how far behind the tracked
+branch that is, and how the fact was made, so the agent knows how far to trust it.
 
-Read [`docs/architecture.md`](docs/architecture.md) first. The evidence behind the design is in
-[`docs/research.md`](docs/research.md), and dated decisions in [`docs/decisions.md`](docs/decisions.md).
+It is a separate service. The Citation delivery harness (`citation-harness-library`) calls it
+over MCP and keeps all of its own skills.
 
-**Status:** phase 1 (seam graph) and phase 3a (richer repo cards) complete. HTTP routes and calls
-are extracted from TS/JS and C#/ASP.NET code and from OpenAPI/Swagger specs. Repo cards say how to
-build and test a repo, who owns it, what it says it is and which repos it talks to.
-`brain_repo_card`, `brain_find_consumers` and `brain_impact` work over MCP, and enrolled repos
-re-sync themselves when their branch moves. Phase 2 (harness evals) waits on the integration
-decision.
+**Status:** local proof of concept. Three MCP tools work, and enrolled repos keep themselves up
+to date. See [Where it's going](#where-its-going).
 
-## Requirements
+## What it can do today
 
-- Node 22.13 or later (uses the built-in `node:sqlite`, so there are no native builds)
-- git on `PATH`
+| Question | Tool | What answers it |
+|---|---|---|
+| What is this repo, how do I build and test it, who owns it, what does it talk to? | `brain_repo_card` | README, package.json scripts and lockfiles, .NET solutions and projects, CODEOWNERS, the seam graph |
+| Who serves this endpoint, and who calls it? | `brain_find_consumers` | HTTP routes and calls extracted from code and OpenAPI specs in every enrolled repo |
+| What would break if I changed this repo, file or endpoint? | `brain_impact` | The routes declared there, and every caller of each one across repos |
+
+All three are read-only. They answer in a few lines by default, and `format: "detailed"` (or
+`--detailed` on the CLI) gives more. The examples below are real output from the
+[RealWorld](https://github.com/gothinkster/realworld) example apps.
+
+### "What is this repo?": `brain_repo_card`
+
+```
+aspnet-api  @a397d11 · up to date · parser-built
+Remote: https://github.com/gothinkster/aspnetcore-realworld-example-app.git
+About: ASP.NET Core codebase containing real world examples (CRUD, auth, advanced patterns, etc.) that adheres to the RealWorld spec and API.
+Files: 114 on origin/master
+Languages: C# 78 · Other 9 · Markdown 8 · JSON 6 · MSBuild 5 (+5 more)
+.NET: dotnet build Conduit.slnx · dotnet test Conduit.slnx · 3 projects (1 web, 1 app, 1 test)
+Owners: not declared (no CODEOWNERS)
+Seams: 19 routes, 0 calls via cs-routes
+Called by: react-web (22 calls)
+
+brain_impact and brain_find_consumers give the endpoints and file:line pointers.
+Commands are as the repo declares them; the brain never runs them.
+```
+
+| Line | Where it comes from |
+|---|---|
+| **About** | The README's first real paragraph. Badges, headings, code and "Run this:" lead-ins are skipped. |
+| **.NET** | The shallowest `.sln`/`.slnx`. `dotnet test` only appears when a test project exists. Projects are counted as web, app, library or test. |
+| **Scripts** | `package.json` scripts (build, test, lint, typecheck, start, dev first), run with the package manager of the nearest lockfile: `npm run`, `pnpm run`, `yarn run` or `bun run`. A script in a subfolder shows as `in evals/: npm run test`. |
+| **Owners** | CODEOWNERS, found the way GitHub finds it (`.github/`, the root, then `docs/`). Shows the owners of `*` and how many path rules there are. |
+| **Seams** | How many HTTP routes and calls were found, and by which extractors. Code languages with no extractor yet show as `not extracted: Python`. |
+| **Calls / Called by** | Repos this one calls and repos that call it, among the repos you can read. Worked out on each request, so always current. |
+
+An unknown name returns the list of enrolled repos, which is how an agent finds out what exists.
+
+### "Who serves and who calls this endpoint?": `brain_find_consumers`
+
+```
+GET /api/articles/{} · 2 servers, 1 caller in 3 repos · parser-built
+
+Served by
+  aspnet-api · src/Conduit/Features/Articles/ArticlesController.cs:39-41 · GET /articles/{slug} · suffix
+  express-api · src/app/routes/article/article.controller.ts:87-98 · GET /articles/:slug · suffix
+
+Called by
+  react-web · src/agent.js:62 · GET `/articles/${slug}` · suffix
+
+suffix = matched ignoring a base path such as /api.
+Indexed: aspnet-api @a397d11 · up to date; express-api @30b68e1 · up to date; react-web @ee72eba · up to date
+24 calls use URLs only known at run time (react-web · src/agent.js:20-26, …), so a missing caller isn't proof there is none.
+```
+
+- **Path styles:** `GET /api/articles/:slug`, `/articles/{slug}` or a full URL all work.
+  `:slug`, `{slug}`, `${slug}`, numbers and GUIDs all count as parameters.
+- **Base paths:** matches can ignore a base path such as `/api`, which is often added at run time,
+  and are labelled `suffix` when they do.
+- **Duplicates:** an endpoint declared in code and in an OpenAPI spec is shown once, citing the
+  code.
+
+### "What breaks if I change this?": `brain_impact`
+
+```
+aspnet-api · src/Conduit/Features/Articles/ArticlesController.cs · 6 routes, 9 callers in 1 repo · parser-built
+
+GET /articles  (14-22)
+  ← react-web · src/agent.js:48
+  ← react-web · src/agent.js:50
+  …
+DELETE /articles/{slug}  (58-64)
+  ← react-web · src/agent.js:54
+```
+
+Pass a repo, a file in it (`--path`) or one endpoint (`--route`). Routes with the most callers
+come first, and callers in the same repo (its own tests) are marked `same repo`.
+
+### Every answer says how far to trust it
+
+- **`@a397d11 · up to date`**: the commit the answer describes, and how many commits behind the
+  tracked branch that is (`2 commits behind origin/main`).
+- **`parser-built`**: made by parsers, with no LLM involved. Later phases add `human-reviewed`
+  and `llm-generated` facts, each labelled.
+- **File and line pointers**, never pasted code. Confirm in the repo before editing.
+- **Gaps are stated:** calls whose URL is only known at run time are counted and located, never
+  guessed, so "no callers found" is never taken as proof.
+- **Permissions:** an answer only includes repos the caller may read. Locally that is every
+  repo you enrolled; hosted, it will follow GitHub permissions.
+
+### It keeps itself up to date
+
+`brain hooks install` adds a git hook to each enrolled repo. Whenever the branch it tracks moves
+(a fetch, pull, merge or rebase), the brain re-syncs that repo in the background. Repos track
+what has been merged (`origin/main`), so your editor's auto-fetch is enough, and your own
+unpushed commits never leak into answers. Only files that changed are re-read. See
+[Keeping it fresh](#keeping-it-fresh).
+
+## What it reads
+
+| | Routes (served) | Calls (made) |
+|---|---|---|
+| **TypeScript / JavaScript** | Express, Fastify, NestJS | `fetch`, `axios`, and `<client>.get/post/…` on receivers named like clients (`api`, `http`, `ordersClient`, …) |
+| **C# / ASP.NET** | Attribute-routed controllers, minimal APIs (including `MapGroup`) | `HttpClient` (and its JSON extensions), `HttpRequestMessage`, RestSharp, Refit |
+| **Any language** | OpenAPI 3 and Swagger 2 specs | |
+
+| Repo facts | From |
+|---|---|
+| Build and test | `package.json`, `package-lock.json` / `pnpm-lock.yaml` / `yarn.lock` / `bun.lock`, `.sln`, `.slnx`, `.csproj` |
+| Owners | `CODEOWNERS` |
+| Summary | Root `README.md` |
+
+Every other file still counts towards the repo's file and language inventory. Files under
+`node_modules`, `vendor` and test-fixture folders are not treated as the repo's own manifests.
+
+## What it can't do yet
+
+- **Other languages' seams:** Python, Java, Go and PHP are inventoried and flagged as
+  `not extracted`, but their routes and calls aren't read yet.
+- **Other kinds of link:** only HTTP. Message queues, events and gRPC are not linked.
+- **Symbol-level questions** ("who calls this method?"): phase 3b, symbol maps.
+- **Search and full documents:** `brain_search` and `brain_get` are planned.
+- **Curated knowledge:** glossary, ADRs, confirmed owners and purposes come in phase 4.
+- **Generated wiki pages:** phase 5.
+- **Running anything:** commands are reported as the repo declares them and never run.
+- **Some routes are skipped on purpose:** conventionally routed MVC actions (the route table
+  isn't in the file), and calls whose URL is built at run time (counted instead).
+- **Hosting:** today it runs on your machine against your local clones. Hosted (Azure,
+  GitHub-backed permissions, webhooks) is phase 6.
+
+## Quick start
+
+Requires Node 22.13 or later (for the built-in `node:sqlite`, so there are no native builds) and
+git on `PATH`.
 
 ```
 npm ci
-npm run check        # typecheck + tests
+npm run check                                        # typecheck + tests
+npm run brain -- repo add ..\some-repo               # enrol a local clone
+npm run brain -- sync                                # index it
+npm run brain -- hooks install                       # keep it fresh from now on
+npm run brain -- card some-repo                      # what an agent will see
 ```
 
-The npm scripts call `tsc` and `vitest` through `node` rather than through the `node_modules/.bin`
-shims, because group policy on Citation laptops blocks those shims.
+The npm scripts call `tsc` and `vitest` through `node` rather than the `node_modules/.bin` shims,
+because group policy on Citation laptops blocks those shims.
+
+## Use it from Claude Code
+
+Register the MCP server once, at user scope, so every session in every folder has it:
+
+```
+claude mcp add --scope user citation-brain -- node C:\Users\<you>\Repos\brain-concept\bin\brain-mcp.mjs
+```
+
+Run `/mcp` in a session to check it is connected. The server tells Claude when to use it, so you
+don't need to name the tools. Questions like these go to the brain:
+
+- *How do I run the tests in aspnet-api?*
+- *Who owns orders-api, and what calls it?*
+- *If I change `GET /articles/:slug` in express-api, what else breaks?*
+- *What would break if I removed the DELETE endpoint in ArticlesController?*
+
+Start a new session after the brain changes, so it picks up new tool descriptions.
 
 ## Commands
 
 Run from this folder with `npm run brain -- <command>`, or from anywhere with
-`node C:\Users\Rafe.Loveday\Repos\brain-concept\bin\brain.mjs <command>`.
+`node <path-to>\brain-concept\bin\brain.mjs <command>`. The `card`, `consumers` and `impact`
+commands print exactly what an agent gets over MCP.
 
 | Command | Does |
 |---|---|
-| `repo add <path> [--name n] [--ref ref]` | Enrol a local clone. The name defaults to the folder; the ref defaults to what `origin/HEAD` points at (usually `origin/main`, i.e. what has been merged), or the checked-out branch if there is no remote. |
+| `repo add <path> [--name n] [--ref ref]` | Enrol a local clone. The name defaults to the folder; the ref defaults to what `origin/HEAD` points at (usually `origin/main`), or the checked-out branch if there is no remote. |
 | `repo list` | Enrolled repos, the commit each is indexed at, and how far behind it is. |
-| `repo set-ref <name> <ref>` | Index a different ref, e.g. move a repo enrolled on `main` to `origin/main`. |
+| `repo set-ref <name> <ref>` | Index a different branch, e.g. `origin/release`. Updates the repo's hook if it has one. |
 | `repo remove <name>` | Remove a repo, every fact about it, and its hook. |
-| `sync [<name>]` | Index the tracked branch's committed tree (not your working copy). All repos if no name. |
-| `hooks install [<name>]` | Re-sync automatically whenever the tracked ref moves: pull, merge, rebase or a plain fetch. All repos if no name. |
-| `hooks remove [<name>]` / `hooks status` | Stop automatic syncing / see which repos sync automatically. |
-| `card <name> [--detailed]` | Print exactly what an agent gets from `brain_repo_card`: what the repo says it is, how to build and test it, who owns it, and which repos it calls and is called by. |
-| `consumers "<METHOD /path>" [--detailed]` | Print what an agent gets from `brain_find_consumers`: who serves and who calls an endpoint. |
-| `impact <repo> [--path file] [--route "<METHOD /path>"] [--detailed]` | Print what an agent gets from `brain_impact`: the routes a repo or file serves, and who calls each one. |
+| `sync [<name>]` | Index the tracked branch's committed tree (never your working copy). All repos if no name. |
+| `hooks install [<name>]` | Re-sync automatically whenever the tracked branch moves. All repos if no name. |
+| `hooks remove [<name>]` / `hooks status` | Stop automatic syncing / see which repos sync automatically, or why one can't. |
+| `card <name> [--detailed]` | `brain_repo_card`. `--detailed` adds every script with its command and line, and a language table. |
+| `consumers "<METHOD /path>" [--detailed]` | `brain_find_consumers`. |
+| `impact <repo> [--path file] [--route "<METHOD /path>"] [--detailed]` | `brain_impact`. |
 
-The store lives at `%USERPROFILE%\.brain\brain.db`. Set `BRAIN_DB` to use a different file,
-for example a throwaway one while testing.
+The store lives at `%USERPROFILE%\.brain\brain.db`. Set `BRAIN_DB` to use a different file, for
+example a throwaway one while testing.
 
 ## Keeping it fresh
 
 `brain hooks install` puts a git `reference-transaction` hook in each enrolled repo. When the
-tracked ref moves (including on a plain `git fetch`, which has no hook of its own) it starts
-`brain sync <name>` in the background and returns straight away, so git is never slowed down.
-Runs are logged to `%USERPROFILE%\.brain\hooks.log`. With a repo tracking `origin/main`, your
-editor's auto-fetch is enough to keep it current; "up to date" always means "as of the last
-fetch".
+tracked ref moves, including on a plain `git fetch`, which has no hook of its own, it starts
+`brain sync <name>` in the background and returns at once, so git is never slowed down. Runs are
+logged to `%USERPROFILE%\.brain\hooks.log`. Read it with `-Encoding utf8` in Windows PowerShell.
+
+This works with any remote, not just GitHub. "Up to date" means "as of the last fetch".
 
 The hook won't be installed if the repo already has its own `reference-transaction` hook, or if
-`core.hooksPath` points inside the repo (as husky does), because it would change tracked files.
-`hooks status` says why. Run `brain sync <name>` from your own hook manager instead.
+`core.hooksPath` points inside the repo (as husky does), because that would change tracked files.
+`hooks status` says why. In that case, run `brain sync <name>` from your own hook manager.
 
-## Use it from Claude Code
+Hooks run whichever brain code is checked out in this folder.
 
-Register the MCP server once (user scope, so it is available in every repo):
+## Testing
 
-```
-claude mcp add --scope user citation-brain -- node C:\Users\Rafe.Loveday\Repos\brain-concept\bin\brain-mcp.mjs
-```
+- `npm run check`: typecheck and the full test suite. Each test builds its own throwaway git
+  repos from `test/fixtures/`.
+- [`docs/manual-testing.md`](docs/manual-testing.md): try every feature by hand. It covers a
+  playground built from real repos with a local stand-in for GitHub (git commands only, nothing
+  added to this project), real open-source repos, and checks that Claude Code uses the brain
+  unprompted. Run it before merging changes to what the brain extracts or answers.
 
-Then, in any Claude Code session, ask something like "use brain_repo_card to tell me about
-citation-harness-library". Run `/mcp` to check the server is connected.
+## Where it's going
 
-## Try it (phase 0 test script)
+| Phase | | Status |
+|---|---|---|
+| 0 | Walking skeleton: enrol, sync, repo card over MCP | ✅ |
+| 1 | Seam graph: HTTP routes and calls in TS/JS, C# and OpenAPI; `brain_find_consumers`, `brain_impact` | ✅ |
+| | Auto-sync through a git hook | ✅ |
+| 3a | Richer repo cards: build, test, owners, summary, neighbours | ✅ |
+| 2 | Evals proving the harness does better with the brain | Waiting on the decision to integrate with the harness |
+| 3b | Symbol maps: symbol-level impact, `brain_get` | Next |
+| 4 | Curated context: glossary, ADRs, confirmed owners and purposes (human-reviewed) | Planned |
+| 5 | Deep wiki pages: generated, cited and checked (llm-generated) | Planned |
+| 6 | Hosted on Azure: Postgres, GitHub App webhooks, per-user permissions | Planned |
 
-1. Enrol and index the harness repo:
-   ```
-   npm run brain -- repo add ..\citation-harness-library
-   npm run brain -- sync
-   npm run brain -- card citation-harness-library
-   ```
-   Expect `@<sha> · up to date · parser-built` and a language breakdown led by Markdown.
-2. Run `npm run brain -- sync` again. Expect `+0 ~0 -0`, because unchanged files are skipped.
-3. Clone a repo in another stack and enrol it:
-   ```
-   mkdir C:\Users\Rafe.Loveday\Repos\brain-test-repos
-   git clone https://github.com/gothinkster/node-express-realworld-example-app C:\Users\Rafe.Loveday\Repos\brain-test-repos\realworld-express
-   npm run brain -- repo add C:\Users\Rafe.Loveday\Repos\brain-test-repos\realworld-express
-   npm run brain -- sync realworld-express
-   npm run brain -- repo list
-   ```
-4. Staleness: make a commit on `main` in any enrolled test repo. `repo list` should say
-   `1 commit behind main` until you sync again.
-5. Register the MCP server (above) and ask Claude Code for both repo cards.
-6. `npm run brain -- card nope` should list only the repos you enrolled.
-
-## Try it (phase 1a test script)
-
-The RealWorld ("Conduit") apps are many frontends and backends built against one API, so they
-make ready-made cross-repo test data.
-
-1. Clone a backend and a frontend and enrol them:
-   ```
-   git clone https://github.com/gothinkster/node-express-realworld-example-app C:\Users\Rafe.Loveday\Repos\brain-test-repos\node-express-realworld-example-app
-   git clone https://github.com/gothinkster/react-redux-realworld-example-app C:\Users\Rafe.Loveday\Repos\brain-test-repos\react-redux-realworld-example-app
-   npm run brain -- repo add C:\Users\Rafe.Loveday\Repos\brain-test-repos\node-express-realworld-example-app --name express-api
-   npm run brain -- repo add C:\Users\Rafe.Loveday\Repos\brain-test-repos\react-redux-realworld-example-app --name react-web
-   npm run brain -- sync
-   ```
-2. `npm run brain -- card express-api` should say about 20 routes; `card react-web` about 22
-   calls, plus 4 with run-time URLs (the superagent wrapper in `src/agent.js`).
-3. `npm run brain -- consumers "GET /api/articles/:slug"` should list the Express controller as
-   the server and `react-web · src/agent.js:62` as the caller, both marked `suffix` because the
-   `/api` base path is not in either repo's route or call.
-4. Try a method filter: `consumers "DELETE /profiles/{username}/follow"` should give one server and
-   one caller.
-5. Start a **new** Claude Code session and ask: *"If I change the GET /articles/:slug endpoint in
-   express-api, what else would break?"* It should call `brain_find_consumers`.
-
-## Try it (phase 1b test script: C#)
-
-1. Enrol the ASP.NET RealWorld backend alongside the two repos above:
-   ```
-   git clone https://github.com/gothinkster/aspnetcore-realworld-example-app C:\Users\Rafe.Loveday\Repos\brain-test-repos\aspnetcore-realworld-example-app
-   npm run brain -- repo add C:\Users\Rafe.Loveday\Repos\brain-test-repos\aspnetcore-realworld-example-app --name aspnet-api
-   npm run brain -- sync
-   ```
-   `card aspnet-api` should show 19 routes via cs-routes.
-2. `npm run brain -- consumers "GET /api/articles/:slug"` should now list **two** servers
-   (the C# `ArticlesController` and the Express controller) for the one React caller. The
-   run-time URL note should point at `react-web · src/agent.js:20-26`, the superagent wrapper.
-3. `npm run brain -- impact aspnet-api --path src/Conduit/Features/Articles/ArticlesController.cs`
-   should list 6 routes and 9 callers, all in `react-web · src/agent.js`.
-4. A bigger C# check: clone `https://github.com/dotnet/eShop` into `brain-test-repos`, enrol it
-   as `eshop`, sync, and run `impact eshop --route "GET /api/catalog/items/{id}"`. Expect one
-   route (from the minimal API, with the two OpenAPI specs listed as "also declared in") and
-   the functional tests as callers.
-5. In a **new** Claude Code session ask: *"What would break if I removed the DELETE endpoint in
-   aspnet-api's ArticlesController?"* It should call `brain_impact` or `brain_find_consumers`.
-
-## Try it (automatic freshness)
-
-1. Repos enrolled before this change track the local branch. Move them to what has been merged:
-   ```
-   npm run brain -- repo set-ref react-web origin/master
-   npm run brain -- repo set-ref express-api origin/master
-   npm run brain -- repo set-ref aspnet-api origin/master
-   npm run brain -- repo set-ref eshop origin/main
-   ```
-   (`repo list` shows each repo's branch; RealWorld repos use `master`.)
-2. `npm run brain -- hooks install` then `npm run brain -- hooks status`: every repo should say
-   `syncs automatically`.
-3. Make any commit on a tracked repo's branch, or `git fetch` one that has new commits upstream.
-   About a second later `npm run brain -- repo list` shows it at the new commit without a sync,
-   and `%USERPROFILE%\.brain\hooks.log` shows the run.
-4. A commit on another branch changes nothing.
-5. `npm run brain -- hooks remove` takes the hooks out again.
-
-## Try it (phase 3a: richer repo cards)
-
-Run `npm run brain -- sync` first. Existing repos are re-read in full once, because the readers
-are new.
-
-1. `npm run brain -- card aspnet-api` should show:
-   - `About:` with the README's description;
-   - `.NET: dotnet build Conduit.slnx · dotnet test Conduit.slnx · 3 projects (1 web, 1 app, 1 test)`;
-   - `Called by: react-web (22 calls)`.
-2. `npm run brain -- card eshop` should pick the root `eShop.slnx` over
-   `src/ClientApp/ClientApp.sln`, report 9 test projects, and show the root package.json's
-   Playwright scripts.
-3. `npm run brain -- card react-web` should say `Calls: aspnet-api (19 endpoints) · express-api (19 endpoints)`.
-4. `npm run brain -- card citation-harness-library` should show `in evals/: npm run test · npm run typecheck`.
-   `--detailed` lists every script with its command and line.
-5. `npm run brain -- card express-api` should **not** list eshop as a neighbour. The only link
-   between them was both using `/`, which says nothing about which service is meant.
-6. In a **new** Claude Code session ask *"how do I run the tests in aspnet-api?"* and *"what
-   talks to express-api?"*. Both should call `brain_repo_card`.
+Read [`docs/architecture.md`](docs/architecture.md) for the design,
+[`docs/research.md`](docs/research.md) for the evidence behind it, and
+[`docs/decisions.md`](docs/decisions.md) for every dated decision.
 
 ## Layout
 
 ```
 bin/            launchers that run the TypeScript from any folder
-src/core/       types, git access, language detection
+src/core/       types, git access, language detection, HTTP path matching
 src/store/      Store interface, SQLite implementation, migrations
-src/ingest/     registry, sync, parsing, extractor plugins and fact readers (the write side)
+src/ingest/     registry, sync, hooks, extractor plugins and fact readers (the write side)
 src/serve/      access policy, freshness, tools, MCP server (the read side)
-test/           vitest; each test builds its own throwaway git repos
-docs/           architecture, research, decisions
+test/           vitest; fixtures are real files in their own languages
+docs/           architecture, research, decisions, manual testing
 ```
