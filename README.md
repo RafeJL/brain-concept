@@ -10,9 +10,12 @@ Citation delivery harness calls it; it never moves code out of the harness.
 Read [`docs/architecture.md`](docs/architecture.md) first. The evidence behind the design is in
 [`docs/research.md`](docs/research.md), and dated decisions in [`docs/decisions.md`](docs/decisions.md).
 
-**Status:** phase 1 (seam graph) complete. HTTP routes and calls are extracted from TS/JS and
-C#/ASP.NET code and from OpenAPI/Swagger specs. `brain_repo_card`, `brain_find_consumers` and
-`brain_impact` work over MCP. Phase 2 (proving it with harness evals) is next.
+**Status:** phase 1 (seam graph) and phase 3a (richer repo cards) complete. HTTP routes and calls
+are extracted from TS/JS and C#/ASP.NET code and from OpenAPI/Swagger specs. Repo cards say how to
+build and test a repo, who owns it, what it says it is and which repos it talks to.
+`brain_repo_card`, `brain_find_consumers` and `brain_impact` work over MCP, and enrolled repos
+re-sync themselves when their branch moves. Phase 2 (harness evals) waits on the integration
+decision.
 
 ## Requirements
 
@@ -41,7 +44,7 @@ Run from this folder with `npm run brain -- <command>`, or from anywhere with
 | `sync [<name>]` | Index the tracked branch's committed tree (not your working copy). All repos if no name. |
 | `hooks install [<name>]` | Re-sync automatically whenever the tracked ref moves: pull, merge, rebase or a plain fetch. All repos if no name. |
 | `hooks remove [<name>]` / `hooks status` | Stop automatic syncing / see which repos sync automatically. |
-| `card <name> [--detailed]` | Print exactly what an agent gets from `brain_repo_card`. |
+| `card <name> [--detailed]` | Print exactly what an agent gets from `brain_repo_card`: what the repo says it is, how to build and test it, who owns it, and which repos it calls and is called by. |
 | `consumers "<METHOD /path>" [--detailed]` | Print what an agent gets from `brain_find_consumers`: who serves and who calls an endpoint. |
 | `impact <repo> [--path file] [--route "<METHOD /path>"] [--detailed]` | Print what an agent gets from `brain_impact`: the routes a repo or file serves, and who calls each one. |
 
@@ -157,13 +160,33 @@ make ready-made cross-repo test data.
 4. A commit on another branch changes nothing.
 5. `npm run brain -- hooks remove` takes the hooks out again.
 
+## Try it (phase 3a: richer repo cards)
+
+Run `npm run brain -- sync` first. Existing repos are re-read in full once, because the readers
+are new.
+
+1. `npm run brain -- card aspnet-api` should show:
+   - `About:` with the README's description;
+   - `.NET: dotnet build Conduit.slnx · dotnet test Conduit.slnx · 3 projects (1 web, 1 app, 1 test)`;
+   - `Called by: react-web (22 calls)`.
+2. `npm run brain -- card eshop` should pick the root `eShop.slnx` over
+   `src/ClientApp/ClientApp.sln`, report 9 test projects, and show the root package.json's
+   Playwright scripts.
+3. `npm run brain -- card react-web` should say `Calls: aspnet-api (19 endpoints) · express-api (19 endpoints)`.
+4. `npm run brain -- card citation-harness-library` should show `in evals/: npm run test · npm run typecheck`.
+   `--detailed` lists every script with its command and line.
+5. `npm run brain -- card express-api` should **not** list eshop as a neighbour. The only link
+   between them was both using `/`, which says nothing about which service is meant.
+6. In a **new** Claude Code session ask *"how do I run the tests in aspnet-api?"* and *"what
+   talks to express-api?"*. Both should call `brain_repo_card`.
+
 ## Layout
 
 ```
 bin/            launchers that run the TypeScript from any folder
 src/core/       types, git access, language detection
 src/store/      Store interface, SQLite implementation, migrations
-src/ingest/     registry, sync, parsing and extractor plugins (the write side)
+src/ingest/     registry, sync, parsing, extractor plugins and fact readers (the write side)
 src/serve/      access policy, freshness, tools, MCP server (the read side)
 test/           vitest; each test builds its own throwaway git repos
 docs/           architecture, research, decisions

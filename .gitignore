@@ -4,3 +4,7 @@ coverage/
 .brain/
 *.db
 *.db-journal
+
+# .NET build output; an IDE restoring the fixture projects creates these
+bin/
+obj/

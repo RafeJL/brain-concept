@@ -67,7 +67,10 @@ async function main(argv: string[]): Promise<void> {
         } else if (sub === "set-ref" && arg && extra) {
           await setRepoRef(store, arg, extra);
           console.log(`${arg} now tracks ${extra}. Next: brain sync ${arg}`);
-          if ((await hookStatus(store, arg)).installed) await installHook(store, arg, hookCommand());
+          if ((await hookStatus(store, arg)).installed) {
+            await installHook(store, arg, hookCommand());
+            console.log(`Its hook now watches ${extra}.`);
+          }
         } else if (sub === "remove" && arg) {
           if (store.getRepo(arg)) await removeHook(store, arg);
           removeRepo(store, arg);
@@ -155,7 +158,7 @@ function print(result: ToolResult<unknown>): void {
 }
 
 function printSync(result: SyncResult): void {
-  const from = result.previousCommit ? `${result.previousCommit.slice(0, 7)} → ` : "";
+  const from = result.previousCommit ? `${result.previousCommit.slice(0, 7)} -> ` : "";
   const extract = result.fullExtract ? "extractors changed, re-read every file" : `${result.extracted} files with seams`;
   console.log(
     `${result.repo}: ${from}${result.commit.slice(0, 7)} ` +

@@ -1,0 +1,11 @@
+# Default owners for everything in the repo.
+*                     @acme/platform
+
+# The API belongs to the orders team.
+/src/api/             @acme/orders @jane-doe
+
+docs/**               @acme/tech-writers  # docs team reviews prose
+
+# A later * rule wins over the first one, as on GitHub.
+*                     @acme/shop-core
+/generated/

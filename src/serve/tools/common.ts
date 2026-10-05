@@ -1,4 +1,4 @@
-import type { Endpoint } from "../../core/http.js";
+import { hasLiteralSegment, matchEndpoints, type Endpoint, type MatchQuality } from "../../core/http.js";
 import type { Seam } from "../../core/seams.js";
 import type { Freshness, RepoRecord, RepoState } from "../../core/types.js";
 import type { Store } from "../../store/store.js";
@@ -49,6 +49,27 @@ export async function requireSyncedRepo(deps: ToolDeps, caller: Caller, name: st
 /** A seam with a key, as an endpoint to match against. */
 export function endpointOf(seam: Seam): Endpoint {
   return { method: seam.method, key: seam.key! };
+}
+
+/** A call that reaches a route, and how well the two matched. */
+export interface SeamLink {
+  call: Seam;
+  route: Seam;
+  match: MatchQuality;
+}
+
+/**
+ * Every call that reaches one of the routes. A key with no literal segment (`/`, `/{}`) only links
+ * within its own repo: every web app serves `/`, so across repos it says nothing about which one.
+ */
+export function linkCalls(calls: readonly Seam[], routes: readonly Seam[]): SeamLink[] {
+  return calls.flatMap((call) =>
+    routes.flatMap((route) => {
+      if (call.repo !== route.repo && !hasLiteralSegment(route.key!)) return [];
+      const match = matchEndpoints(endpointOf(call), endpointOf(route));
+      return match ? [{ call, route, match }] : [];
+    }),
+  );
 }
 
 /** "1 route", "3 routes". */

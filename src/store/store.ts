@@ -1,3 +1,4 @@
+import type { Fact } from "../core/facts.js";
 import type { Seam, SeamCoverage, SeamKind } from "../core/seams.js";
 import type { FileRecord, LanguageShare, RepoRecord, RepoState } from "../core/types.js";
 
@@ -8,9 +9,10 @@ export interface SyncUpdate {
   extractorVersion: number;
   upsert: FileRecord[];
   remove: string[];
-  /** Files whose seams are replaced: old seams for these paths are dropped, `seams` inserted. */
-  seamPaths: string[];
+  /** Files re-read in this sync: their old seams and facts are dropped, `seams` and `facts` inserted. */
+  extractedPaths: string[];
   seams: Seam[];
+  facts: Fact[];
 }
 
 export interface SeamFilter {
@@ -42,6 +44,9 @@ export interface Store {
 
   seams(filter: SeamFilter): Seam[];
   seamCoverage(repo: string): SeamCoverage;
+
+  /** Every fact read from the repo's well-known files, ordered by path and line. */
+  facts(repo: string): Fact[];
 
   close(): void;
 }

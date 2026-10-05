@@ -37,6 +37,12 @@ calls it; nothing is ever moved out of the harness into here.
   over complete. Skip anything ambiguous; record a call with a run-time URL as unresolved only when
   the receiver is clearly an HTTP client. **Bump `EXTRACTOR_VERSION`** whenever what a plugin
   extracts changes.
+- **Fact readers** in `src/ingest/facts/` read what a repo declares about itself (package.json
+  scripts, lockfiles, .NET solutions and projects, CODEOWNERS, the README's opening paragraph).
+  They follow the plugin rules: pure, one file at a time, bad input gives no facts, and a change
+  bumps `EXTRACTOR_VERSION`. Their fixtures are real files under `test/fixtures/facts/<case>/`,
+  where each case folder plays a repo root. Neighbours are never stored; they come from the seam
+  graph at query time.
 - **Every extractor pattern has a fixture**: a real source file in its own language under
   `test/fixtures/extractors/<language>/`, with the expected seam annotated on the line it starts
   (`// seam: route GET /api/orders/{}`, `# seam:` in YAML, a `<file>.seams` sidecar for JSON).

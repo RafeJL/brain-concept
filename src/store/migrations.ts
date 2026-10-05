@@ -49,4 +49,18 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX seams_by_file ON seams(repo, path);
   CREATE INDEX seams_by_key ON seams(route_key);
   `,
+  `
+  CREATE TABLE facts (
+    id         INTEGER PRIMARY KEY,
+    repo       TEXT NOT NULL,
+    path       TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    value      TEXT NOT NULL,
+    line       INTEGER,
+    commit_sha TEXT NOT NULL,
+    FOREIGN KEY (repo, path) REFERENCES files(repo, path) ON DELETE CASCADE
+  );
+  CREATE INDEX facts_by_file ON facts(repo, path);
+  `,
 ];

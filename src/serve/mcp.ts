@@ -27,9 +27,11 @@ function answer(result: ToolResult<unknown>) {
  */
 export const INSTRUCTIONS =
   "citation-brain holds indexed facts about the organisation's code repositories. When a question " +
-  "is about one of those repositories (what it is, what it is built with, which service serves or " +
-  "calls an HTTP endpoint), ask the brain first instead of searching the web, cloning, or changing " +
-  "folder. Call brain_repo_card with any name to see which repos are enrolled. Before changing, " +
+  "is about one of those repositories or services (what it is, how to build or test it, who owns " +
+  "it, what it depends on or what depends on it, which service serves or calls an HTTP endpoint), " +
+  "ask the brain first instead of searching the web, cloning, or changing folder. People may name " +
+  "a repo by its folder, its GitHub name or the service it runs: call brain_repo_card with any name " +
+  "to see which repos are enrolled. Before changing, " +
   "renaming or removing an HTTP endpoint, call brain_find_consumers to see who else depends on it. " +
   "Before changing a controller, router or service that serves endpoints, call brain_impact. " +
   "Every answer names the commit it describes and how far behind the tracked branch that is; " +
@@ -47,9 +49,11 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: "Repo card",
       description:
-        "Summarise one enrolled repository: what it is built with, how many files, which commit the " +
-        "brain has indexed and how far behind the tracked branch that is. Use it before cloning or " +
-        "grepping a repo you don't know. An unknown name returns the list of repos you can read.",
+        "Summarise one enrolled repository: what it says it is (README), how to build and test it " +
+        "(package.json scripts, .NET solution), who owns it (CODEOWNERS), which repos it calls and " +
+        "which call it, its languages, and which commit the brain has indexed. Use it before building, " +
+        "testing, cloning or grepping a repo you don't know, or when asked what a service is or what " +
+        "it talks to. An unknown name returns the list of repos you can read.",
       inputSchema: {
         repo: z.string().min(1).describe("Enrolled repo name, e.g. citation-harness-library."),
         format: formatSchema,

@@ -8,6 +8,7 @@ import {
   footer,
   groupRoutes,
   lineRange,
+  linkCalls,
   PAGE_SIZE,
   pointer,
   requireSyncedRepo,
@@ -55,14 +56,12 @@ export async function impact(deps: ToolDeps, caller: Caller, input: ImpactInput)
   const routes = deps.store
     .seams({ repos: [input.repo], kind: "http-route", path })
     .filter((route) => !target || matchEndpoints(endpointOf(route), target));
-  const calls = deps.store.seams({ repos: found.readable, kind: "http-call" });
-  const impacts: RouteImpact[] = groupRoutes(routes).map(({ primary: route, also }) => ({
+  const groups = groupRoutes(routes);
+  const links = linkCalls(deps.store.seams({ repos: found.readable, kind: "http-call" }), groups.map((g) => g.primary));
+  const impacts: RouteImpact[] = groups.map(({ primary: route, also }) => ({
     route,
     also,
-    callers: calls.flatMap((seam) => {
-      const match = matchEndpoints(endpointOf(seam), endpointOf(route));
-      return match ? [{ seam, match }] : [];
-    }),
+    callers: links.filter((link) => link.route === route).map(({ call, match }) => ({ seam: call, match })),
   }));
   impacts.sort((a, b) => b.callers.length - a.callers.length || a.route.path.localeCompare(b.route.path) || a.route.startLine - b.route.startLine);
 

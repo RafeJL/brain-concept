@@ -49,7 +49,7 @@ describe("seam sync", () => {
     const { store } = await twoRepos();
     const state = store.getState("api")!;
     // Simulate a store written by older extractors.
-    store.applySync("api", { ...state, extractorVersion: 0, upsert: [], remove: [], seamPaths: ["src/articles.ts"], seams: [] });
+    store.applySync("api", { ...state, extractorVersion: 0, upsert: [], remove: [], extractedPaths: ["src/articles.ts"], seams: [], facts: [] });
     expect(store.seams({ repos: ["api"] })).toEqual([]);
 
     const result = await syncRepo(store, "api");

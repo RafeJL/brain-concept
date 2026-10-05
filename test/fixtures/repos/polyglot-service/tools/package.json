@@ -1,0 +1,6 @@
+{
+  "name": "tools",
+  "scripts": {
+    "codegen": "openapi-typescript openapi.yaml -o client.ts"
+  }
+}
