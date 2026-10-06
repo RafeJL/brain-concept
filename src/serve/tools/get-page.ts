@@ -17,8 +17,16 @@ export interface PageAnswer {
   freshness?: Freshness;
 }
 
+/** What the citation checker found, for the page header. */
+function checkedNote(page: WikiPage): string {
+  if (page.claims === 0) return "citations not checked";
+  const kept = page.claims - page.removed;
+  return `citations checked: ${kept} of ${page.claims} claims kept${page.removed ? ` (${page.removed} removed)` : ""}`;
+}
+
 const CAUTION =
-  "AI-written (llm-generated). Each [path:lines] cites the code a sentence is based on; confirm there before relying on it.";
+  "AI-written (llm-generated). Every claim kept here cites lines that exist and contain what it names; " +
+  "whether it reads them correctly isn't checked, so confirm at the citation before relying on it.";
 
 /** A repo's AI-written wiki: the page list, or one page. Backs `brain_get` and `brain page`. */
 export async function getPage(deps: ToolDeps, caller: Caller, input: PageInput): Promise<ToolResult<PageAnswer>> {
@@ -48,7 +56,7 @@ export async function getPage(deps: ToolDeps, caller: Caller, input: PageInput):
   }
   const freshness = await freshnessOf(repo, { ...state, commit: page.commit });
   const text = [
-    `${repo.name} · ${page.slug} · ${describeFreshness(freshness, repo.ref)} · llm-generated`,
+    `${repo.name} · ${page.slug} · ${describeFreshness(freshness, repo.ref)} · llm-generated · ${checkedNote(page)}`,
     "",
     page.markdown,
     "",

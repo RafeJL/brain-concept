@@ -214,3 +214,26 @@ Each change deletes the code, tests, fixtures and docs it replaces, and updates 
 manual-testing guide and the vault in the same PR. Old code is deleted only once its replacement
 is shown to work: W1 removed the fact readers after real wikis for C#, PHP and Python, and a
 fresh Claude Code session answering from them. Manual-test scaffolding stays out of the repo.
+
+## 2026-10-05: every wiki citation is checked before an agent sees it
+
+`src/wiki/check.ts` runs on each page in the same worktree, so it reads exactly the commit the
+page describes. It uses no AI. Each sentence, list item and table row is a claim. A claim is kept
+only if:
+- it cites lines that exist;
+- no citation spans more than 80 lines;
+- every name it puts in backticks appears in the cited lines.
+
+Matching is by the name's most specific word: dashes and underscores count as the same, and a
+name also counts when it is a cited file or a file next to one. A route's HTTP method must appear
+too. Exact text was too strict, because the AI paraphrases and code is namespaced. Failing claims
+are removed. A page where fewer than half pass isn't published, and its previous version stays.
+
+On the trial wikis about 80% of claims were kept, and every removal read was a real problem:
+- a name cited to a file that doesn't contain it;
+- an inference the code doesn't state;
+- invented example values;
+- 150-line spans.
+
+The checker can't tell whether a claim reads its lines correctly, so pages stay `llm-generated`.
+The rules change only on evidence from real pages, with the case added to the tests.

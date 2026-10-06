@@ -39,7 +39,9 @@ calls it; nothing is ever moved out of the harness into here.
   extracts changes.
 - **Wiki pages** come from Claude Code run headless through `src/wiki/runner.ts`, the only place
   the brain talks to an AI. Runs are isolated (`--safe-mode --strict-mcp-config`, Read/Grep/Glob
-  only) and happen in a temporary worktree at the indexed commit (`withWorktree`). Tests use a
+  only) and happen in a temporary worktree at the indexed commit (`withWorktree`). Every page
+  goes through `src/wiki/check.ts` (deterministic, no AI) before it is stored; change its rules
+  only on evidence from real pages, and add the case to `test/check.test.ts`. Tests use a
   fake `Runner` with a recorded result in `test/fixtures/wiki/`, so they never call the AI. The
   direction (AI-first wiki, parsers kept only as the answer key) is in `docs/decisions.md`.
 - Neighbours are never stored; they come from the seam graph at query time.
