@@ -13,3 +13,7 @@ numbers in these files: keep existing lines where they are.
 | `mixed-languages` | TypeScript, C#, Markdown and an unknown file type, for language detection |
 | `status-api` | Serves `/` and `/status` |
 | `status-checks` | Calls `/` and `/status`; only `/status` says which service it means |
+
+Each repo that has routes or calls also has a recorded Claude Code answer in
+`test/fixtures/seams/<repo>.json` (`mapSeams` in `test/helpers.ts`). Its citations are verified
+against these files, so keep the line numbers in both in step.

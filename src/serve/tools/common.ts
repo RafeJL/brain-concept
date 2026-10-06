@@ -59,17 +59,21 @@ export interface SeamLink {
 }
 
 /**
- * Every call that reaches one of the routes. A key with no literal segment (`/`, `/{}`) only links
- * within its own repo: every web app serves `/`, so across repos it says nothing about which one.
+ * Every call that reaches one of the routes. Two kinds of call only link within their own repo:
+ * - a key with no literal segment (`/`, `/{}`): every web app serves `/`, so across repos it says
+ *   nothing about which one is meant;
+ * - a call its own repo serves (`ownRoutes` holds the callers' routes): its tests or front end
+ *   calling itself, which says nothing about another repo that happens to serve the same path.
  */
-export function linkCalls(calls: readonly Seam[], routes: readonly Seam[]): SeamLink[] {
-  return calls.flatMap((call) =>
-    routes.flatMap((route) => {
-      if (call.repo !== route.repo && !hasLiteralSegment(route.key!)) return [];
+export function linkCalls(calls: readonly Seam[], routes: readonly Seam[], ownRoutes: readonly Seam[] = []): SeamLink[] {
+  return calls.flatMap((call) => {
+    const selfServed = ownRoutes.some((own) => own.repo === call.repo && matchEndpoints(endpointOf(call), endpointOf(own)));
+    return routes.flatMap((route) => {
+      if (call.repo !== route.repo && (selfServed || !hasLiteralSegment(route.key!))) return [];
       const match = matchEndpoints(endpointOf(call), endpointOf(route));
       return match ? [{ call, route, match }] : [];
-    }),
-  );
+    });
+  });
 }
 
 /** "1 route", "3 routes". */
@@ -86,15 +90,20 @@ export function pointer(seam: Seam): string {
   return `${seam.repo} · ${seam.path}:${lineRange(seam.startLine, seam.endLine)}`;
 }
 
-/** Freshness of each named repo's index, for stamping on answers. */
+/** Freshness of each named repo's seams (the commit they were mapped at), for stamping on answers. */
 export async function freshnessByRepo(deps: ToolDeps, repos: Iterable<string>): Promise<Map<string, Freshness>> {
   const result = new Map<string, Freshness>();
   for (const name of new Set(repos)) {
     const repo = deps.store.getRepo(name);
     const state = deps.store.getState(name);
-    if (repo && state) result.set(name, await freshnessOf(repo, state));
+    if (repo && state) result.set(name, await freshnessOf(repo, { ...state, commit: state.seamsCommit ?? state.commit }));
   }
   return result;
+}
+
+/** The other lines a seam's path was assembled from (a prefix, a base URL), for detailed answers. */
+export function builtFrom(seam: Seam): string {
+  return seam.cites.length ? ` · path built with ${seam.cites.map((c) => `${c.path}:${lineRange(c.start, c.end)}`).join(", ")}` : "";
 }
 
 /**
@@ -153,6 +162,9 @@ export async function footer(deps: ToolDeps, options: FooterOptions): Promise<st
   return lines;
 }
 
+/** OpenAPI and Swagger specs are YAML or JSON; code is cited before them. */
+const SPEC_FILE = /\.(ya?ml|json)$/i;
+
 /** One endpoint of one repo, however many files declare it (code, OpenAPI specs). */
 export interface RouteGroup {
   /** The declaration to cite first: code over specs. */
@@ -168,7 +180,7 @@ export function groupRoutes(routes: readonly Seam[]): RouteGroup[] {
     groups.set(id, [...(groups.get(id) ?? []), route]);
   }
   return [...groups.values()].map((members) => {
-    const primary = members.find((m) => m.plugin !== "openapi") ?? members[0]!;
+    const primary = members.find((m) => !SPEC_FILE.test(m.path)) ?? members[0]!;
     return { primary, also: members.filter((m) => m !== primary) };
   });
 }

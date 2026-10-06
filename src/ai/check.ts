@@ -66,16 +66,52 @@ function withoutCitations(text: string): string {
   return text.replace(BRACKET, (whole, inside: string) => (citationsIn(inside).length ? "" : whole));
 }
 
-/** Checks a page against the repo checked out at `root` (the indexed commit). */
-export function checkPage(markdown: string, root: string): CheckedPage {
+/** Reads files under `root` once each, as lines; null for a path that isn't a file there. */
+export function fileReader(root: string): (path: string) => string[] | null {
   const files = new Map<string, string[] | null>();
-  const linesOf = (path: string) => {
+  return (path) => {
     if (!files.has(path)) {
       const full = join(root, path);
       files.set(path, existsSync(full) && statSync(full).isFile() ? readFileSync(full, "utf8").split(/\r?\n/) : null);
     }
     return files.get(path)!;
   };
+}
+
+/** Why a citation can't support anything (missing file, outside it, too broad), or null. */
+export function citationProblem(cite: Citation, lines: string[] | null): string | null {
+  if (!lines) return `cites ${cite.path}, which doesn't exist at this commit`;
+  if (!Number.isInteger(cite.start) || !Number.isInteger(cite.end) || cite.start < 1 || cite.end < cite.start || cite.end > lines.length) {
+    return `cites ${cite.path}:${cite.start}-${cite.end}, outside the file (${lines.length} lines)`;
+  }
+  if (cite.end - cite.start + 1 > MAX_SPAN_LINES) {
+    return `cites ${cite.end - cite.start + 1} lines of ${cite.path}; too broad to support one claim`;
+  }
+  return null;
+}
+
+/** The cited lines plus the slack either side, lower-cased: where a claim's words must appear. */
+export function spanText(lines: readonly string[], cite: Citation): string {
+  return lines.slice(Math.max(0, cite.start - 1 - SLACK), cite.end + SLACK).join("\n").toLowerCase();
+}
+
+/**
+ * Whether cited spans show an HTTP method: as a word in the code (get, HttpGet, Route::get,
+ * methods=['GET']) or, for the CRUD methods, a resource declaration.
+ */
+export function methodShown(method: string, spans: readonly string[]): boolean {
+  const verb = method.toLowerCase();
+  return spans.some(
+    (span) => span.includes(verb) || (verb === "delete" && DEL.test(span)) || (CRUD.has(verb) && RESOURCE.test(span)),
+  );
+}
+
+/** superagent, node's http helpers and others spell DELETE `del`. */
+const DEL = /\bdel\s*\(/;
+
+/** Checks a page against the repo checked out at `root` (the indexed commit). */
+export function checkPage(markdown: string, root: string): CheckedPage {
+  const linesOf = fileReader(root);
 
   let claims = 0;
   const removed: RemovedClaim[] = [];
@@ -135,14 +171,9 @@ function unsupported(text: string, root: string, linesOf: (path: string) => stri
   const spans: string[] = [];
   for (const cite of cites) {
     const lines = linesOf(cite.path);
-    if (!lines) return `cites ${cite.path}, which doesn't exist at this commit`;
-    if (cite.start < 1 || cite.end < cite.start || cite.end > lines.length) {
-      return `cites ${cite.path}:${cite.start}-${cite.end}, outside the file (${lines.length} lines)`;
-    }
-    if (cite.end - cite.start + 1 > MAX_SPAN_LINES) {
-      return `cites ${cite.end - cite.start + 1} lines of ${cite.path}; too broad to support one claim`;
-    }
-    spans.push(lines.slice(Math.max(0, cite.start - 1 - SLACK), cite.end + SLACK).join("\n").toLowerCase());
+    const problem = citationProblem(cite, lines);
+    if (problem) return problem;
+    spans.push(spanText(lines!, cite));
   }
 
   for (const [, term] of withoutCitations(text).matchAll(/`([^`]+)`/g)) {
@@ -167,7 +198,7 @@ function supported(term: string, cites: readonly Citation[], root: string, spans
   // A route (`PATCH /articles/{slug}`, `GET articles`, a bare `PUT`) needs its method in the cited
   // lines too, as get, HttpGet, Route::get…, or a resource declaration there.
   const verb = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)(?=\s|$)/i.exec(term)?.[1]?.toLowerCase();
-  if (verb && !spans.some((span) => span.includes(verb) || (CRUD.has(verb) && RESOURCE.test(span)))) return false;
+  if (verb && !methodShown(verb, spans)) return false;
   if (verb && term.length === verb.length) return true;
   const words = term.match(/[A-Za-z_][A-Za-z0-9_-]*/g)?.filter((w) => w.length >= 3) ?? [];
   const needle = loose(words.at(-1) ?? term);
@@ -177,7 +208,8 @@ function supported(term: string, cites: readonly Citation[], root: string, spans
   return cites.some((c) => [c.path, ...siblings(root, c.path)].some((file) => loose(basename(file, extname(file))) === needle));
 }
 
-function loose(text: string): string {
+/** Case-insensitive, with dashes and underscores ignored (`follow_user` and `followUser` meet). */
+export function loose(text: string): string {
   return text.toLowerCase().replace(/[-_]/g, "");
 }
 

@@ -1,7 +1,5 @@
-import { CODE_LANGUAGES } from "../../core/languages.js";
 import type { SeamCoverage } from "../../core/seams.js";
-import type { Freshness, LanguageShare, Tier } from "../../core/types.js";
-import { SEAM_LANGUAGES } from "../../ingest/extractors/index.js";
+import type { Freshness, LanguageShare } from "../../core/types.js";
 import type { Caller } from "../access.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
 import { neighbours, type Neighbour, type Neighbours } from "../neighbours.js";
@@ -13,13 +11,11 @@ export interface RepoCard {
   path: string;
   remote: string | null;
   ref: string;
-  tier: Tier;
   freshness: Freshness;
   files: number;
   languages: LanguageShare[];
-  seams: SeamCoverage;
-  /** Code languages present in the repo that no extractor reads yet. */
-  unsupportedLanguages: string[];
+  /** The routes and calls Claude Code found, and the commit they describe (null: not mapped yet). */
+  seams: SeamCoverage & { commit: string | null };
   neighbours: Neighbours;
   /** The AI-written wiki, if one has been generated. */
   wiki: { pages: string[]; commit: string } | null;
@@ -43,14 +39,10 @@ export async function repoCard(deps: ToolDeps, caller: Caller, name: string, for
     path: repo.path,
     remote: repo.remote,
     ref: repo.ref,
-    tier: "parser-built",
     freshness: await freshnessOf(repo, state),
     files: state.fileCount,
     languages,
-    seams: deps.store.seamCoverage(name),
-    unsupportedLanguages: languages
-      .map((l) => l.language)
-      .filter((language) => CODE_LANGUAGES.has(language) && !SEAM_LANGUAGES.has(language)),
+    seams: { ...deps.store.seamCoverage(name), commit: state.seamsCommit },
     neighbours: neighbours(deps.store, name, readable),
     wiki: wikiOf(deps, name, state.commit),
   };
@@ -61,7 +53,7 @@ function conciseText(card: RepoCard): string {
   const shown = card.languages.slice(0, CONCISE_LANGUAGES).map((l) => `${l.language} ${l.files}`);
   const more = card.languages.length - shown.length;
   return [
-    `${card.repo}  ${describeFreshness(card.freshness, card.ref)} · ${card.tier}`,
+    `${card.repo}  ${describeFreshness(card.freshness, card.ref)}`,
     `Remote: ${card.remote ?? "none"}`,
     wikiLine(card),
     `Files: ${card.files} on ${card.ref}`,
@@ -75,7 +67,7 @@ function conciseText(card: RepoCard): string {
 function detailedText(card: RepoCard): string {
   const rows = card.languages.map((l) => `  ${l.language.padEnd(18)} ${String(l.files).padStart(6)} files ${formatBytes(l.bytes).padStart(10)}`);
   return [
-    `${card.repo}  ${describeFreshness(card.freshness, card.ref)} · ${card.tier}`,
+    `${card.repo}  ${describeFreshness(card.freshness, card.ref)}`,
     `Path: ${card.path}`,
     `Remote: ${card.remote ?? "none"}`,
     `Tracked ref: ${card.ref}`,
@@ -97,19 +89,20 @@ function wikiOf(deps: ToolDeps, name: string, indexed: string): RepoCard["wiki"]
 }
 
 function wikiLine({ repo, wiki, freshness }: RepoCard): string {
-  if (!wiki) return `Wiki: not generated yet (brain wiki ${repo})`;
+  if (!wiki) return `Wiki: not generated yet (brain sync ${repo})`;
   const older = wiki.commit === freshness.commit ? "" : ` · written at @${wiki.commit.slice(0, 7)}, older than the index`;
   return `Wiki: ${count(wiki.pages.length, "page")} (${wiki.pages.join(", ")}) · read with brain_get${older}`;
 }
 
-function seamsLine(card: RepoCard): string {
-  const { routes, calls, unresolvedCalls, plugins } = card.seams;
+function seamsLine({ repo, seams, freshness }: RepoCard): string {
+  if (!seams.commit) return `Seams: not mapped yet (brain sync ${repo})`;
+  const { routes, calls, unresolvedCalls } = seams;
   const found =
     routes + calls + unresolvedCalls === 0
       ? "none found"
-      : `${count(routes, "route")}, ${count(calls, "call")}${unresolvedCalls ? ` (+${unresolvedCalls} with run-time URLs)` : ""} via ${plugins.join(", ")}`;
-  const gaps = card.unsupportedLanguages.length ? ` · not extracted: ${card.unsupportedLanguages.join(", ")}` : "";
-  return `Seams: ${found}${gaps}`;
+      : `${count(routes, "route")}, ${count(calls, "call")}${unresolvedCalls ? ` (+${unresolvedCalls} with run-time URLs)` : ""}`;
+  const older = seams.commit === freshness.commit ? "" : ` · mapped at @${seams.commit.slice(0, 7)}, older than the index`;
+  return `Seams: ${found} · llm-generated${older}`;
 }
 
 function neighbourLines({ calls, calledBy }: Neighbours): string[] {

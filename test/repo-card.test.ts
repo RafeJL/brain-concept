@@ -4,12 +4,12 @@ import { syncRepo } from "../src/ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy, type AccessPolicy } from "../src/serve/access.js";
 import { repoCard } from "../src/serve/tools/repo-card.js";
 import { SqliteStore } from "../src/store/sqlite.js";
-import { commit, makeRepo, repoFromFixture } from "./helpers.js";
+import { commit, makeRepo, mapSeams, repoFromFixture } from "./helpers.js";
 
 const local = new LocalAccessPolicy();
 
 describe("repo card", () => {
-  it("names the indexed commit, freshness, tier and languages", async () => {
+  it("names the indexed commit, freshness and languages", async () => {
     const store = new SqliteStore(":memory:");
     await enrolRepo(store, { path: makeRepo({ "a.ts": "1", "b.ts": "2", "c.md": "3" }), name: "orders" });
     const { commit: sha } = await syncRepo(store, "orders");
@@ -17,7 +17,7 @@ describe("repo card", () => {
     const result = await repoCard({ store, access: local }, LOCAL_CALLER, "orders", "concise");
 
     expect(result.ok).toBe(true);
-    expect(result.text).toContain(`orders  @${sha.slice(0, 7)} · up to date · parser-built`);
+    expect(result.text).toContain(`orders  @${sha.slice(0, 7)} · up to date`);
     expect(result.text).toContain("Languages: TypeScript 2 · Markdown 1");
   });
 
@@ -71,12 +71,13 @@ describe("repo card", () => {
   });
 });
 
-/** Enrols and syncs fixture repos under their own names. */
+/** Enrols, syncs and maps fixture repos under their own names. */
 async function enrolled(...names: string[]) {
   const store = new SqliteStore(":memory:");
   for (const name of names) {
     await enrolRepo(store, { path: repoFromFixture(name), name });
     await syncRepo(store, name);
+    await mapSeams(store, name);
   }
   return store;
 }
@@ -102,6 +103,18 @@ describe("repo card neighbours", () => {
 
     // Both endpoints are called, but only /status names status-api; every web app serves "/".
     expect(result.ok && result.data.neighbours.calls).toEqual([{ repo: "status-api", count: 1, suffix: false }]);
+  });
+
+  it("doesn't link a repo's calls to its own routes with another repo serving the same path", async () => {
+    // Two copies of an API: each one's tests call its own GET /api/orders/{id}, not the other's.
+    const store = await enrolled("orders-api");
+    await enrolRepo(store, { path: repoFromFixture("orders-api"), name: "orders-copy" });
+    await syncRepo(store, "orders-copy");
+    await mapSeams(store, "orders-copy", "orders-api");
+
+    const result = await repoCard({ store, access: local }, LOCAL_CALLER, "orders-copy", "concise");
+
+    expect(result.ok && result.data.neighbours).toEqual({ calls: [], calledBy: [] });
   });
 
   it("never names a repo the caller can't read", async () => {

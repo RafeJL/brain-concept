@@ -1,27 +1,144 @@
 import { describe, expect, it } from "vitest";
+import { updateSeams, verifySeams, type FoundSeam } from "../src/ai/seams.js";
+import { parseEndpoint } from "../src/core/http.js";
 import { enrolRepo } from "../src/ingest/registry.js";
 import { syncRepo } from "../src/ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy, type AccessPolicy } from "../src/serve/access.js";
-import { parseEndpoint } from "../src/core/http.js";
 import { findConsumers } from "../src/serve/tools/find-consumers.js";
 import { repoCard } from "../src/serve/tools/repo-card.js";
 import { SqliteStore } from "../src/store/sqlite.js";
-import { commit, commitFixture, repoFromFixture } from "./helpers.js";
+import { commit, commitFixture, makeRepo, mapSeams, recordedRunner, recordedSeams, repoFromFixture } from "./helpers.js";
 
-/** test/fixtures/repos/articles-api and articles-web, enrolled as "api" and "web". */
+/** test/fixtures/repos/articles-api and articles-web, enrolled as "api" and "web", synced and mapped. */
 async function twoRepos() {
   const store = new SqliteStore(":memory:");
   const apiDir = repoFromFixture("articles-api");
   const webDir = repoFromFixture("articles-web");
   await enrolRepo(store, { path: apiDir, name: "api" });
   await enrolRepo(store, { path: webDir, name: "web" });
-  await syncRepo(store, "api");
-  await syncRepo(store, "web");
+  for (const [name, fixture] of [["api", "articles-api"], ["web", "articles-web"]] as const) {
+    await syncRepo(store, name);
+    await mapSeams(store, name, fixture);
+  }
   return { store, apiDir, webDir, deps: { store, access: new LocalAccessPolicy() } };
 }
 
-describe("seam sync", () => {
-  it("extracts seams tagged with repo, file, lines and commit", async () => {
+const route = (method: string, path: string, ...cites: [string, number, number][]): FoundSeam => ({
+  kind: "route",
+  method,
+  path,
+  runtime: false,
+  cites: cites.map(([file, start, end]) => ({ file, start, end })),
+});
+
+describe("verifying the AI's routes and calls", () => {
+  const files = {
+    "Program.cs": 'app.UsePathBase("/api");\n',
+    "TagsController.cs": ['[Route("tags")]', "public class TagsController {", "  [HttpGet] public IActionResult List() => Ok();", "  [HttpPost] public IActionResult Add() => Ok();", "}", ""].join("\n"),
+    "notes.txt": Array.from({ length: 100 }, (_, i) => `line ${i + 1}`).join("\n"),
+    "agent.js": "export const remove = (slug) => requests.del(`/articles/${slug}`);\n",
+  };
+  const verify = (...found: unknown[]) => verifySeams(found, makeRepo(files), "api", "abc");
+
+  it("keeps a route whose path is assembled from several files, and records where each part came from", () => {
+    const { kept, dropped } = verify(route("GET", "/api/tags", ["TagsController.cs", 3, 3], ["TagsController.cs", 1, 1], ["Program.cs", 1, 1]));
+
+    expect(dropped).toEqual([]);
+    expect(kept).toEqual([
+      {
+        repo: "api",
+        path: "TagsController.cs",
+        kind: "http-route",
+        method: "GET",
+        rawPath: "/api/tags",
+        key: "/api/tags",
+        startLine: 3,
+        endLine: 3,
+        cites: [
+          { path: "TagsController.cs", start: 1, end: 1 },
+          { path: "Program.cs", start: 1, end: 1 },
+        ],
+        commit: "abc",
+      },
+    ]);
+  });
+
+  it("drops a seam the cited lines don't support, and says why", () => {
+    const { kept, dropped } = verify(
+      route("GET", "/api/tags", ["TagsController.cs", 3, 3], ["TagsController.cs", 1, 1]),
+      route("DELETE", "/tags", ["TagsController.cs", 3, 4], ["TagsController.cs", 1, 1]),
+      route("GET", "/tags", ["Missing.cs", 1, 1]),
+      route("GET", "/tags", ["TagsController.cs", 9, 9]),
+      route("GET", "/line", ["notes.txt", 1, 100]),
+      { ...route("GET", "/x", ["TagsController.cs", 3, 3]), runtime: true },
+      { kind: "route", method: "FETCH", path: "/tags", runtime: false, cites: [{ file: "TagsController.cs", start: 3, end: 3 }] },
+      { kind: "route" },
+    );
+
+    expect(kept).toEqual([]);
+    expect(dropped.map((d) => d.reason)).toEqual([
+      '"api" isn\'t in the cited lines',
+      "DELETE isn't in the cited lines",
+      "cites Missing.cs, which doesn't exist at this commit",
+      "cites TagsController.cs:9-9, outside the file (6 lines)",
+      "cites 100 lines of notes.txt; too broad to support one claim",
+      "a route's path must be known",
+      'unknown method "FETCH"',
+      "malformed entry",
+    ]);
+    expect(dropped[0]!.seam).toBe("route GET /api/tags (TagsController.cs:3)");
+  });
+
+  it("keeps a run-time call with only its call site, an implicit GET, and DELETE spelled del()", () => {
+    const { kept } = verify(
+      { kind: "call", method: "GET", path: "baseUrl + path", runtime: true, cites: [{ file: "Program.cs", start: 1, end: 1 }] },
+      route("POST", "/tags", ["TagsController.cs", 4, 4], ["TagsController.cs", 1, 1]),
+      { kind: "call", method: "DELETE", path: "/articles/{slug}", runtime: false, cites: [{ file: "agent.js", start: 1, end: 1 }] },
+    );
+
+    expect(kept.map((s) => [s.kind, s.method, s.key, s.rawPath])).toEqual([
+      ["http-call", "GET", null, "baseUrl + path"],
+      ["http-route", "POST", "/tags", "/tags"],
+      ["http-call", "DELETE", "/articles/{}", "/articles/{slug}"],
+    ]);
+  });
+});
+
+describe("where a call is", () => {
+  it("is the line its path is written on, not a shared wrapper or base URL the AI cited first", () => {
+    const dir = makeRepo({
+      "client.js": ['const API_ROOT = "https://x.example/api";', "const get = (url) => superagent.get(`${API_ROOT}${url}`);", "export const profile = (u) => get(`/profiles/${u}`);"].join("\n"),
+    });
+    const call = { kind: "call", method: "GET", path: "/api/profiles/{u}", runtime: false, cites: [2, 3, 1].map((line) => ({ file: "client.js", start: line, end: line })) };
+
+    const [seam] = verifySeams([call], dir, "web", "abc").kept;
+
+    expect([seam!.path, seam!.startLine]).toEqual(["client.js", 3]);
+    expect(seam!.cites.map((c) => c.start)).toEqual([2, 1]);
+  });
+
+  it("stays in the calling file when the path is only spelled out in the route it names", () => {
+    const dir = makeRepo({
+      "views.py": "@blueprint.route('/api/profiles/<username>', methods=('GET',))\n",
+      "test_profile.py": "resp = testapp.get(url_for('profile.get_profile', username='foo'))\n",
+    });
+    const call = {
+      kind: "call",
+      method: "GET",
+      path: "/api/profiles/{username}",
+      runtime: false,
+      cites: [{ file: "test_profile.py", start: 1, end: 1 }, { file: "views.py", start: 1, end: 1 }],
+    };
+
+    const [seam] = verifySeams([call], dir, "api", "abc").kept;
+
+    expect([seam!.path, seam!.startLine]).toEqual(["test_profile.py", 1]);
+    expect(seam!.cites).toEqual([{ path: "views.py", start: 1, end: 1 }]);
+  });
+});
+
+describe("mapping and updating a repo's routes and calls", () => {
+  it("stores what passes, tagged with repo, file, lines and commit", async () => {
     const { store } = await twoRepos();
 
     const routes = store.seams({ repos: ["api"] });
@@ -31,39 +148,72 @@ describe("seam sync", () => {
       "DELETE /articles/{} src/articles.ts:4",
     ]);
     expect(routes[0]?.commit).toBe(store.getState("api")?.commit);
+    expect(store.getState("api")?.seamsCommit).toBe(store.getState("api")?.commit);
   });
 
-  it("replaces seams of changed files and drops seams of deleted files", async () => {
+  it("maps only changed files after a change, and drops the seams of deleted files", async () => {
     const { store, apiDir } = await twoRepos();
 
     commitFixture(apiDir, "articles-api-v2");
     await syncRepo(store, "api");
+    const update = recordedRunner(recordedSeams("articles-api-v2"));
+    const result = await updateSeams(store, update.runner, "api");
+
+    expect(result).toMatchObject({ mode: "update", redone: ["src/articles.ts", "src/tags.ts"] });
+    expect(update.requests[0]!.prompt).toContain("Only list routes and calls declared in these files");
+    expect(update.requests[0]!.prompt).toContain("- src/tags.ts");
     expect(store.seams({ repos: ["api"] }).map((s) => `${s.method} ${s.key}`)).toEqual(["PUT /articles/{}", "GET /tags"]);
 
     commit(apiDir, {}, "remove tags", ["src/tags.ts"]);
     await syncRepo(store, "api");
+    const none = recordedRunner({ seams: [] });
+    const after = await updateSeams(store, none.runner, "api");
+
+    expect(none.requests).toHaveLength(0);
+    expect(after.redone).toEqual([]);
     expect(store.seams({ repos: ["api"] }).map((s) => s.path)).toEqual(["src/articles.ts"]);
   });
 
-  it("re-extracts every file when the extractor version changes", async () => {
-    const { store } = await twoRepos();
-    const state = store.getState("api")!;
-    // Simulate a store written by older extractors.
-    store.applySync("api", { ...state, extractorVersion: 0, upsert: [], remove: [], extractedPaths: ["src/articles.ts"], seams: [] });
-    expect(store.seams({ repos: ["api"] })).toEqual([]);
+  it("maps a file again when a file its seams were built from changes", async () => {
+    const store = new SqliteStore(":memory:");
+    const dir = makeRepo({ "Program.cs": 'app.UsePathBase("/api");\n', "Tags.cs": '[HttpGet("tags")]\n' });
+    await enrolRepo(store, { path: dir, name: "api" });
+    await syncRepo(store, "api");
+    await updateSeams(store, recordedRunner({ seams: [route("GET", "/api/tags", ["Tags.cs", 1, 1], ["Program.cs", 1, 1])] }).runner, "api");
 
-    const result = await syncRepo(store, "api");
+    commit(dir, { "Program.cs": 'app.UsePathBase("/v2");\n' });
+    await syncRepo(store, "api");
+    const update = recordedRunner({ seams: [route("GET", "/v2/tags", ["Tags.cs", 1, 1], ["Program.cs", 1, 1])] });
+    await updateSeams(store, update.runner, "api");
 
-    expect(result.fullExtract).toBe(true);
-    expect(store.seams({ repos: ["api"] })).toHaveLength(2);
+    expect(update.requests[0]!.prompt).toContain("- Program.cs\n- Tags.cs");
+    expect(store.seams({ repos: ["api"] }).map((s) => s.key)).toEqual(["/v2/tags"]);
   });
 
-  it("shows coverage on the repo card", async () => {
-    const { deps } = await twoRepos();
+  it("runs no AI when only Markdown changed", async () => {
+    const { store, apiDir } = await twoRepos();
+    commit(apiDir, { "README.md": "# changed" });
+    await syncRepo(store, "api");
+    const { runner, requests } = recordedRunner({ seams: [] });
+
+    const result = await updateSeams(store, runner, "api");
+
+    expect(requests).toHaveLength(0);
+    expect(result).toMatchObject({ mode: "update", redone: [], costUsd: 0 });
+    expect(store.seams({ repos: ["api"] })).toHaveLength(2);
+    expect(store.getState("api")?.seamsCommit).toBe(store.getState("api")?.commit);
+  });
+
+  it("shows coverage on the repo card, or that the repo hasn't been mapped", async () => {
+    const { store, deps } = await twoRepos();
+    await enrolRepo(store, { path: makeRepo({ "a.ts": "1" }), name: "new" });
+    await syncRepo(store, "new");
 
     const card = await repoCard(deps, LOCAL_CALLER, "web", "concise");
+    const unmapped = await repoCard(deps, LOCAL_CALLER, "new", "concise");
 
-    expect(card.text).toContain("Seams: 0 routes, 1 call (+1 with run-time URLs) via ts-calls");
+    expect(card.text).toContain("Seams: 0 routes, 1 call (+1 with run-time URLs) · llm-generated");
+    expect(unmapped.text).toContain("Seams: not mapped yet (brain sync new)");
   });
 });
 
@@ -80,9 +230,9 @@ describe("brain_find_consumers", () => {
     const result = await findConsumers(deps, LOCAL_CALLER, { target: "GET /articles/{slug}", format: "concise" });
 
     expect(result.ok).toBe(true);
-    expect(result.text).toContain("GET /articles/{} · 1 server, 1 caller in 2 repos · parser-built");
-    expect(result.text).toContain("api · src/articles.ts:3 · GET /articles/:slug");
-    expect(result.text).toContain("web · src/agent.js:2 · GET `/articles/${slug}`");
+    expect(result.text).toContain("GET /articles/{} · 1 server, 1 caller in 2 repos · llm-generated");
+    expect(result.text).toContain("api · src/articles.ts:3 · GET /articles/{slug}");
+    expect(result.text).toContain("web · src/agent.js:2 · GET /articles/{slug}");
     expect(result.text).toContain("1 call uses a URL only known at run time (web · src/agent.js:3)");
   });
 
@@ -111,10 +261,24 @@ describe("brain_find_consumers", () => {
     const { store, deps } = await twoRepos();
     await enrolRepo(store, { path: repoFromFixture("shop-web"), name: "shop" });
     await syncRepo(store, "shop");
+    await mapSeams(store, "shop", "shop-web");
 
     const result = await findConsumers(deps, LOCAL_CALLER, { target: "GET /articles/{slug}", format: "concise" });
 
     expect(result.text).toContain("2 calls use URLs only known at run time (web · src/agent.js:3, shop · src/api.ts:2)");
+  });
+
+  it("lists a repo calling its own endpoint after other callers, marked same repo", async () => {
+    const store = new SqliteStore(":memory:");
+    for (const name of ["orders-api", "shop-web"]) {
+      await enrolRepo(store, { path: repoFromFixture(name), name });
+      await syncRepo(store, name);
+      await mapSeams(store, name);
+    }
+
+    const result = await findConsumers({ store, access: new LocalAccessPolicy() }, LOCAL_CALLER, { target: "GET /api/orders/{id}", format: "concise" });
+
+    expect(result.text).toContain("Called by\n  shop-web · src/api.ts:1 · GET /api/orders/{id}\n  orders-api · tests/OrdersTests.cs:1 · GET /api/orders/{id} · same repo");
   });
 
   it("says when nothing matched, and why that isn't proof", async () => {

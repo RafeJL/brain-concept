@@ -57,7 +57,11 @@ export async function impact(deps: ToolDeps, caller: Caller, input: ImpactInput)
     .seams({ repos: [input.repo], kind: "http-route", path })
     .filter((route) => !target || matchEndpoints(endpointOf(route), target));
   const groups = groupRoutes(routes);
-  const links = linkCalls(deps.store.seams({ repos: found.readable, kind: "http-call" }), groups.map((g) => g.primary));
+  const links = linkCalls(
+    deps.store.seams({ repos: found.readable, kind: "http-call" }),
+    groups.map((g) => g.primary),
+    deps.store.seams({ repos: found.readable, kind: "http-route" }),
+  );
   const impacts: RouteImpact[] = groups.map(({ primary: route, also }) => ({
     route,
     also,
@@ -81,7 +85,7 @@ async function render(deps: ToolDeps, { repo, path, routes, outgoingCalls }: Imp
   const quiet = routes.filter((r) => r.callers.length === 0);
   const callerRepos = new Set(withCallers.flatMap((r) => r.callers.map((c) => c.seam.repo)));
   const callerCount = withCallers.reduce((sum, r) => sum + r.callers.length, 0);
-  const out = [`${scope} · ${count(routes.length, "route")}, ${count(callerCount, "caller")} in ${count(callerRepos.size, "repo")} · parser-built`];
+  const out = [`${scope} · ${count(routes.length, "route")}, ${count(callerCount, "caller")} in ${count(callerRepos.size, "repo")} · llm-generated`];
 
   const shown = format === "detailed" ? routes : withCallers;
   const page = shown.slice(offset, offset + PAGE_SIZE);

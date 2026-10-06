@@ -86,4 +86,13 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE pages ADD COLUMN claims INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE pages ADD COLUMN removed INTEGER NOT NULL DEFAULT 0;
   `,
+  // W4: seams come from Claude Code, not parsers. Parser seams are dropped; the next sync finds
+  // them again. cites holds the lines that contribute to a seam's path (JSON); seams_commit is
+  // the commit the seams describe, so an update knows what changed since.
+  `
+  DELETE FROM seams;
+  ALTER TABLE seams ADD COLUMN cites TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE repo_state ADD COLUMN seams_commit TEXT;
+  ALTER TABLE repo_state DROP COLUMN extractor_version;
+  `,
 ];

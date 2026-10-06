@@ -1,16 +1,19 @@
 import type { Seam, SeamCoverage, SeamKind } from "../core/seams.js";
 import type { FileRecord, LanguageShare, RepoRecord, RepoState, WikiPage } from "../core/types.js";
 
-/** Everything one sync changes, applied atomically. */
+/** Everything one sync changes, applied atomically. Removing a file removes its seams. */
 export interface SyncUpdate {
   commit: string;
   fileCount: number;
-  extractorVersion: number;
   upsert: FileRecord[];
   remove: string[];
-  /** Files re-read in this sync: their old seams are dropped, `seams` inserted. */
-  extractedPaths: string[];
-  seams: Seam[];
+}
+
+/** New seams for a repo at `commit`, replacing those declared in `paths` (every seam if null). */
+export interface SeamUpdate {
+  commit: string;
+  paths: readonly string[] | null;
+  seams: readonly Seam[];
 }
 
 export interface SeamFilter {
@@ -42,6 +45,8 @@ export interface Store {
 
   seams(filter: SeamFilter): Seam[];
   seamCoverage(repo: string): SeamCoverage;
+  /** Swaps in Claude Code's seams and records the commit they describe, in one step. */
+  replaceSeams(repo: string, update: SeamUpdate): void;
 
   /** Replaces a repo's whole wiki in one step, keeping the pages' order. */
   replacePages(repo: string, pages: readonly WikiPage[]): void;

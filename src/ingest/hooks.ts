@@ -7,7 +7,7 @@ import { requireRepo } from "./registry.js";
 
 /**
  * Keeps a repo's facts and wiki fresh without anyone running `brain sync`: a git
- * `reference-transaction` hook starts a background `brain sync --wiki` whenever the tracked ref moves. It catches pulls, merges,
+ * `reference-transaction` hook starts a background `brain sync` whenever the tracked ref moves. It catches pulls, merges,
  * rebases and plain fetches (which have no hook of their own), and never blocks git.
  */
 
@@ -23,6 +23,8 @@ export interface HookCommand {
   dbPath?: string;
   /** Where background syncs append their output. */
   logPath: string;
+  /** Extra `brain sync` flags, e.g. `--no-ai` where no AI should run. */
+  syncFlags?: string[];
 }
 
 export interface HookStatus {
@@ -41,14 +43,15 @@ function sh(value: string): string {
 function hookScript(repo: string, trackedRef: string, command: HookCommand): string {
   const env = command.dbPath ? `BRAIN_DB=${sh(command.dbPath)} ` : "";
   const log = sh(command.logPath);
+  const flags = (command.syncFlags ?? []).map((flag) => ` ${sh(flag)}`).join("");
   return `#!/bin/sh
 ${MARKER}
-# Re-syncs "${repo}" in the brain, and updates its wiki if it has one, when ${trackedRef} moves. Remove with: brain hooks remove ${repo}
+# Re-syncs "${repo}" in the brain (index, routes and calls, wiki) when ${trackedRef} moves. Remove with: brain hooks remove ${repo}
 [ "$1" = committed ] || exit 0
 awk -v ref=${sh(trackedRef)} '$3 == ref { found = 1 } END { exit !found }' || exit 0
 (
   echo "$(date '+%Y-%m-%d %H:%M:%S') ${repo}: ${trackedRef} moved" >> ${log}
-  ${env}${sh(command.node)} ${sh(command.brain)} sync ${sh(repo)} --wiki >> ${log} 2>&1
+  ${env}${sh(command.node)} ${sh(command.brain)} sync ${sh(repo)}${flags} >> ${log} 2>&1
 ) < /dev/null > /dev/null 2>&1 &
 exit 0
 `;

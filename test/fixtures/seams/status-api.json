@@ -1,0 +1,6 @@
+{
+  "seams": [
+    { "kind": "route", "method": "GET", "path": "/", "runtime": false, "cites": [{ "file": "src/server.ts", "start": 4, "end": 4 }] },
+    { "kind": "route", "method": "GET", "path": "/status", "runtime": false, "cites": [{ "file": "src/server.ts", "start": 5, "end": 5 }] }
+  ]
+}

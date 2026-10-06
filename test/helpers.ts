@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach } from "vitest";
+import type { RunRequest, RunResult, Runner } from "../src/ai/runner.js";
+import { updateSeams, type SeamOptions } from "../src/ai/seams.js";
+import type { Store } from "../src/store/store.js";
 
 const created: string[] = [];
 
@@ -96,4 +99,28 @@ export async function waitFor(condition: () => boolean, timeoutMs: number): Prom
 
 export function setRemote(dir: string, url: string): void {
   git(dir, "remote", "add", "origin", url);
+}
+
+const FIXTURE_SEAMS = fileURLToPath(new URL("./fixtures/seams/", import.meta.url));
+
+/** A Runner that answers every run with `output`, as Claude Code's structured output, and records the requests. */
+export function recordedRunner(output: unknown) {
+  const requests: RunRequest[] = [];
+  const runner: Runner = {
+    async run<T>(request: RunRequest): Promise<RunResult<T>> {
+      requests.push(request);
+      return { output: output as T, costUsd: 0.05, durationMs: 1000, model: "claude-sonnet-5" };
+    },
+  };
+  return { runner, requests };
+}
+
+/** The recorded answer in test/fixtures/seams/<name>.json. */
+export function recordedSeams(name: string): unknown {
+  return JSON.parse(readFileSync(join(FIXTURE_SEAMS, `${name}.json`), "utf8"));
+}
+
+/** Maps a synced repo's routes and calls as Claude Code would, from test/fixtures/seams/<fixture>.json. */
+export async function mapSeams(store: Store, name: string, fixture = name, options: SeamOptions = { full: true }) {
+  return updateSeams(store, recordedRunner(recordedSeams(fixture)).runner, name, options);
 }

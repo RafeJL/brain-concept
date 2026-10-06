@@ -1,0 +1,6 @@
+{
+  "seams": [
+    { "kind": "route", "method": "PUT", "path": "/articles/{slug}", "runtime": false, "cites": [{ "file": "src/articles.ts", "start": 1, "end": 1 }] },
+    { "kind": "route", "method": "GET", "path": "/tags", "runtime": false, "cites": [{ "file": "src/tags.ts", "start": 1, "end": 1 }] }
+  ]
+}
