@@ -27,6 +27,11 @@ function fakeRunner(stdout = RECORDED) {
   return { runner, seen };
 }
 
+/** A Claude Code result carrying these pages, as the fixture file does. */
+function recorded(pages: { slug: string; title: string; markdown: string }[]): string {
+  return JSON.stringify({ is_error: false, structured_output: { pages }, total_cost_usd: 0.1, duration_ms: 1000, modelUsage: { "claude-sonnet-5": {} } });
+}
+
 async function setup() {
   const store = new SqliteStore(":memory:");
   const dir = repoFromFixture("articles-api");
@@ -97,6 +102,52 @@ describe("brain wiki", () => {
     expect(store.pages("api").map((p) => p.slug)).toEqual(["overview", "build-run-test", "api"]);
   });
 
+  it("checks every citation and stores what it found on each page", async () => {
+    const { store } = await setup();
+
+    const wiki = await generateWiki(store, fakeRunner().runner, "api");
+
+    expect(wiki.reports.map((r) => [r.slug, r.claims, r.removed.length, r.published])).toEqual([
+      ["overview", 1, 0, true],
+      ["build-run-test", 1, 0, true],
+      ["api", 2, 0, true],
+    ]);
+    expect(store.pages("api").map((p) => [p.slug, p.claims, p.removed])).toEqual([
+      ["overview", 1, 0],
+      ["build-run-test", 1, 0],
+      ["api", 2, 0],
+    ]);
+  });
+
+  it("removes unsupported claims, and keeps the old version of a page that mostly fails", async () => {
+    const { store } = await setup();
+    await generateWiki(store, fakeRunner().runner, "api");
+    const firstOverview = store.pages("api")[0]!;
+    const next = recorded([
+      { slug: "overview", title: "Overview", markdown: "# Overview\n\nIt streams events to `Kafka` [src/articles.ts:1]. It caches in `Redis` [src/articles.ts:2]." },
+      { slug: "api", title: "API", markdown: "# API\n\n- `GET /articles/:slug` is public [src/articles.ts:3].\n- `PATCH /articles/:slug` edits one [src/articles.ts:4]." },
+    ]);
+
+    const wiki = await generateWiki(store, fakeRunner(next).runner, "api");
+
+    expect(wiki.reports.map((r) => [r.slug, r.published])).toEqual([["overview", false], ["api", true]]);
+    expect(store.pages("api").map((p) => p.slug)).toEqual(["overview", "api"]);
+    expect(store.pages("api")[0]).toEqual(firstOverview);
+    expect(store.pages("api")[1]!.markdown).toBe("# API\n\n- `GET /articles/:slug` is public [src/articles.ts:3].");
+    expect(wiki.reports[1]!.removed).toEqual([
+      { text: "- `PATCH /articles/:slug` edits one [src/articles.ts:4].", reason: "`PATCH /articles/:slug` isn't in the cited lines" },
+    ]);
+  });
+
+  it("leaves the wiki as it was when no page passes the check", async () => {
+    const { store } = await setup();
+    await generateWiki(store, fakeRunner().runner, "api");
+    const bad = recorded([{ slug: "overview", title: "Overview", markdown: "# Overview\n\nIt uses `Kafka` [src/articles.ts:1]." }]);
+
+    await expect(generateWiki(store, fakeRunner(bad).runner, "api")).rejects.toThrow(/No page passed the citation check.*overview: 0\/1/);
+    expect(store.pages("api").map((p) => p.slug)).toEqual(["overview", "build-run-test", "api"]);
+  });
+
   it("asks for a sync first when the repo hasn't been indexed", async () => {
     const store = new SqliteStore(":memory:");
     await enrolRepo(store, { path: repoFromFixture("articles-api"), name: "api" });
@@ -116,6 +167,7 @@ describe("brain_get", () => {
     expect(list.text).toContain(`api wiki · 3 pages · @${sha.slice(0, 7)} · up to date · llm-generated`);
     expect(list.text).toMatch(/build-run-test\s+Build, run and test/);
     expect(page.text).toContain("- `DELETE /articles/:slug` removes one; auth is required [src/articles.ts:4].");
+    expect(page.text).toContain("llm-generated · citations checked: 2 of 2 claims kept");
     expect(page.text).toContain("AI-written (llm-generated)");
   });
 

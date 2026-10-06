@@ -113,8 +113,12 @@ git -C $P\aspnet-api worktree list
 ```
 
 **Expect:**
-- `pg-aspnet-api: 4 pages at @a397d11 (overview, build-run-test, api, …) · $… · …s`;
+- `pg-aspnet-api: wiki at @a397d11 · $… · …s`, then one line per page such as
+  `build-run-test  19/22 claims kept · published`, with up to three `removed: … ` lines saying
+  why. Read the removed claims. Each should be a real problem (the named thing isn't in the
+  cited lines, a missing file, an over-broad span), not the checker being too strict;
 - the page list stamped `@a397d11 · up to date · llm-generated`;
+- each page's header ending `citations checked: N of M claims kept`;
 - a build page that names `build/build.csproj`, the Bullseye targets and
   `dotnet build Conduit.slnx`, each with `[path:lines]` citations. Open two or three citations
   and check they say what the sentence claims;

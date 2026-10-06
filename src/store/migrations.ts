@@ -81,4 +81,9 @@ export const MIGRATIONS: string[] = [
   `
   DROP TABLE IF EXISTS facts;
   `,
+  // W2: what the citation checker found on each page.
+  `
+  ALTER TABLE pages ADD COLUMN claims INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE pages ADD COLUMN removed INTEGER NOT NULL DEFAULT 0;
+  `,
 ];

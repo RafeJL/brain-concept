@@ -98,10 +98,14 @@ async function main(argv: string[]): Promise<void> {
         if (!sub) throw new BrainError("Usage: brain wiki <name> [--model <model>]");
         console.log(`Writing ${sub}'s wiki with Claude Code (${values.model ?? DEFAULT_MODEL}); this takes a few minutes...`);
         const wiki = await generateWiki(store, claudeRunner, sub, values.model);
-        console.log(
-          `${wiki.repo}: ${wiki.pages.length} pages at @${wiki.commit.slice(0, 7)} ` +
-            `(${wiki.pages.map((p) => p.slug).join(", ")}) · $${wiki.costUsd.toFixed(2)} · ${Math.round(wiki.durationMs / 1000)}s`,
-        );
+        console.log(`${wiki.repo}: wiki at @${wiki.commit.slice(0, 7)} · $${wiki.costUsd.toFixed(2)} · ${Math.round(wiki.durationMs / 1000)}s`);
+        for (const report of wiki.reports) {
+          const kept = report.claims - report.removed.length;
+          const state = report.published ? "published" : "NOT published (too few claims supported; previous version kept if any)";
+          console.log(`  ${report.slug.padEnd(24)} ${kept}/${report.claims} claims kept · ${state}`);
+          for (const claim of report.removed.slice(0, 3)) console.log(`    removed: ${claim.reason} · "${claim.text.slice(0, 90)}…"`);
+          if (report.removed.length > 3) console.log(`    … and ${report.removed.length - 3} more`);
+        }
         console.log(`Read them with: brain page ${wiki.repo}`);
         break;
       }

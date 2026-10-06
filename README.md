@@ -12,9 +12,9 @@ tracked branch that is, and how it was made, so the agent knows how far to trust
 It is a separate service. The Citation delivery harness (`citation-harness-library`) calls it
 over MCP and keeps all of its own skills.
 
-**Status:** local proof of concept, part-way through the switch to AI-written wikis (W1 of W0–W5:
-pages are generated and served; checking every citation automatically is next). See
-[Where it's going](#where-its-going).
+**Status:** local proof of concept, part-way through the switch to AI-written wikis (W2 of W0–W5:
+pages are generated, every citation is checked before an agent sees it, and the pages are
+served; regenerating them on change is next). See [Where it's going](#where-its-going).
 
 ## What it can do today
 
@@ -34,7 +34,7 @@ All four are read-only. The examples below are real output from the
 the most important module). `brain_get` with no page lists them; with a page, it returns it:
 
 ```
-aspnet-api · build-run-test · @a397d11 · up to date · llm-generated
+aspnet-api · build-run-test · @a397d11 · up to date · llm-generated · citations checked: 19 of 22 claims kept (3 removed)
 
 # Build, Run & Test
 
@@ -47,9 +47,19 @@ shell scripts [build/Program.cs:1-7][readme.md:23]. It defines five targets: `cl
 [build/Program.cs:46], `test` (runs `dotnet test` against every `tests/**/*.csproj`, depends on
 `build`) [build/Program.cs:48-60] …
 
-AI-written (llm-generated). Each [path:lines] cites the code a sentence is based on; confirm there before relying on it.
+AI-written (llm-generated). Every claim kept here cites lines that exist and contain what it names; whether it reads them correctly isn't checked, so confirm at the citation before relying on it.
 ```
 
+- **Every citation is checked** before a page is stored, with no AI involved. Each sentence, list
+  item and table row must cite lines that exist at the commit, no citation may span more than 80
+  lines, and the names it puts in backticks must appear in the cited lines (allowing for
+  paraphrase and namespaces; a route's HTTP method must be there too). Claims that fail are
+  removed. A page where fewer than half pass isn't published, and its previous version stays.
+  `brain wiki` lists what it removed and why. Routes declared without their verb (Laravel's
+  `Route::resource`) lose correct claims under the method rule, which is kept so a wrong method
+  can't pass. On the trial repos about 80% of claims were kept;
+  the removals were real problems, such as `net10.0` cited to a file that doesn't contain it, a
+  `FLASK_DEBUG` the code never mentions, or citations spanning 150 lines.
 - **Any language:** the trial generated correct wikis for C#, PHP (Laravel) and Python (Flask)
   repos. No per-language setup is needed.
 - **Commit-exact:** Claude Code runs in a temporary git worktree at the commit the brain indexed,
@@ -126,8 +136,10 @@ come first, and callers in the same repo (its own tests) are marked `same repo`.
 - **`@a397d11 · up to date`**: the commit the answer describes, and how many commits behind the
   tracked branch that is (`2 commits behind origin/main`).
 - **`parser-built`**: made by parsers, with no AI involved.
-- **`llm-generated`**: written by Claude Code, with a citation on every sentence. Confirm at the
-  citation before relying on it. From W2, every citation is checked automatically.
+- **`llm-generated`**: written by Claude Code, with a citation on every sentence, each one
+  checked automatically. The header says how many claims were kept. A check confirms the cited
+  lines exist and contain what the claim names, not that the claim reads them correctly, so
+  confirm at the citation before relying on it.
 - **File and line pointers**, never pasted code.
 - **Gaps are stated:** calls whose URL is only known at run time are counted and located, never
   guessed.
@@ -159,8 +171,6 @@ in C#, TypeScript, JavaScript, PHP and Python.
 
 ## What it can't do yet
 
-- **Automatic citation checks:** pages are cited, but the citations aren't verified yet. That's
-  W2.
 - **Regenerating pages on change:** W3. Re-run `brain wiki <repo>` for now.
 - **Routes and calls outside TS/JS, C# and OpenAPI:** W4, by Claude Code.
 - **Search across wikis:** `brain_search`, in W5.
@@ -218,7 +228,7 @@ Run from this folder with `npm run brain -- <command>`, or from anywhere with
 | `repo set-ref <name> <ref>` | Index a different branch, e.g. `origin/release`. Updates the repo's hook if it has one. |
 | `repo remove <name>` | Remove a repo, everything the brain holds about it, and its hook. |
 | `sync [<name>]` | Index the tracked branch's committed tree (never your working copy). All repos if no name. |
-| `wiki <name> [--model m]` | Have Claude Code write the repo's wiki at the indexed commit. Default model `sonnet`. Replaces the previous pages only if the new ones are well-formed. |
+| `wiki <name> [--model m]` | Have Claude Code write the repo's wiki at the indexed commit, check every citation, and store what passes. It prints each page's kept/total claims and the first few removed, with reasons. Default model `sonnet`. |
 | `page <name> [<page>]` | `brain_get`: the page list, or one page. |
 | `hooks install [<name>]` | Re-sync automatically whenever the tracked branch moves. All repos if no name. |
 | `hooks remove [<name>]` / `hooks status` | Stop automatic syncing / see which repos sync automatically, or why one can't. |
@@ -262,9 +272,9 @@ Hooks run whichever brain code is checked out in this folder.
 |---|---|---|
 | 0, 1, 3a | Index, seam graph, `brain_find_consumers`, `brain_impact`, repo cards, auto-sync | ✅ |
 | W0 | Trial: Claude Code finds every RealWorld endpoint in 5 repos and 5 languages; pages accurate | ✅ |
-| W1 | Wiki pages: `brain wiki`, `brain_get`; the old fact readers removed | ✅ (this branch) |
-| W2 | Every citation checked automatically; tiers on pages and claims | Next |
-| W3 | Pages regenerated on change, only what changed; the last good page kept | Planned |
+| W1 | Wiki pages: `brain wiki`, `brain_get`; the old fact readers removed | ✅ |
+| W2 | Every citation checked automatically; unsupported claims removed; a failing page keeps its previous version | ✅ (this branch) |
+| W3 | Pages regenerated on change, only what changed | Next |
 | W4 | Routes and calls in any language by Claude Code; the parsers removed | Planned |
 | W5 | `brain_search` across wikis; final docs | Planned |
 | 2, 4, 6 | Harness evals, curated context, hosting | After the switch |

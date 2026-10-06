@@ -181,12 +181,14 @@ export class SqliteStore implements Store {
 
   replacePages(repo: string, pages: readonly WikiPage[]): void {
     const insert = this.db.prepare(
-      `INSERT INTO pages (repo, slug, position, title, markdown, commit_sha, model, cost_usd, generated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO pages (repo, slug, position, title, markdown, commit_sha, claims, removed, model, cost_usd, generated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     this.transaction(() => {
       this.db.prepare("DELETE FROM pages WHERE repo = ?").run(repo);
-      pages.forEach((p, i) => insert.run(repo, p.slug, i, p.title, p.markdown, p.commit, p.model, p.costUsd, p.generatedAt));
+      pages.forEach((p, i) =>
+        insert.run(repo, p.slug, i, p.title, p.markdown, p.commit, p.claims, p.removed, p.model, p.costUsd, p.generatedAt),
+      );
     });
   }
 
@@ -198,6 +200,8 @@ export class SqliteStore implements Store {
       title: String(row.title),
       markdown: String(row.markdown),
       commit: String(row.commit_sha),
+      claims: Number(row.claims),
+      removed: Number(row.removed),
       model: String(row.model),
       costUsd: Number(row.cost_usd),
       generatedAt: String(row.generated_at),
