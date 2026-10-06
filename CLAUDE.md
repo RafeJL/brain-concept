@@ -44,6 +44,12 @@ calls it; nothing is ever moved out of the harness into here.
   only on evidence from real pages, and add the case to `test/check.test.ts`. Tests use a
   fake `Runner` with a recorded result in `test/fixtures/wiki/`, so they never call the AI. The
   direction (AI-first wiki, parsers kept only as the answer key) is in `docs/decisions.md`.
+- **Prompts** are Markdown in `src/wiki/prompts/`, loaded by `prompt()` in `src/wiki/prompts.ts`
+  (`{{rules}}` pulls in `rules.md`). Not skills: runs load none. If you change what the checker
+  enforces, update `rules.md` to match.
+- **Updates** (`generateWiki` without `--full`) rewrite only pages a change affects
+  (`src/wiki/affected.ts`), retry a failing page once, and keep the last passing version. Hooks
+  run `brain sync --wiki` through `runQueued` (`src/core/queue.ts`), one run per repo at a time.
 - Neighbours are never stored; they come from the seam graph at query time.
 - **Every extractor pattern has a fixture**: a real source file in its own language under
   `test/fixtures/extractors/<language>/`, with the expected seam annotated on the line it starts

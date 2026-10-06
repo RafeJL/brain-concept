@@ -97,6 +97,34 @@ describe("checkPage", () => {
   });
 });
 
+describe("route claims", () => {
+  it("accepts the methods a resource declaration implies, and still refuses a method that isn't there", () => {
+    const dir = repo();
+    // Line 7 is beyond the 3 lines of slack around line 2.
+    writeFileSync(join(dir, "api.php"), ["<?php", "Route::resource('articles', ArticleController::class);", "", "", "", "", "Route::get('tags', TagController::class);"].join("\n"));
+    writeFileSync(join(dir, "routes.rb"), ["Rails.application.routes.draw do", "  resources :articles", "end"].join("\n"));
+    const keep = (claim: string) => checkPage(claim, dir).removed.length === 0;
+
+    expect(keep("`GET /articles/{article}` shows one article [api.php:2].")).toBe(true);
+    expect(keep("`PUT /articles/{article}` updates one [api.php:2].")).toBe(true);
+    expect(keep("`DELETE /articles/:id` removes one [routes.rb:2].")).toBe(true);
+    expect(keep("`POST /tags` creates a tag [api.php:7].")).toBe(false);
+    expect(keep("`OPTIONS /articles` is answered [api.php:2].")).toBe(false);
+  });
+
+  it("checks routes written without a slash or as a bare method, and a resource's implied actions", () => {
+    const dir = repo();
+    writeFileSync(join(dir, "api.php"), ["<?php", "Route::resource('articles', 'ArticleController');", "", "", "", "", "Route::get('tags', 'TagController@index');"].join("\n"));
+    const keep = (claim: string) => checkPage(claim, dir).removed.length === 0;
+
+    expect(keep("`GET articles` lists articles via `ArticleController@index` [api.php:2].")).toBe(true);
+    expect(keep("`PUT`/`PATCH articles/{article}` updates one via `ArticleController@update` [api.php:2].")).toBe(true);
+    expect(keep("`DELETE tags` removes a tag [api.php:7].")).toBe(false);
+    expect(keep("`PUT` updates a tag [api.php:7].")).toBe(false);
+    expect(keep("Articles are exported via `ArticleController@export` [api.php:2].")).toBe(false);
+  });
+});
+
 describe("sentences", () => {
   it("keeps a sentence whole when a citation sits in the middle of it", () => {
     const checked = checkPage("The router comes from `express` [src/articles.ts:1] and is exported at the end of the file [src/articles.ts:5].", repo());

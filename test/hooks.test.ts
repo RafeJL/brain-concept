@@ -30,6 +30,7 @@ describe("brain hooks", () => {
     expect(readFileSync(hookPath, "utf8")).toBe(first);
     expect(first).toContain("citation-brain: managed by `brain hooks`");
     expect(first).toContain("ref='refs/heads/main'");
+    expect(first).toContain("sync 'api' --wiki");
     expect((await hookStatus(store, "api")).installed).toBe(true);
 
     expect(await removeHook(store, "api")).toBe(true);

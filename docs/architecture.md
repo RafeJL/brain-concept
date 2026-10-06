@@ -67,8 +67,12 @@ Two halves share only the store:
 1. A merge to main queues a job for that repo: commit a → b.
 2. `git diff a..b` gives the changed files.
 3. Extractors re-run on those files only; the graph is updated and re-linked across repos. No LLM.
-4. Wiki pages citing changed lines are regenerated and must pass the citation check. Pass →
-   publish tagged with b. Fail → keep the old page and mark it stale.
+4. Wiki pages that cite a changed file, or a folder a file was added to, are rewritten in one
+   Claude Code run and must pass the citation check. Pass → publish tagged with b. Fail → written
+   once more with the removed claims as feedback; fail again → keep the old page, which then
+   shows it was kept from an older commit. Pages that cite nothing changed are re-checked against
+   b without AI and moved to b. One run per repo at a time; a trigger mid-run is folded into one
+   more pass. (Built in W3: the git hook runs `brain sync --wiki`.)
 5. Curated facts citing changed lines are never rewritten automatically; the owner gets a draft PR.
 
 ## MCP tools

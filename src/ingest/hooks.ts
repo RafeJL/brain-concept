@@ -6,8 +6,8 @@ import type { Store } from "../store/store.js";
 import { requireRepo } from "./registry.js";
 
 /**
- * Keeps a repo's facts fresh without anyone running `brain sync`: a git `reference-transaction`
- * hook starts a background sync whenever the tracked ref moves. It catches pulls, merges,
+ * Keeps a repo's facts and wiki fresh without anyone running `brain sync`: a git
+ * `reference-transaction` hook starts a background `brain sync --wiki` whenever the tracked ref moves. It catches pulls, merges,
  * rebases and plain fetches (which have no hook of their own), and never blocks git.
  */
 
@@ -43,12 +43,12 @@ function hookScript(repo: string, trackedRef: string, command: HookCommand): str
   const log = sh(command.logPath);
   return `#!/bin/sh
 ${MARKER}
-# Re-syncs "${repo}" in the brain when ${trackedRef} moves. Remove with: brain hooks remove ${repo}
+# Re-syncs "${repo}" in the brain, and updates its wiki if it has one, when ${trackedRef} moves. Remove with: brain hooks remove ${repo}
 [ "$1" = committed ] || exit 0
 awk -v ref=${sh(trackedRef)} '$3 == ref { found = 1 } END { exit !found }' || exit 0
 (
   echo "$(date '+%Y-%m-%d %H:%M:%S') ${repo}: ${trackedRef} moved" >> ${log}
-  ${env}${sh(command.node)} ${sh(command.brain)} sync ${sh(repo)} >> ${log} 2>&1
+  ${env}${sh(command.node)} ${sh(command.brain)} sync ${sh(repo)} --wiki >> ${log} 2>&1
 ) < /dev/null > /dev/null 2>&1 &
 exit 0
 `;

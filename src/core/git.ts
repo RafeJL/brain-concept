@@ -125,6 +125,22 @@ export async function countCommits(repoPath: string, from: string, to: string): 
   return out === null ? null : Number(out);
 }
 
+export interface ChangedFile {
+  path: string;
+  /** A added, M modified, D deleted, T type changed. Renames show as a delete plus an add. */
+  status: "A" | "M" | "D" | "T";
+}
+
+/** Files that differ between two commits, or null if either commit is unknown here. */
+export async function changedFiles(repoPath: string, from: string, to: string): Promise<ChangedFile[] | null> {
+  const out = await tryGit(repoPath, ["diff", "--name-status", "--no-renames", "-z", from, to]);
+  if (out === null) return null;
+  const parts = out.split("\0").filter(Boolean);
+  const files: ChangedFile[] = [];
+  for (let i = 0; i + 1 < parts.length; i += 2) files.push({ status: parts[i]![0] as ChangedFile["status"], path: parts[i + 1]! });
+  return files;
+}
+
 export async function remoteUrl(repoPath: string): Promise<string | null> {
   const url = await tryGit(repoPath, ["config", "--get", "remote.origin.url"]);
   return url ? stripCredentials(url) : null;

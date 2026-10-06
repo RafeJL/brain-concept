@@ -12,9 +12,10 @@ tracked branch that is, and how it was made, so the agent knows how far to trust
 It is a separate service. The Citation delivery harness (`citation-harness-library`) calls it
 over MCP and keeps all of its own skills.
 
-**Status:** local proof of concept, part-way through the switch to AI-written wikis (W2 of W0–W5:
-pages are generated, every citation is checked before an agent sees it, and the pages are
-served; regenerating them on change is next). See [Where it's going](#where-its-going).
+**Status:** local proof of concept, part-way through the switch to AI-written wikis (W3 of W0–W5:
+pages are generated, every citation is checked before an agent sees it, and the wiki updates
+itself when the code changes, rewriting only the pages affected; routes and calls in any language
+are next). See [Where it's going](#where-its-going).
 
 ## What it can do today
 
@@ -54,10 +55,11 @@ AI-written (llm-generated). Every claim kept here cites lines that exist and con
   item and table row must cite lines that exist at the commit, no citation may span more than 80
   lines, and the names it puts in backticks must appear in the cited lines (allowing for
   paraphrase and namespaces; a route's HTTP method must be there too). Claims that fail are
-  removed. A page where fewer than half pass isn't published, and its previous version stays.
-  `brain wiki` lists what it removed and why. Routes declared without their verb (Laravel's
-  `Route::resource`) lose correct claims under the method rule, which is kept so a wrong method
-  can't pass. On the trial repos about 80% of claims were kept;
+  removed. A page where fewer than half pass is written once more, with the AI told what was
+  removed and why; if it fails again it isn't published, and its previous version stays (marked
+  as kept from an older commit). `brain wiki` lists what it removed and why. A resource
+  declaration (`Route::resource`, Rails `resources`) counts as declaring its CRUD methods and
+  actions. On the trial repos about 80% of claims were kept;
   the removals were real problems, such as `net10.0` cited to a file that doesn't contain it, a
   `FLASK_DEBUG` the code never mentions, or citations spanning 150 lines.
 - **Any language:** the trial generated correct wikis for C#, PHP (Laravel) and Python (Flask)
@@ -67,8 +69,13 @@ AI-written (llm-generated). Every claim kept here cites lines that exist and con
 - **Isolated and read-only:** each run uses `--safe-mode --strict-mcp-config`, with Read, Grep
   and Glob only. No MCP servers, user settings or memory, so it can't call the brain or anything
   else.
-- **Cost:** about $0.65–1.00 and 1–3 minutes per repo with Sonnet. Locally it uses your Claude
-  Code allowance. The cost of each run is reported.
+- **Cost:** about $0.60–1.00 and 1–4 minutes per repo with Sonnet for a full write. An update
+  after a change rewrites only the affected pages, typically $0.05–0.25 in under 30 seconds, and
+  costs nothing when no cited file changed. Locally it uses your Claude Code allowance. The cost
+  of each run is reported.
+- **Prompts are Markdown** in [`src/wiki/prompts/`](src/wiki/prompts/), passed straight to each
+  run. They aren't skills: the task is fixed, and runs load no skills or settings, so a repo being
+  documented can't add its own.
 
 ### "What is this repo?": `brain_repo_card`
 
@@ -149,10 +156,19 @@ come first, and callers in the same repo (its own tests) are marked `same repo`.
 ### It keeps itself up to date
 
 `brain hooks install` adds a git hook to each enrolled repo. Whenever the branch it tracks moves
-(a fetch, pull, merge or rebase), the brain re-syncs that repo in the background. Repos track
+(a fetch, pull, merge or rebase), the brain re-syncs that repo in the background and, if it has a
+wiki, updates it. Only pages that cite a changed file (or a folder a file was added to) go back
+to Claude Code; the rest are re-checked against the new commit and moved forward. Repos track
 what has been merged (`origin/main`), so your editor's auto-fetch is enough, and your own
-unpushed commits never leak into answers. Regenerating wiki pages on change comes in W3; for now,
-run `brain wiki <repo>` again. See [Keeping it fresh](#keeping-it-fresh).
+unpushed commits never leak into answers. See [Keeping it fresh](#keeping-it-fresh).
+
+```
+2026-10-06 09:28:32 flask: refs/heads/master moved
+flask: 4b95fb2 -> 3d2889b (+0 ~1 -0, 44 unchanged; 0 files with seams)
+flask: wiki updated at @3d2889b · $0.22 · 22s
+  build-run-test           8/8 claims kept · published
+  unchanged, moved to @3d2889b: overview, api, articles
+```
 
 ## What it reads
 
@@ -171,7 +187,8 @@ in C#, TypeScript, JavaScript, PHP and Python.
 
 ## What it can't do yet
 
-- **Regenerating pages on change:** W3. Re-run `brain wiki <repo>` for now.
+- **Re-planning the page set:** an update keeps the same pages. If a repo's structure changes a
+  lot, run `brain wiki <repo> --full`.
 - **Routes and calls outside TS/JS, C# and OpenAPI:** W4, by Claude Code.
 - **Search across wikis:** `brain_search`, in W5.
 - **Curated knowledge** (people correcting and confirming facts): phase 4.
@@ -227,8 +244,8 @@ Run from this folder with `npm run brain -- <command>`, or from anywhere with
 | `repo list` | Enrolled repos, the commit each is indexed at, and how far behind it is. |
 | `repo set-ref <name> <ref>` | Index a different branch, e.g. `origin/release`. Updates the repo's hook if it has one. |
 | `repo remove <name>` | Remove a repo, everything the brain holds about it, and its hook. |
-| `sync [<name>]` | Index the tracked branch's committed tree (never your working copy). All repos if no name. |
-| `wiki <name> [--model m]` | Have Claude Code write the repo's wiki at the indexed commit, check every citation, and store what passes. It prints each page's kept/total claims and the first few removed, with reasons. Default model `sonnet`. |
+| `sync [<name>] [--wiki]` | Index the tracked branch's committed tree (never your working copy). All repos if no name. `--wiki` also updates the wiki of each repo that has one (what the hook runs). |
+| `wiki <name> [--full] [--model m]` | Sync, then bring the repo's wiki up to that commit: written in full the first time (or with `--full`), afterwards only the pages a change affects. Every citation is checked and only what passes is stored. It prints each page's kept/total claims and the first few removed, with reasons. Default model `sonnet`. |
 | `page <name> [<page>]` | `brain_get`: the page list, or one page. |
 | `hooks install [<name>]` | Re-sync automatically whenever the tracked branch moves. All repos if no name. |
 | `hooks remove [<name>]` / `hooks status` | Stop automatic syncing / see which repos sync automatically, or why one can't. |
@@ -243,11 +260,19 @@ example a throwaway one while testing.
 
 `brain hooks install` puts a git `reference-transaction` hook in each enrolled repo. When the
 tracked ref moves, including on a plain `git fetch`, which has no hook of its own, it starts
-`brain sync <name>` in the background and returns at once, so git is never slowed down. Runs are
-logged to `%USERPROFILE%\.brain\hooks.log`. Read it with `-Encoding utf8` in Windows PowerShell.
+`brain sync <name> --wiki` in the background and returns at once, so git is never slowed down.
+That syncs the repo and, if it has a wiki, updates it. Repos without a wiki never call the AI.
+Runs are logged to `%USERPROFILE%\.brain\hooks.log`. Read it with `-Encoding utf8` in Windows
+PowerShell.
+
+Only one sync per repo runs at a time. If the branch moves again mid-run, that run goes round
+once more when it finishes, so the latest commit is always covered. A lock left by a crashed run
+is taken over. Hooks installed before W3 only sync: run `brain hooks install` again to update
+them.
 
 This works with any remote, not just GitHub. "Up to date" means "as of the last fetch". The card
-and every page say when the wiki is older than the index.
+and every page say when the wiki is older than the index, and a page kept after a failed rewrite
+says so.
 
 The hook won't be installed if the repo already has its own `reference-transaction` hook, or if
 `core.hooksPath` points inside the repo (as husky does), because that would change tracked files.
@@ -273,9 +298,9 @@ Hooks run whichever brain code is checked out in this folder.
 | 0, 1, 3a | Index, seam graph, `brain_find_consumers`, `brain_impact`, repo cards, auto-sync | ✅ |
 | W0 | Trial: Claude Code finds every RealWorld endpoint in 5 repos and 5 languages; pages accurate | ✅ |
 | W1 | Wiki pages: `brain wiki`, `brain_get`; the old fact readers removed | ✅ |
-| W2 | Every citation checked automatically; unsupported claims removed; a failing page keeps its previous version | ✅ (this branch) |
-| W3 | Pages regenerated on change, only what changed | Next |
-| W4 | Routes and calls in any language by Claude Code; the parsers removed | Planned |
+| W2 | Every citation checked automatically; unsupported claims removed; a failing page keeps its previous version | ✅ |
+| W3 | The wiki updates itself from the hooks, rewriting only affected pages; a failing page is retried once | ✅ (this branch) |
+| W4 | Routes and calls in any language by Claude Code; the parsers removed | Next |
 | W5 | `brain_search` across wikis; final docs | Planned |
 | 2, 4, 6 | Harness evals, curated context, hosting | After the switch |
 
@@ -287,10 +312,10 @@ Read [`docs/architecture.md`](docs/architecture.md) for the design,
 
 ```
 bin/            launchers that run the TypeScript from any folder
-src/core/       types, git access, language detection, HTTP path matching
+src/core/       types, git access, language detection, HTTP path matching, the per-repo run queue
 src/store/      Store interface, SQLite implementation, migrations
 src/ingest/     registry, sync, hooks, extractor plugins (the write side)
-src/wiki/       Claude Code runner and wiki generation
+src/wiki/       Claude Code runner, prompts (Markdown), wiki generation and updates, citation checker
 src/serve/      access policy, freshness, tools, MCP server (the read side)
 test/           vitest; fixtures are real files in their own languages
 docs/           architecture, research, decisions, manual testing

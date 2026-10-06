@@ -29,6 +29,14 @@ const SLACK = 3;
 /** Shorter fragments (lead-ins like "Common invocations:") aren't claims. */
 const MIN_CLAIM_CHARS = 20;
 
+/**
+ * Declarations that serve a resource's CRUD routes without naming them: Laravel
+ * `Route::resource`/`apiResource`, Rails `resources :x`. They imply these methods and actions.
+ */
+const RESOURCE = /route::(api)?resources?\s*\(|->(api)?resources?\s*\(|^\s*resources?\s+:/m;
+const CRUD = new Set(["get", "post", "put", "patch", "delete"]);
+const CRUD_ACTIONS = new Set(["index", "create", "new", "store", "show", "edit", "update", "destroy"]);
+
 const BRACKET = /\[([^[\]]+)\](?!\()/g;
 const SOURCE = /^\s*([^\s:;,[\]]+):(\d+(?:\s*-\s*\d+)?(?:\s*,\s*\d+(?:\s*-\s*\d+)?)*)\s*$/;
 
@@ -156,12 +164,16 @@ function supported(term: string, cites: readonly Citation[], root: string, spans
   const path = term.replace(/^\.?\//, "").replace(/\/\*{1,2}$/, "").replace(/\/$/, "");
   if (cites.some((c) => c.path === path)) return true;
   if (/[/\\]|\.\w{1,6}$/.test(path) && !/\s/.test(path) && existsSync(join(root, path))) return true;
-  // A route (`PATCH /articles/{slug}`) needs its method in the cited lines too, as get, HttpGet, Route::get…
-  const verb = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\//i.exec(term)?.[1];
-  if (verb && !spans.some((span) => span.includes(verb.toLowerCase()))) return false;
+  // A route (`PATCH /articles/{slug}`, `GET articles`, a bare `PUT`) needs its method in the cited
+  // lines too, as get, HttpGet, Route::get…, or a resource declaration there.
+  const verb = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)(?=\s|$)/i.exec(term)?.[1]?.toLowerCase();
+  if (verb && !spans.some((span) => span.includes(verb) || (CRUD.has(verb) && RESOURCE.test(span)))) return false;
+  if (verb && term.length === verb.length) return true;
   const words = term.match(/[A-Za-z_][A-Za-z0-9_-]*/g)?.filter((w) => w.length >= 3) ?? [];
   const needle = loose(words.at(-1) ?? term);
   if (spans.some((span) => loose(span).includes(needle))) return true;
+  // `ArticleController@show` for a resource's implied action.
+  if (CRUD_ACTIONS.has(needle) && spans.some((span) => RESOURCE.test(span))) return true;
   return cites.some((c) => [c.path, ...siblings(root, c.path)].some((file) => loose(basename(file, extname(file))) === needle));
 }
 

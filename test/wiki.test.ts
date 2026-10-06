@@ -14,14 +14,18 @@ import { commit, git, repoFromFixture } from "./helpers.js";
 
 const RECORDED = readFileSync(fileURLToPath(new URL("./fixtures/wiki/claude-pages-result.json", import.meta.url)), "utf8");
 
-/** Answers like Claude Code did, and remembers what it was asked and what it could see. */
-function fakeRunner(stdout = RECORDED) {
+/**
+ * Answers like Claude Code did, one recorded result per run (the last repeats), and remembers
+ * what it was asked and what it could see.
+ */
+function fakeRunner(...outputs: string[]) {
+  const answers = outputs.length ? outputs : [RECORDED];
   const seen: { request: RunRequest; files: Record<string, string | null> }[] = [];
   const runner: Runner = {
     async run<T>(request: RunRequest) {
       const read = (path: string) => (existsSync(join(request.cwd, path)) ? readFileSync(join(request.cwd, path), "utf8") : null);
       seen.push({ request, files: { "src/articles.ts": read("src/articles.ts"), "NOTES.md": read("NOTES.md") } });
-      return parseClaudeResult<T>(stdout);
+      return parseClaudeResult<T>(answers[Math.min(seen.length, answers.length) - 1]!);
     },
   };
   return { runner, seen };
@@ -98,7 +102,7 @@ describe("brain wiki", () => {
     await generateWiki(store, fakeRunner().runner, "api");
     const bad = JSON.stringify({ is_error: false, structured_output: { pages: [{ slug: "Not A Slug", title: "x", markdown: "y" }] } });
 
-    await expect(generateWiki(store, fakeRunner(bad).runner, "api")).rejects.toThrow(/malformed/);
+    await expect(generateWiki(store, fakeRunner(bad).runner, "api", { full: true })).rejects.toThrow(/malformed/);
     expect(store.pages("api").map((p) => p.slug)).toEqual(["overview", "build-run-test", "api"]);
   });
 
@@ -128,7 +132,7 @@ describe("brain wiki", () => {
       { slug: "api", title: "API", markdown: "# API\n\n- `GET /articles/:slug` is public [src/articles.ts:3].\n- `PATCH /articles/:slug` edits one [src/articles.ts:4]." },
     ]);
 
-    const wiki = await generateWiki(store, fakeRunner(next).runner, "api");
+    const wiki = await generateWiki(store, fakeRunner(next).runner, "api", { full: true });
 
     expect(wiki.reports.map((r) => [r.slug, r.published])).toEqual([["overview", false], ["api", true]]);
     expect(store.pages("api").map((p) => p.slug)).toEqual(["overview", "api"]);
@@ -144,7 +148,7 @@ describe("brain wiki", () => {
     await generateWiki(store, fakeRunner().runner, "api");
     const bad = recorded([{ slug: "overview", title: "Overview", markdown: "# Overview\n\nIt uses `Kafka` [src/articles.ts:1]." }]);
 
-    await expect(generateWiki(store, fakeRunner(bad).runner, "api")).rejects.toThrow(/No page passed the citation check.*overview: 0\/1/);
+    await expect(generateWiki(store, fakeRunner(bad).runner, "api", { full: true })).rejects.toThrow(/No page passed the citation check.*overview: 0\/1/);
     expect(store.pages("api").map((p) => p.slug)).toEqual(["overview", "build-run-test", "api"]);
   });
 
@@ -153,6 +157,118 @@ describe("brain wiki", () => {
     await enrolRepo(store, { path: repoFromFixture("articles-api"), name: "api" });
 
     await expect(generateWiki(store, fakeRunner().runner, "api")).rejects.toThrow(/brain sync api/);
+  });
+});
+
+describe("updating the wiki", () => {
+  /** For when no AI run may happen. */
+  const never: Runner = {
+    async run() {
+      throw new Error("no AI run expected");
+    },
+  };
+  const overview = { slug: "overview", title: "Overview", markdown: "# Overview\n\n`articles-api` is an Express API serving articles [README.md:1; src/articles.ts:1-5]." };
+  const goodApi = { slug: "api", title: "API", markdown: "# API\n\n- `GET /articles/:slug` returns one article [src/articles.ts:3]." };
+  const badApi = { slug: "api", title: "API", markdown: "# API\n\nEvents go to `Kafka` [src/articles.ts:3]. Results are cached in `Redis` [src/articles.ts:4]." };
+
+  /** A wiki at the first commit, then a commit changing `files`, synced. */
+  async function changed(files: Record<string, string>) {
+    const { store, dir, sha, deps } = await setup();
+    await generateWiki(store, fakeRunner().runner, "api");
+    const next = commit(dir, files);
+    await syncRepo(store, "api");
+    return { store, dir, sha, next, deps };
+  }
+  const editedArticles = () => readFileSync(fileURLToPath(new URL("./fixtures/repos/articles-api/src/articles.ts", import.meta.url)), "utf8") + "// audited\n";
+
+  it("rewrites only the pages whose cited files changed, and carries the rest forward", async () => {
+    const { store, next } = await changed({ "src/articles.ts": editedArticles() });
+    const { runner, seen } = fakeRunner(recorded([overview, goodApi]));
+
+    const wiki = await generateWiki(store, runner, "api");
+
+    expect(wiki).toMatchObject({ mode: "update", carried: ["build-run-test"] });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.request.prompt).toContain("- M src/articles.ts");
+    expect(seen[0]!.request.prompt).toContain('<page slug="api">');
+    expect(seen[0]!.request.prompt).not.toContain('<page slug="build-run-test">');
+    expect(JSON.stringify(seen[0]!.request.schema)).toContain('"enum":["overview","api"]');
+    expect(store.pages("api").map((p) => [p.slug, p.commit])).toEqual([
+      ["overview", next],
+      ["build-run-test", next],
+      ["api", next],
+    ]);
+    expect(store.pages("api")[2]!.markdown).toBe(goodApi.markdown);
+  });
+
+  it("treats a file added beside a cited one as a change to that page", async () => {
+    const { store } = await changed({ "src/tags.ts": "export const tags = [];\n" });
+    const { runner, seen } = fakeRunner(recorded([overview, goodApi]));
+
+    await generateWiki(store, runner, "api");
+
+    expect(seen[0]!.request.prompt).toContain("- A src/tags.ts");
+    expect(seen[0]!.request.prompt).toContain('<page slug="overview">');
+    expect(seen[0]!.request.prompt).not.toContain('<page slug="build-run-test">');
+  });
+
+  it("runs no AI when nothing the pages cite changed, and moves them to the new commit", async () => {
+    const { store, next } = await changed({ "docs/notes.md": "uncited" });
+
+    const wiki = await generateWiki(store, never, "api");
+    const again = await generateWiki(store, never, "api");
+
+    expect(wiki).toMatchObject({ reports: [], carried: ["overview", "build-run-test", "api"], costUsd: 0 });
+    expect(again).toMatchObject({ reports: [], carried: [] });
+    expect(store.pages("api").every((p) => p.commit === next)).toBe(true);
+  });
+
+  it("writes a failing page once more, telling the AI what the check removed", async () => {
+    const { store } = await changed({ "src/articles.ts": editedArticles() });
+    const { runner, seen } = fakeRunner(recorded([overview, badApi]), recorded([goodApi]));
+
+    const wiki = await generateWiki(store, runner, "api");
+
+    expect(seen).toHaveLength(2);
+    expect(seen[1]!.request.prompt).toContain("`Kafka` isn't in the cited lines");
+    expect(JSON.stringify(seen[1]!.request.schema)).toContain('"enum":["api"]');
+    expect(wiki.reports.map((r) => [r.slug, r.published, r.attempts])).toEqual([
+      ["overview", true, 1],
+      ["api", true, 2],
+    ]);
+    expect(store.pages("api")[2]!.markdown).toBe(goodApi.markdown);
+  });
+
+  it("keeps the last good page when the second attempt fails too, and says so", async () => {
+    const { store, sha, next, deps } = await changed({ "src/articles.ts": editedArticles() });
+    const before = store.pages("api")[2]!;
+
+    const wiki = await generateWiki(store, fakeRunner(recorded([overview, badApi]), recorded([badApi])).runner, "api");
+    const list = await getPage(deps, LOCAL_CALLER, { repo: "api" });
+    const page = await getPage(deps, LOCAL_CALLER, { repo: "api", page: "api" });
+    const card = await repoCard(deps, LOCAL_CALLER, "api", "concise");
+
+    expect(wiki.reports.map((r) => [r.slug, r.published, r.attempts])).toEqual([
+      ["overview", true, 1],
+      ["api", false, 2],
+    ]);
+    expect(store.pages("api").map((p) => p.commit)).toEqual([next, next, sha]);
+    expect(store.pages("api")[2]).toEqual(before);
+    const kept = `kept from @${sha.slice(0, 7)}: its rewrite at @${next.slice(0, 7)} failed the citation check`;
+    expect(list.text).toContain(`API (${kept})`);
+    expect(page.text).toContain(`Note: ${kept}, so this older version is shown.`);
+    expect(card.text).not.toContain("older than the index");
+  });
+
+  it("rewrites every page when the commit they describe can't be compared", async () => {
+    const { store } = await changed({ "docs/notes.md": "uncited" });
+    store.replacePages("api", store.pages("api").map((p) => ({ ...p, commit: "0".repeat(40) })));
+    const { runner, seen } = fakeRunner();
+
+    const wiki = await generateWiki(store, runner, "api");
+
+    expect(seen[0]!.request.prompt).toContain("can't be compared");
+    expect(wiki.reports.map((r) => r.slug)).toEqual(["overview", "build-run-test", "api"]);
   });
 });
 

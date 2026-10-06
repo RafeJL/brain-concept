@@ -7,7 +7,7 @@ sessions. Run it before merging anything that changes what the brain extracts or
 There are three parts:
 
 - **Part A** builds a playground from real repos, with a local stand-in for GitHub, and drives
-  auto-sync, repo cards and neighbours through pushes and fetches.
+  auto-sync, wiki updates, repo cards and neighbours through pushes and fetches.
 - **Part B** checks every tool against real open-source repos.
 - **Part C** checks Claude Code reaches for the brain on its own.
 
@@ -113,7 +113,7 @@ git -C $P\aspnet-api worktree list
 ```
 
 **Expect:**
-- `pg-aspnet-api: wiki at @a397d11 · $… · …s`, then one line per page such as
+- `pg-aspnet-api: wiki written at @a397d11 · $… · …s`, then one line per page such as
   `build-run-test  19/22 claims kept · published`, with up to three `removed: … ` lines saying
   why. Read the removed claims. Each should be a real problem (the named thing isn't in the
   cited lines, a missing file, an over-broad span), not the checker being too strict;
@@ -162,12 +162,26 @@ npm run brain -- card pg-aspnet-api
 **Expect:**
 - a new commit;
 - `Seams: 20 routes`;
-- `Wiki: 4 pages (…) · read with brain_get · written at @a397d11, older than the index`. The wiki
-  hasn't been regenerated, and the card says so rather than pretending it is current.
+- `Wiki: 4 pages (…) · read with brain_get · written at @a397d11, older than the index`. The sync
+  is done; the wiki update is still running in the background.
 
-Nobody ran `sync`. Regenerating pages automatically comes in W3. For now,
-`npm run brain -- wiki pg-aspnet-api` brings the wiki up to the new commit, and the "older"
-note disappears.
+Now give the wiki update about a minute, then look again:
+
+```
+Get-Content $env:USERPROFILE\.brain\hooks.log -Tail 8 -Encoding utf8
+npm run brain -- card pg-aspnet-api
+npm run brain -- page pg-aspnet-api api
+```
+
+**Expect:**
+- in the log, `pg-aspnet-api: wiki updated at @… · $… · …s`, one line for each page that cites
+  `ArticlesController.cs` (at least `api`), and `unchanged, moved to @…:` listing the rest. Only
+  the pages a change affects go back to Claude Code; the others are re-checked and moved forward
+  with no AI;
+- the card's wiki line without the "older than the index" note;
+- the API page mentioning the new `POST …/archive` route, cited to `ArticlesController.cs`.
+
+Nobody ran `sync` or `wiki`.
 
 ### A4. A change in one repo updates another repo's card
 
@@ -230,6 +244,7 @@ npm run brain -- impact pg-aspnet-api --route "POST /articles/{slug}/archive"
 ```
 
 **Expect** `Seams: 19 routes` again, and `No matching routes are declared in pg-aspnet-api.`
+A minute later, `npm run brain -- page pg-aspnet-api api` no longer mentions the archive route.
 
 ### A7. The hook's log
 
@@ -238,8 +253,11 @@ Get-Content $env:USERPROFILE\.brain\hooks.log -Tail 6 -Encoding utf8
 ```
 
 **Expect** two lines per fetch, for example `pg-aspnet-api: refs/remotes/origin/master moved`
-and `pg-aspnet-api: a397d11 -> 067d67b (+1 ~1 -0, 113 unchanged; 1 files with seams)`. There
-should be no errors.
+and `pg-aspnet-api: a397d11 -> 067d67b (+1 ~1 -0, 113 unchanged; 1 files with seams)`, followed
+by the wiki update for repos that have a wiki (pg-react-web has none, so it never calls the AI).
+There should be no errors. If two fetches land close together, the second is folded into one
+more pass of the run already going. On Windows the log can then miss the second "moved" line,
+but the last sync line always shows the newest commit.
 
 ### A8. Track another branch
 
@@ -285,7 +303,7 @@ npm run brain -- hooks install
 
 | Command | Expect |
 |---|---|
-| `wiki laravel-api`, then `page laravel-api api` | Four pages for a PHP repo the parsers can't read; the API page lists the RealWorld endpoints, each cited to `routes/api.php` |
+| `wiki laravel-api`, then `page laravel-api api` | Four pages for a PHP repo the parsers can't read; the API page lists the RealWorld endpoints, each cited to `routes/api.php`, including `GET articles/{article}` and the other routes `Route::resource` declares without naming |
 | `wiki flask-api`, then `page flask-api api` | The same for Python: blueprints in `conduit/*/views.py`, `JWT_HEADER_TYPE = 'Token'` cited to `conduit/settings.py` |
 | `card aspnet-api` | `Wiki: 4 pages (…)` once generated; `Seams: 19 routes`; `Called by: react-web (22 calls)` |
 | `card react-web` | `22 calls (+4 with run-time URLs)`; `Calls: aspnet-api (19 endpoints) · express-api (19 endpoints)` |

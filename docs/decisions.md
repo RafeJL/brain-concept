@@ -237,3 +237,42 @@ On the trial wikis about 80% of claims were kept, and every removal read was a r
 
 The checker can't tell whether a claim reads its lines correctly, so pages stay `llm-generated`.
 The rules change only on evidence from real pages, with the case added to the tests.
+
+## 2026-10-06: the wiki updates itself, one affected page at a time
+
+The git hook now runs `brain sync <repo> --wiki`: sync, then update the wiki if the repo has one.
+A page is rewritten only if a file it cites changed or was deleted, or a file was added in a
+folder it cites. Every other page is re-checked against the new commit, with no AI, and moved to
+it. On flask-api a one-line `Procfile` change rewrote one page for $0.22 instead of four for
+about $0.70; later small changes cost $0.05.
+
+A page that fails the check is written once more, with the removed claims and reasons in the
+prompt, because output varies between runs (W2 saw a laravel run fail and its rerun pass). If it
+fails again, the previous version stays and `brain_get` says it was kept from an older commit.
+That is derived from the page's commit, so there's no stale flag to keep in step.
+
+One run per repo at a time, across processes: a lock file next to the store. A trigger that
+arrives mid-run leaves a marker, and the running process goes round once more, so the newest
+commit is always covered without stacking runs. A lock whose process died is taken over.
+
+Not built, for lack of evidence it's needed: re-planning the page set when a repo's structure
+changes (`brain wiki --full` does it by hand), and a separate `--status` command (the page list
+marks any page kept from an older commit).
+
+## 2026-10-06: a resource declaration implies its CRUD routes
+
+`Route::resource`, `Route::apiResource` and Rails `resources :x` serve GET, POST, PUT, PATCH and
+DELETE routes, and the index, store, show, update and destroy actions, without naming them. When
+the cited lines contain one, the checker accepts those methods and actions. The method rule also
+covers routes written without a leading slash (`GET articles`) and bare methods (`PUT`). On
+laravel-api, `GET articles/{article}` and the other resource routes now survive. Claims that cite
+only the handler still lose the method check, so the prompt now asks for the route's declaring
+line as well as its handler.
+
+## 2026-10-06: prompts are Markdown files, not skills
+
+The AI's instructions live in `src/wiki/prompts/*.md` and are passed straight to `claude -p`.
+They aren't skills: a skill is something an agent may choose to load, but here the prompt is the
+task. Runs load no skills or settings (`--safe-mode`), so a repo being documented can't inject
+its own. The prompts describe what the checker enforces, so they're versioned and reviewed with
+the code.

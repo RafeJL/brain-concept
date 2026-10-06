@@ -6,6 +6,7 @@ import type { Caller } from "../access.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
 import { neighbours, type Neighbour, type Neighbours } from "../neighbours.js";
 import { count, requireSyncedRepo, type Format, type ToolDeps, type ToolResult } from "./common.js";
+import { wikiCommit } from "./get-page.js";
 
 export interface RepoCard {
   repo: string;
@@ -51,7 +52,7 @@ export async function repoCard(deps: ToolDeps, caller: Caller, name: string, for
       .map((l) => l.language)
       .filter((language) => CODE_LANGUAGES.has(language) && !SEAM_LANGUAGES.has(language)),
     neighbours: neighbours(deps.store, name, readable),
-    wiki: wikiOf(deps, name),
+    wiki: wikiOf(deps, name, state.commit),
   };
   return { ok: true, data: card, text: format === "detailed" ? detailedText(card) : conciseText(card) };
 }
@@ -90,9 +91,9 @@ function detailedText(card: RepoCard): string {
   ].join("\n");
 }
 
-function wikiOf(deps: ToolDeps, name: string): RepoCard["wiki"] {
+function wikiOf(deps: ToolDeps, name: string, indexed: string): RepoCard["wiki"] {
   const pages = deps.store.pages(name);
-  return pages.length ? { pages: pages.map((p) => p.slug), commit: pages[0]!.commit } : null;
+  return pages.length ? { pages: pages.map((p) => p.slug), commit: wikiCommit(pages, indexed) } : null;
 }
 
 function wikiLine({ repo, wiki, freshness }: RepoCard): string {

@@ -2,6 +2,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { resolveDbPath } from "./config.js";
+import { runQueued } from "./core/queue.js";
 import { BrainError } from "./core/types.js";
 import { hookStatus, installHook, removeHook, type HookCommand } from "./ingest/hooks.js";
 import { enrolRepo, removeRepo, setRepoRef } from "./ingest/registry.js";
@@ -14,7 +15,7 @@ import { getPage } from "./serve/tools/get-page.js";
 import { impact } from "./serve/tools/impact.js";
 import { repoCard } from "./serve/tools/repo-card.js";
 import { SqliteStore } from "./store/sqlite.js";
-import { DEFAULT_MODEL, generateWiki } from "./wiki/generate.js";
+import { DEFAULT_MODEL, generateWiki, type WikiResult } from "./wiki/generate.js";
 import { claudeRunner } from "./wiki/runner.js";
 import type { Store } from "./store/store.js";
 
@@ -25,10 +26,12 @@ Usage:
   brain repo list                                          enrolled repos and freshness
   brain repo set-ref <name> <ref>                          index a different ref, e.g. origin/main
   brain repo remove <name>                                 remove a repo, its facts and its hook
-  brain sync [<name>]                                      index the tracked branch (all repos if no name)
+  brain sync [<name>] [--wiki]                             index the tracked branch (all repos if no name);
+                                                           --wiki also updates the wiki of repos that have one
   brain hooks install|remove [<name>]                      re-sync automatically when the tracked ref moves
   brain hooks status                                       which repos sync automatically
-  brain wiki <name> [--model <model>]                      have Claude Code write the repo's wiki (default ${DEFAULT_MODEL})
+  brain wiki <name> [--full] [--model <model>]             sync, then have Claude Code write the repo's wiki, or
+                                                           rewrite only the pages changes affect (default ${DEFAULT_MODEL})
   brain page <name> [<page>]                               a wiki page (or the page list) as an agent gets it
   brain card <name> [--detailed]                           the repo card an agent would get
   brain consumers "<METHOD /path>" [--detailed]            who serves and who calls an endpoint
@@ -47,6 +50,8 @@ async function main(argv: string[]): Promise<void> {
       path: { type: "string" },
       route: { type: "string" },
       model: { type: "string" },
+      wiki: { type: "boolean", default: false },
+      full: { type: "boolean", default: false },
       detailed: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
@@ -88,27 +93,20 @@ async function main(argv: string[]): Promise<void> {
       case "sync": {
         const names = sub ? [sub] : store.listRepos().map((repo) => repo.name);
         if (names.length === 0) throw new BrainError("No repos enrolled. Run: brain repo add <path>");
-        for (const name of names) printSync(await syncRepo(store, name));
+        for (const name of names) {
+          if (!values.wiki) printSync(await syncRepo(store, name));
+          else await syncAndWiki(store, name, { model: values.model, onlyIfWiki: true });
+        }
         break;
       }
       case "hooks":
         await hooks(store, sub, arg);
         break;
-      case "wiki": {
-        if (!sub) throw new BrainError("Usage: brain wiki <name> [--model <model>]");
-        console.log(`Writing ${sub}'s wiki with Claude Code (${values.model ?? DEFAULT_MODEL}); this takes a few minutes...`);
-        const wiki = await generateWiki(store, claudeRunner, sub, values.model);
-        console.log(`${wiki.repo}: wiki at @${wiki.commit.slice(0, 7)} · $${wiki.costUsd.toFixed(2)} · ${Math.round(wiki.durationMs / 1000)}s`);
-        for (const report of wiki.reports) {
-          const kept = report.claims - report.removed.length;
-          const state = report.published ? "published" : "NOT published (too few claims supported; previous version kept if any)";
-          console.log(`  ${report.slug.padEnd(24)} ${kept}/${report.claims} claims kept · ${state}`);
-          for (const claim of report.removed.slice(0, 3)) console.log(`    removed: ${claim.reason} · "${claim.text.slice(0, 90)}…"`);
-          if (report.removed.length > 3) console.log(`    … and ${report.removed.length - 3} more`);
-        }
-        console.log(`Read them with: brain page ${wiki.repo}`);
+      case "wiki":
+        if (!sub) throw new BrainError("Usage: brain wiki <name> [--full] [--model <model>]");
+        console.log(`Bringing ${sub}'s wiki up to date with Claude Code (${values.model ?? DEFAULT_MODEL}); writing pages takes a few minutes...`);
+        await syncAndWiki(store, sub, { model: values.model, full: values.full });
         break;
-      }
       case "page":
         if (!sub) throw new BrainError("Usage: brain page <name> [<page>]");
         print(await getPage(tools, LOCAL_CALLER, { repo: sub, page: arg }));
@@ -131,6 +129,42 @@ async function main(argv: string[]): Promise<void> {
   } finally {
     store.close();
   }
+}
+
+/**
+ * Syncs a repo, then brings its wiki up to the new commit, one run per repo at a time: a hook
+ * firing mid-run is folded into one more pass when this one finishes.
+ */
+async function syncAndWiki(store: Store, name: string, options: { model?: string; full?: boolean; onlyIfWiki?: boolean }): Promise<void> {
+  let full = options.full;
+  const outcome = await runQueued(join(dirname(resolveDbPath()), "locks"), name, async () => {
+    printSync(await syncRepo(store, name));
+    if (options.onlyIfWiki && store.pages(name).length === 0) return;
+    printWiki(await generateWiki(store, claudeRunner, name, { model: options.model, full }));
+    full = false;
+  });
+  if (outcome === "queued") console.log(`${name}: already being synced; that run will go again to pick this up.`);
+}
+
+function printWiki(wiki: WikiResult): void {
+  const at = `@${wiki.commit.slice(0, 7)}`;
+  if (wiki.reports.length === 0) {
+    const carried = wiki.carried.length ? `; ${wiki.carried.length} pages re-checked and moved to ${at}` : "";
+    console.log(`${wiki.repo}: wiki up to date at ${at}, nothing its pages cite changed (no AI run${carried})`);
+    return;
+  }
+  const action = wiki.mode === "full" ? "written" : "updated";
+  console.log(`${wiki.repo}: wiki ${action} at ${at} · $${wiki.costUsd.toFixed(2)} · ${Math.round(wiki.durationMs / 1000)}s`);
+  for (const report of wiki.reports) {
+    const kept = report.claims - report.removed.length;
+    const state = report.published ? "published" : "NOT published (too few claims supported; previous version kept if any)";
+    const twice = report.attempts > 1 ? " · second attempt" : "";
+    console.log(`  ${report.slug.padEnd(24)} ${kept}/${report.claims} claims kept · ${state}${twice}`);
+    for (const claim of report.removed.slice(0, 3)) console.log(`    removed: ${claim.reason} · "${claim.text.slice(0, 90)}…"`);
+    if (report.removed.length > 3) console.log(`    … and ${report.removed.length - 3} more`);
+  }
+  if (wiki.carried.length) console.log(`  unchanged, moved to ${at}: ${wiki.carried.join(", ")}`);
+  console.log(`Read them with: brain page ${wiki.repo}`);
 }
 
 /** How the hook should run this CLI: absolute paths, since hooks get no predictable PATH. */

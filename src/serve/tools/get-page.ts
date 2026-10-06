@@ -24,6 +24,14 @@ function checkedNote(page: WikiPage): string {
   return `citations checked: ${kept} of ${page.claims} claims kept${page.removed ? ` (${page.removed} removed)` : ""}`;
 }
 
+/**
+ * The commit a wiki describes: the indexed one if any page is at it. Pages at an older commit
+ * than that were kept because their rewrite failed the citation check.
+ */
+export function wikiCommit(pages: readonly WikiPage[], indexed: string): string {
+  return pages.some((p) => p.commit === indexed) ? indexed : pages[0]!.commit;
+}
+
 const CAUTION =
   "AI-written (llm-generated). Every claim kept here cites lines that exist and contain what it names; " +
   "whether it reads them correctly isn't checked, so confirm at the citation before relying on it.";
@@ -38,9 +46,12 @@ export async function getPage(deps: ToolDeps, caller: Caller, input: PageInput):
   if (pages.length === 0) {
     return { ok: false, text: `${repo.name} has no wiki yet. Generate it with: brain wiki ${repo.name}` };
   }
+  const newest = wikiCommit(pages, state.commit);
+  const keptNote = (p: WikiPage) =>
+    p.commit === newest ? "" : `kept from @${p.commit.slice(0, 7)}: its rewrite at @${newest.slice(0, 7)} failed the citation check`;
   if (!input.page) {
-    const rows = pages.map((p) => `  ${p.slug.padEnd(24)} ${p.title}`);
-    const freshness = await freshnessOf(repo, { ...state, commit: pages[0]!.commit });
+    const rows = pages.map((p) => `  ${p.slug.padEnd(24)} ${p.title}${keptNote(p) ? ` (${keptNote(p)})` : ""}`);
+    const freshness = await freshnessOf(repo, { ...state, commit: newest });
     const text = [
       `${repo.name} wiki · ${pages.length} pages · ${describeFreshness(freshness, repo.ref)} · llm-generated`,
       ...rows,
@@ -57,6 +68,7 @@ export async function getPage(deps: ToolDeps, caller: Caller, input: PageInput):
   const freshness = await freshnessOf(repo, { ...state, commit: page.commit });
   const text = [
     `${repo.name} · ${page.slug} · ${describeFreshness(freshness, repo.ref)} · llm-generated · ${checkedNote(page)}`,
+    ...(keptNote(page) ? [`Note: ${keptNote(page)}, so this older version is shown.`] : []),
     "",
     page.markdown,
     "",
