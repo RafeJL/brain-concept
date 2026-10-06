@@ -3,6 +3,7 @@ import type { Seam } from "../../core/seams.js";
 import type { Caller } from "../access.js";
 import {
   alsoDeclared,
+  builtFrom,
   count,
   endpointOf,
   footer,
@@ -53,12 +54,16 @@ export async function findConsumers(deps: ToolDeps, caller: Caller, input: Consu
   });
   const matchOf = new Map(matches.map(({ seam, match }) => [seam, match]));
   const servers = groupRoutes(matches.filter(({ seam }) => seam.kind === "http-route").map(({ seam }) => seam));
+  const serving = new Set(servers.map((s) => s.primary.repo));
+  // A repo calling an endpoint it serves itself (its tests, its own front end) is listed after other callers.
+  const selfCall = (hit: Hit) => hit.role === "caller" && serving.has(hit.seam.repo);
   const hits: Hit[] = [
     ...servers.map(({ primary, also }): Hit => ({ role: "server", seam: primary, match: matchOf.get(primary)!, also })),
     ...matches.filter(({ seam }) => seam.kind === "http-call").map(({ seam, match }): Hit => ({ role: "caller", seam, match, also: [] })),
   ].sort(
     (a, b) =>
       Number(a.role === "caller") - Number(b.role === "caller") ||
+      Number(selfCall(a)) - Number(selfCall(b)) ||
       Number(a.match === "suffix") - Number(b.match === "suffix") ||
       a.seam.repo.localeCompare(b.seam.repo) ||
       a.seam.path.localeCompare(b.seam.path) ||
@@ -74,17 +79,19 @@ async function render(deps: ToolDeps, { target, hits }: Consumers, scope: string
   if (hits.length === 0) return [`No servers or callers found for ${label}.`, unresolvedNote(deps, scope)].filter(Boolean).join("\n");
 
   const servers = hits.filter((h) => h.role === "server").length;
+  const serving = new Set(hits.filter((h) => h.role === "server").map((h) => h.seam.repo));
   const repos = new Set(hits.map((h) => h.seam.repo));
   const page = hits.slice(offset, offset + PAGE_SIZE);
-  const out = [`${label} · ${count(servers, "server")}, ${count(hits.length - servers, "caller")} in ${count(repos.size, "repo")} · parser-built`];
+  const out = [`${label} · ${count(servers, "server")}, ${count(hits.length - servers, "caller")} in ${count(repos.size, "repo")} · llm-generated`];
   for (const role of ["server", "caller"] as const) {
     const rows = page.filter((h) => h.role === role);
     if (rows.length === 0) continue;
     out.push("", role === "server" ? "Served by" : "Called by");
     for (const { seam, match, also } of rows) {
       const what = `${seam.method} ${seam.rawPath}`;
-      const notes = format === "detailed" ? ` · ${match} · ${seam.plugin}` : match === "suffix" ? " · suffix" : "";
-      out.push(`  ${pointer(seam)} · ${what}${notes}`);
+      const notes = format === "detailed" ? ` · ${match}${builtFrom(seam)}` : match === "suffix" ? " · suffix" : "";
+      const own = role === "caller" && serving.has(seam.repo) ? " · same repo" : "";
+      out.push(`  ${pointer(seam)} · ${what}${notes}${own}`);
       if (also.length) out.push(`    ${alsoDeclared(also)}`);
     }
   }

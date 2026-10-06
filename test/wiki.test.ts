@@ -8,8 +8,8 @@ import { LOCAL_CALLER, LocalAccessPolicy, type AccessPolicy } from "../src/serve
 import { getPage } from "../src/serve/tools/get-page.js";
 import { repoCard } from "../src/serve/tools/repo-card.js";
 import { SqliteStore } from "../src/store/sqlite.js";
-import { generateWiki } from "../src/wiki/generate.js";
-import { claudeArgs, parseClaudeResult, type RunRequest, type Runner } from "../src/wiki/runner.js";
+import { generateWiki } from "../src/ai/generate.js";
+import { claudeArgs, parseClaudeResult, type RunRequest, type Runner } from "../src/ai/runner.js";
 import { commit, git, repoFromFixture } from "./helpers.js";
 
 const RECORDED = readFileSync(fileURLToPath(new URL("./fixtures/wiki/claude-pages-result.json", import.meta.url)), "utf8");
@@ -308,7 +308,7 @@ describe("brain_get", () => {
     const nobody: AccessPolicy = { readableRepos: async () => new Set() };
     const hidden = await getPage({ store, access: nobody }, LOCAL_CALLER, { repo: "api" });
 
-    expect(noWiki).toMatchObject({ ok: false, text: "api has no wiki yet. Generate it with: brain wiki api" });
+    expect(noWiki).toMatchObject({ ok: false, text: "api has no wiki yet. Generate it with: brain sync api" });
     expect(noPage.text).toBe('api has no page "nope". Pages: overview, build-run-test, api.');
     expect(hidden.text).toBe('No readable repo named "api". No repos are enrolled yet.');
   });
@@ -319,7 +319,7 @@ describe("brain_get", () => {
     await generateWiki(store, fakeRunner().runner, "api");
     const after = await repoCard(deps, LOCAL_CALLER, "api", "concise");
 
-    expect(before.text).toContain("Wiki: not generated yet (brain wiki api)");
+    expect(before.text).toContain("Wiki: not generated yet (brain sync api)");
     expect(after.text).toContain("Wiki: 3 pages (overview, build-run-test, api) · read with brain_get");
   });
 });

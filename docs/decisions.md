@@ -217,7 +217,7 @@ fresh Claude Code session answering from them. Manual-test scaffolding stays out
 
 ## 2026-10-05: every wiki citation is checked before an agent sees it
 
-`src/wiki/check.ts` runs on each page in the same worktree, so it reads exactly the commit the
+`src/ai/check.ts` runs on each page in the same worktree, so it reads exactly the commit the
 page describes. It uses no AI. Each sentence, list item and table row is a claim. A claim is kept
 only if:
 - it cites lines that exist;
@@ -271,8 +271,63 @@ line as well as its handler.
 
 ## 2026-10-06: prompts are Markdown files, not skills
 
-The AI's instructions live in `src/wiki/prompts/*.md` and are passed straight to `claude -p`.
+The AI's instructions live in `src/ai/prompts/*.md` and are passed straight to `claude -p`.
 They aren't skills: a skill is something an agent may choose to load, but here the prompt is the
 task. Runs load no skills or settings (`--safe-mode`), so a repo being documented can't inject
 its own. The prompts describe what the checker enforces, so they're versioned and reviewed with
 the code.
+
+## 2026-10-06: routes and calls come from Claude Code; the parsers are removed
+
+Supersedes the 2026-09-29 entries on phase 1 stacks, tree-sitter, the extractor version,
+extractor fixtures, client-named receivers, conventionally routed controllers and trailing
+run-time paths. Endpoint matching, run-time URLs and one-entry-per-endpoint stand.
+
+One Claude Code run per repo lists every route served and HTTP call made, with the lines that
+declare each and the lines its path is built from. Each is verified with no AI before it is
+stored: the cited files and lines exist (80-line cap, as for wiki claims), the method appears in
+them unless it's GET (a resource declaration implies its CRUD methods; `del(` is DELETE), and
+every fixed segment of the path appears in them. That last rule is what proves a prefix three
+files away. Failures are dropped and reported.
+
+**The deletion gate** (agreed 2026-10-05: match the parser on every test repo). Measured against
+the parsers' stored seams:
+
+| Repo | Parser | Claude Code | Missed | Dropped | Cost |
+|---|---|---|---|---|---|
+| aspnet-api (C#) | 19 routes | 20 routes, 1 call | 0 | 0 | $0.90 |
+| express-api (TS) | 20 routes, 1 call | 20 routes, 1 call | 0 | 0 | $0.49 |
+| react-web (JS) | 22 calls, 4 run-time | 22 calls | 0 | 0 | $0.09 |
+| eshop (C#, large) | 56 routes, 54 calls, 20 run-time | 77 routes, 57 calls, 2 run-time | 1 duplicate test call | 0 | $3.68 |
+| laravel-api (PHP) | none | 22 routes, 78 calls | n/a: all 19 RealWorld endpoints | 0 | $0.22 |
+| flask-api (Python) | none | 19 routes, 14 calls | n/a: all 19 RealWorld endpoints | 0 | $0.17 |
+
+- **Every extra was real:** aspnet's Swagger endpoint and a `curl` in its Makefile; eshop's
+  health checks, Identity MVC routes and Blazor pages.
+- **eshop's one miss:** a v1 call on the line beside a v2 call in one test. Its endpoint is still
+  linked from another test.
+- **Fewer run-time calls:** the AI resolves wrappers and base URLs. react-web's four "run-time"
+  calls were the superagent wrapper itself.
+- **Two fixes came from the first run:** `del(` for DELETE (react-web's three DELETEs were
+  dropped), and the prompt rule that a variable segment is a parameter, not run-time (Laravel's
+  tests went from 13 run-time calls to 0).
+
+**Two matching rules came from real output:**
+- A call its own repo serves (its tests, its own front end) links only within that repo. Every
+  RealWorld backend serves the same paths, so without this rule Laravel's tests "called" aspnet.
+  `consumers` lists such calls last, marked `same repo`.
+- A call's location is the cited line, within the file the AI cited first, that holds its path's
+  last fixed segment. react-web's calls then point at their call sites rather than the shared
+  superagent wrapper the AI sometimes cited first. It stays within that file because a Flask
+  test calling `url_for(...)` cites the route it names, and the route isn't where the call is.
+
+**Every repo gets AI seams and a wiki automatically** (Rafe chose this over "only repos with a
+wiki", which would have silently lost links to repos like react-web). `brain sync` indexes, then
+updates both; `--no-ai` indexes only. After the first full map, an update maps only changed files
+plus files whose seams cite a changed file (a moved prefix). Markdown, CSS and files of unknown
+type cost no run. The cost per change is cents; a large repo's first map is a few dollars.
+
+Removed: `src/ingest/extractors/`, `parse.ts`, `extract.ts`, the tree-sitter dependency, the
+extractor fixtures and tests, `EXTRACTOR_VERSION` (migration 7 drops its column and the parser
+seams), the `parser-built` tier and the card's "not extracted" note. Tests now use recorded AI
+answers per fixture repo (`test/fixtures/seams/`), with real verification.

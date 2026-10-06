@@ -1,0 +1,6 @@
+{
+  "seams": [
+    { "kind": "call", "method": "GET", "path": "/articles/{slug}", "runtime": false, "cites": [{ "file": "src/agent.js", "start": 2, "end": 2 }] },
+    { "kind": "call", "method": "GET", "path": "${API_ROOT}${url}", "runtime": true, "cites": [{ "file": "src/agent.js", "start": 3, "end": 3 }] }
+  ]
+}

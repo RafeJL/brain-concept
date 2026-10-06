@@ -25,8 +25,8 @@ export function neighbours(store: Store, repo: string, readable: readonly string
   const routesOf = (repos: readonly string[]) => groupRoutes(store.seams({ repos, kind: "http-route" })).map((g) => g.primary);
   const callsOf = (repos: readonly string[]) => store.seams({ repos, kind: "http-call" });
   return {
-    calls: tally(linkCalls(callsOf([repo]), routesOf(others)), (link) => link.route.repo, (link) => `${link.route.method} ${link.route.key}`),
-    calledBy: tally(linkCalls(callsOf(others), routesOf([repo])), (link) => link.call.repo, (link) => link.call),
+    calls: tally(linkCalls(callsOf([repo]), routesOf(others), routesOf([repo])), (link) => link.route.repo, (link) => `${link.route.method} ${link.route.key}`),
+    calledBy: tally(linkCalls(callsOf(others), routesOf([repo]), routesOf(others)), (link) => link.call.repo, (link) => link.call),
   };
 }
 

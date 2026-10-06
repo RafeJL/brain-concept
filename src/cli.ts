@@ -15,8 +15,9 @@ import { getPage } from "./serve/tools/get-page.js";
 import { impact } from "./serve/tools/impact.js";
 import { repoCard } from "./serve/tools/repo-card.js";
 import { SqliteStore } from "./store/sqlite.js";
-import { DEFAULT_MODEL, generateWiki, type WikiResult } from "./wiki/generate.js";
-import { claudeRunner } from "./wiki/runner.js";
+import { DEFAULT_MODEL, generateWiki, type WikiResult } from "./ai/generate.js";
+import { claudeRunner } from "./ai/runner.js";
+import { updateSeams, type SeamsResult } from "./ai/seams.js";
 import type { Store } from "./store/store.js";
 
 const HELP = `brain: organisation-wide context for coding agents
@@ -26,12 +27,12 @@ Usage:
   brain repo list                                          enrolled repos and freshness
   brain repo set-ref <name> <ref>                          index a different ref, e.g. origin/main
   brain repo remove <name>                                 remove a repo, its facts and its hook
-  brain sync [<name>] [--wiki]                             index the tracked branch (all repos if no name);
-                                                           --wiki also updates the wiki of repos that have one
+  brain sync [<name>] [--full] [--no-ai]                   index the tracked branch, then have Claude Code bring the
+                                                           repo's routes, calls and wiki up to it (all repos if no
+                                                           name); --full redoes them from scratch, --no-ai skips them
   brain hooks install|remove [<name>]                      re-sync automatically when the tracked ref moves
   brain hooks status                                       which repos sync automatically
-  brain wiki <name> [--full] [--model <model>]             sync, then have Claude Code write the repo's wiki, or
-                                                           rewrite only the pages changes affect (default ${DEFAULT_MODEL})
+  brain wiki <name> [--full] [--model <model>]             sync, then bring only the wiki up to date (default ${DEFAULT_MODEL})
   brain page <name> [<page>]                               a wiki page (or the page list) as an agent gets it
   brain card <name> [--detailed]                           the repo card an agent would get
   brain consumers "<METHOD /path>" [--detailed]            who serves and who calls an endpoint
@@ -50,7 +51,9 @@ async function main(argv: string[]): Promise<void> {
       path: { type: "string" },
       route: { type: "string" },
       model: { type: "string" },
+      // Hooks installed before W4 run "sync --wiki"; sync now always updates the wiki.
       wiki: { type: "boolean", default: false },
+      "no-ai": { type: "boolean", default: false },
       full: { type: "boolean", default: false },
       detailed: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
@@ -94,8 +97,8 @@ async function main(argv: string[]): Promise<void> {
         const names = sub ? [sub] : store.listRepos().map((repo) => repo.name);
         if (names.length === 0) throw new BrainError("No repos enrolled. Run: brain repo add <path>");
         for (const name of names) {
-          if (!values.wiki) printSync(await syncRepo(store, name));
-          else await syncAndWiki(store, name, { model: values.model, onlyIfWiki: true });
+          if (values["no-ai"]) printSync(await syncRepo(store, name));
+          else await syncAndRefresh(store, name, { model: values.model, full: values.full, seams: true });
         }
         break;
       }
@@ -105,7 +108,7 @@ async function main(argv: string[]): Promise<void> {
       case "wiki":
         if (!sub) throw new BrainError("Usage: brain wiki <name> [--full] [--model <model>]");
         console.log(`Bringing ${sub}'s wiki up to date with Claude Code (${values.model ?? DEFAULT_MODEL}); writing pages takes a few minutes...`);
-        await syncAndWiki(store, sub, { model: values.model, full: values.full });
+        await syncAndRefresh(store, sub, { model: values.model, full: values.full, seams: false });
         break;
       case "page":
         if (!sub) throw new BrainError("Usage: brain page <name> [<page>]");
@@ -132,18 +135,47 @@ async function main(argv: string[]): Promise<void> {
 }
 
 /**
- * Syncs a repo, then brings its wiki up to the new commit, one run per repo at a time: a hook
- * firing mid-run is folded into one more pass when this one finishes.
+ * Syncs a repo, then has Claude Code bring its routes and calls (unless `seams` is false) and
+ * its wiki up to the new commit. One run per repo at a time: a hook firing mid-run is folded into
+ * one more pass when this one finishes. A failed AI step is reported and the next one still runs.
  */
-async function syncAndWiki(store: Store, name: string, options: { model?: string; full?: boolean; onlyIfWiki?: boolean }): Promise<void> {
+async function syncAndRefresh(store: Store, name: string, options: { model?: string; full?: boolean; seams: boolean }): Promise<void> {
   let full = options.full;
   const outcome = await runQueued(join(dirname(resolveDbPath()), "locks"), name, async () => {
     printSync(await syncRepo(store, name));
-    if (options.onlyIfWiki && store.pages(name).length === 0) return;
-    printWiki(await generateWiki(store, claudeRunner, name, { model: options.model, full }));
+    if (options.seams) await reported(name, "routes and calls", async () => printSeams(await updateSeams(store, claudeRunner, name, { model: options.model, full })));
+    await reported(name, "wiki", async () => printWiki(await generateWiki(store, claudeRunner, name, { model: options.model, full })));
     full = false;
   });
   if (outcome === "queued") console.log(`${name}: already being synced; that run will go again to pick this up.`);
+}
+
+async function reported(name: string, step: string, work: () => Promise<void>): Promise<void> {
+  try {
+    await work();
+  } catch (error) {
+    if (!(error instanceof BrainError)) throw error;
+    console.error(`${name}: ${step} not updated: ${error.message}`);
+  }
+}
+
+function printSeams(result: SeamsResult): void {
+  const at = `@${result.commit.slice(0, 7)}`;
+  if (result.mode === "update" && result.redone.length === 0) {
+    console.log(`${result.repo}: routes and calls up to date at ${at}, no code changed (no AI run)`);
+    return;
+  }
+  const routes = result.kept.filter((s) => s.kind === "http-route").length;
+  const calls = result.kept.filter((s) => s.kind === "http-call");
+  const runtime = calls.filter((s) => s.key === null).length;
+  const scope = result.mode === "full" ? "mapped" : `updated in ${result.redone.length} file${result.redone.length === 1 ? "" : "s"}`;
+  const dropped = result.dropped.length ? `, ${result.dropped.length} dropped` : "";
+  console.log(
+    `${result.repo}: routes and calls ${scope} at ${at} · ${routes} routes, ${calls.length - runtime} calls` +
+      `${runtime ? ` (+${runtime} run-time)` : ""}${dropped} · $${result.costUsd.toFixed(2)} · ${Math.round(result.durationMs / 1000)}s`,
+  );
+  for (const drop of result.dropped.slice(0, 3)) console.log(`    dropped: ${drop.reason} · ${drop.seam}`);
+  if (result.dropped.length > 3) console.log(`    … and ${result.dropped.length - 3} more`);
 }
 
 function printWiki(wiki: WikiResult): void {
@@ -218,12 +250,7 @@ function print(result: ToolResult<unknown>): void {
 
 function printSync(result: SyncResult): void {
   const from = result.previousCommit ? `${result.previousCommit.slice(0, 7)} -> ` : "";
-  const extract = result.fullExtract ? "extractors changed, re-read every file" : `${result.extracted} files with seams`;
-  console.log(
-    `${result.repo}: ${from}${result.commit.slice(0, 7)} ` +
-      `(+${result.added} ~${result.changed} -${result.removed}, ${result.unchanged} unchanged; ${extract})`,
-  );
-  for (const path of result.failures) console.error(`  could not extract ${path}`);
+  console.log(`${result.repo}: ${from}${result.commit.slice(0, 7)} (+${result.added} ~${result.changed} -${result.removed}, ${result.unchanged} unchanged)`);
 }
 
 main(process.argv.slice(2)).catch((error: unknown) => {

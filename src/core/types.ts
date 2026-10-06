@@ -1,9 +1,3 @@
-/**
- * How a fact was made, carried on every answer so an agent knows how far to trust it.
- * See docs/architecture.md, "Three kinds of fact".
- */
-export type Tier = "parser-built" | "human-reviewed" | "llm-generated";
-
 /** A repository enrolled in the registry. The repo is the unit of work, permission and deletion. */
 export interface RepoRecord {
   name: string;
@@ -22,8 +16,8 @@ export interface RepoState {
   commit: string;
   syncedAt: string;
   fileCount: number;
-  /** EXTRACTOR_VERSION the seams were built with; a mismatch forces a full re-extract. */
-  extractorVersion: number;
+  /** The commit the stored seams describe; null until Claude Code first lists them. */
+  seamsCommit: string | null;
 }
 
 /** One file in a repo's committed tree. */

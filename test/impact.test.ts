@@ -4,15 +4,17 @@ import { syncRepo } from "../src/ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy, type AccessPolicy } from "../src/serve/access.js";
 import { impact } from "../src/serve/tools/impact.js";
 import { SqliteStore } from "../src/store/sqlite.js";
-import { repoFromFixture } from "./helpers.js";
+import { mapSeams, repoFromFixture } from "./helpers.js";
 
 /** test/fixtures/repos/orders-api (C#) and shop-web (TS), which calls it. */
 async function setup() {
   const store = new SqliteStore(":memory:");
   await enrolRepo(store, { path: repoFromFixture("orders-api"), name: "orders-api" });
   await enrolRepo(store, { path: repoFromFixture("shop-web"), name: "shop-web" });
-  await syncRepo(store, "orders-api");
-  await syncRepo(store, "shop-web");
+  for (const name of ["orders-api", "shop-web"]) {
+    await syncRepo(store, name);
+    await mapSeams(store, name);
+  }
   return { store, deps: { store, access: new LocalAccessPolicy() } };
 }
 
@@ -23,7 +25,7 @@ describe("brain_impact", () => {
     const result = await impact(deps, LOCAL_CALLER, { repo: "orders-api", path: "src/OrdersController.cs", format: "concise" });
 
     expect(result.ok).toBe(true);
-    expect(result.text).toContain("orders-api · src/OrdersController.cs · 2 routes, 2 callers in 2 repos · parser-built");
+    expect(result.text).toContain("orders-api · src/OrdersController.cs · 2 routes, 2 callers in 2 repos · llm-generated");
     expect(result.text).toMatch(/GET \/api\/orders\/\{id\}\s+\(4-5\)\n {2}← orders-api · tests\/OrdersTests.cs:1 · same repo\n {2}← shop-web · src\/api.ts:1/);
     expect(result.text).toContain("No known callers: DELETE /api/orders/{id}");
     expect(result.text).toContain("1 call uses a URL only known at run time (shop-web · src/api.ts:2)");
@@ -35,7 +37,7 @@ describe("brain_impact", () => {
     const result = await impact(deps, LOCAL_CALLER, { repo: "orders-api", route: "GET /api/orders/{id}", format: "concise" });
 
     expect(result.text).toContain("orders-api · 1 route, 2 callers");
-    expect(result.text).toContain("GET /api/orders/{id}  (src/OrdersController.cs:4-5)\n  also declared in docs/openapi.yaml:4");
+    expect(result.text).toContain("GET /api/orders/{id}  (src/OrdersController.cs:4-5)\n  also declared in docs/openapi.yaml:3-4");
   });
 
   it("filters to one endpoint", async () => {

@@ -30,7 +30,7 @@ describe("brain hooks", () => {
     expect(readFileSync(hookPath, "utf8")).toBe(first);
     expect(first).toContain("citation-brain: managed by `brain hooks`");
     expect(first).toContain("ref='refs/heads/main'");
-    expect(first).toContain("sync 'api' --wiki");
+    expect(first).toContain("sync 'api' >>");
     expect((await hookStatus(store, "api")).installed).toBe(true);
 
     expect(await removeHook(store, "api")).toBe(true);
@@ -60,7 +60,8 @@ describe("brain hooks", () => {
     const dbPath = join(tempDir(), "brain.db");
     const { store, dir, command } = await enrolled(dbPath);
     const before = store.getState("api")!.commit;
-    await installHook(store, "api", { ...command, dbPath });
+    // --no-ai: the test checks the hook fires and syncs, without starting Claude Code.
+    await installHook(store, "api", { ...command, dbPath, syncFlags: ["--no-ai"] });
 
     git(dir, "switch", "--quiet", "-c", "feature");
     git(dir, "commit", "--quiet", "--allow-empty", "-m", "not on main");
@@ -72,7 +73,7 @@ describe("brain hooks", () => {
     const next = commitFixture(dir, "articles-api-v2");
     await waitFor(() => store.getState("api")?.commit === next, 30_000);
 
-    expect(store.seams({ repos: ["api"] }).map((s) => `${s.method} ${s.key}`)).toEqual(["PUT /articles/{}", "GET /tags"]);
+    expect(store.getFiles("api").map((f) => f.path)).toContain("src/tags.ts");
     expect(readFileSync(command.logPath, "utf8")).toContain("api: refs/heads/main moved");
     store.close();
   }, 60_000);

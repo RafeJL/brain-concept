@@ -66,20 +66,35 @@ git clone $P\origin\react-web.git $P\teammate\react-web
 | `aspnet-api\`, `react-web\` | Your clones: the C# API and the React site that calls it |
 | `teammate\aspnet-api\`, `teammate\react-web\` | A colleague's clones. Change, commit and push from here |
 
-### A1. Enrol, sync and turn on auto-sync
+### A1. Enrol and sync
+
+`sync` indexes each repo, then has Claude Code map its routes and calls and write its wiki. For
+these two repos that takes about 5–8 minutes and $2–3 of your Claude Code allowance.
 
 ```
 npm run brain -- repo add $P\aspnet-api --name pg-aspnet-api
 npm run brain -- repo add $P\react-web --name pg-react-web
 npm run brain -- sync
+```
+
+**Expect,** for each repo:
+- `tracking origin/master` when enrolled. The brain describes what has been merged, not your local
+  branch;
+- an index line, then `routes and calls mapped at @… · N routes, M calls · $… · …s`, with any
+  `dropped:` lines saying why (there should be none or very few; read each one);
+- `wiki written at @… · $… · …s`, then one line per page such as
+  `build-run-test  19/22 claims kept · published`, with up to three `removed: … ` lines saying
+  why. Read the removed claims. Each should be a real problem (the named thing isn't in the
+  cited lines, a missing file, an over-broad span), not the checker being too strict.
+
+Then turn on auto-sync:
+
+```
 npm run brain -- hooks install
 npm run brain -- hooks status
 ```
 
-**Expect:**
-- both repos say `tracking origin/master`. The brain describes what has been merged, not your
-  local branch;
-- `hooks status` says `syncs automatically` for both.
+**Expect** `syncs automatically` for both.
 
 ### A2. Repo cards and the wiki
 
@@ -92,28 +107,26 @@ npm run brain -- card pg-react-web
 
 | Line | Shows |
 |---|---|
-| `Wiki: not generated yet (brain wiki pg-aspnet-api)` | No wiki yet |
-| `Seams: 19 routes, 0 calls via cs-routes` | Routes from the controllers |
-| `Called by: pg-react-web (22 calls)` | Neighbours, from the seam graph |
+| `Wiki: 4 pages (…) · read with brain_get` | The wiki Claude Code wrote |
+| `Seams: about 20 routes, 1 call · llm-generated` | The RealWorld routes under the global `/api` prefix, plus the Swagger endpoint; the call is a `curl` in the Makefile |
+| `Called by: pg-react-web (… calls)` | Neighbours, from the seam graph |
 
 **pg-react-web:**
-- `Calls: pg-aspnet-api (19 endpoints)`.
-- `(+4 with run-time URLs)`: calls inside the superagent wrapper whose URL is only known at run
-  time, counted, never guessed.
+- `Calls: pg-aspnet-api (… endpoints)`: the site's calls, with the `API_ROOT` base URL resolved,
+  match the API's routes exactly rather than as a suffix.
 
-Now have Claude Code write the API's wiki. It takes 1–3 minutes and uses your Claude Code
-allowance, about $0.65:
+Look closer at one route and one page:
 
 ```
-npm run brain -- wiki pg-aspnet-api
+npm run brain -- impact pg-aspnet-api --route "GET /api/articles/{slug}" --detailed
 npm run brain -- page pg-aspnet-api
 npm run brain -- page pg-aspnet-api build-run-test
-npm run brain -- card pg-aspnet-api
 git -C $P\aspnet-api worktree list
 ```
 
 **Expect:**
-- `pg-aspnet-api: wiki written at @a397d11 · $… · …s`, then one line per page such as
+- the route's callers, and `path built with …` naming the lines its `/api` prefix and controller
+  route come from. Open them and check;
   `build-run-test  19/22 claims kept · published`, with up to three `removed: … ` lines saying
   why. Read the removed claims. Each should be a real problem (the named thing isn't in the
   cited lines, a missing file, an over-broad span), not the checker being too strict;
@@ -122,7 +135,6 @@ git -C $P\aspnet-api worktree list
 - a build page that names `build/build.csproj`, the Bullseye targets and
   `dotnet build Conduit.slnx`, each with `[path:lines]` citations. Open two or three citations
   and check they say what the sentence claims;
-- the card now says `Wiki: 4 pages (…) · read with brain_get`;
 - `worktree list` shows one line: the temporary worktree Claude Code ran in was removed.
 
 ### A3. A teammate pushes, you fetch, and the brain updates itself
@@ -161,27 +173,30 @@ npm run brain -- card pg-aspnet-api
 
 **Expect:**
 - a new commit;
-- `Seams: 20 routes`;
-- `Wiki: 4 pages (…) · read with brain_get · written at @a397d11, older than the index`. The sync
-  is done; the wiki update is still running in the background.
+- `Seams: … · mapped at @a397d11, older than the index` and the same for the wiki. The index is
+  done; Claude Code is still updating the routes and the wiki in the background.
 
-Now give the wiki update about a minute, then look again:
+Give it a minute or two, then look again:
 
 ```
-Get-Content $env:USERPROFILE\.brain\hooks.log -Tail 8 -Encoding utf8
+Get-Content $env:USERPROFILE\.brain\hooks.log -Tail 12 -Encoding utf8
 npm run brain -- card pg-aspnet-api
+npm run brain -- impact pg-aspnet-api --route "POST /api/articles/{slug}/archive" --detailed
 npm run brain -- page pg-aspnet-api api
 ```
 
 **Expect:**
-- in the log, `pg-aspnet-api: wiki updated at @… · $… · …s`, one line for each page that cites
-  `ArticlesController.cs` (at least `api`), and `unchanged, moved to @…:` listing the rest. Only
-  the pages a change affects go back to Claude Code; the others are re-checked and moved forward
-  with no AI;
-- the card's wiki line without the "older than the index" note;
+- in the log, `routes and calls updated in 1 file at @…` (only `ArticlesController.cs` was mapped
+  again, for a few cents), then `wiki updated at @…` with one line for each page that cites
+  `ArticlesController.cs` (at least `api`) and `unchanged, moved to @…:` listing the rest. The
+  wiki line comes a minute or two after the routes line; read the log again if it isn't there yet;
+- the card with one more route and no "older than the index" notes;
+- the impact answer listing the archive route at `ArticlesController.cs` and its line (without
+  `--detailed`, a route nobody calls yet only appears in the "No known callers" line);
 - the API page mentioning the new `POST …/archive` route, cited to `ArticlesController.cs`.
 
-Nobody ran `sync` or `wiki`.
+Nobody ran `sync` or `wiki`, and no parser knows this repo's framework: Claude Code found the
+route and the brain checked it against the cited lines.
 
 ### A4. A change in one repo updates another repo's card
 
@@ -211,11 +226,13 @@ git -C $P\teammate\react-web commit -am "Archive button"
 git -C $P\teammate\react-web push
 git -C $P\react-web fetch
 npm run brain -- card pg-aspnet-api
-npm run brain -- impact pg-aspnet-api --route "POST /articles/{slug}/archive"
+npm run brain -- impact pg-aspnet-api --route "POST /api/articles/{slug}/archive"
 ```
 
+Give the website's update a minute first (`hooks.log` shows `routes and calls updated in 1 file`).
+
 **Expect:**
-- `Called by: pg-react-web (23 calls)`, up from 22;
+- `Called by: pg-react-web (… calls)`, one more than in A2;
 - the impact answer lists `← pg-react-web · src/agent.js:70` under the archive route.
 
 Neighbours are worked out on each request, so they follow whichever repo changed.
@@ -240,11 +257,12 @@ git -C $P\teammate\aspnet-api commit -am "Remove archive"
 git -C $P\teammate\aspnet-api push
 git -C $P\aspnet-api fetch
 npm run brain -- card pg-aspnet-api
-npm run brain -- impact pg-aspnet-api --route "POST /articles/{slug}/archive"
+npm run brain -- impact pg-aspnet-api --route "POST /api/articles/{slug}/archive"
 ```
 
-**Expect** `Seams: 19 routes` again, and `No matching routes are declared in pg-aspnet-api.`
-A minute later, `npm run brain -- page pg-aspnet-api api` no longer mentions the archive route.
+**Expect,** after a minute or two: the card's route count back to what A2 showed, `No matching
+routes are declared in pg-aspnet-api.`, and `npm run brain -- page pg-aspnet-api api` no longer
+mentioning the archive route.
 
 ### A7. The hook's log
 
@@ -252,10 +270,10 @@ A minute later, `npm run brain -- page pg-aspnet-api api` no longer mentions the
 Get-Content $env:USERPROFILE\.brain\hooks.log -Tail 6 -Encoding utf8
 ```
 
-**Expect** two lines per fetch, for example `pg-aspnet-api: refs/remotes/origin/master moved`
-and `pg-aspnet-api: a397d11 -> 067d67b (+1 ~1 -0, 113 unchanged; 1 files with seams)`, followed
-by the wiki update for repos that have a wiki (pg-react-web has none, so it never calls the AI).
-There should be no errors. If two fetches land close together, the second is folded into one
+**Expect** for each fetch: `pg-aspnet-api: refs/remotes/origin/master moved`, the index line
+(`pg-aspnet-api: a397d11 -> 067d67b (+0 ~1 -0, 113 unchanged)`), then the routes-and-calls and
+wiki updates. A fetch that only changed Markdown says `no code changed (no AI run)` for the
+routes. There should be no errors. If two fetches land close together, the second is folded into one
 more pass of the run already going. On Windows the log can then miss the second "moved" line,
 but the last sync line always shows the newest commit.
 
@@ -301,21 +319,27 @@ npm run brain -- sync
 npm run brain -- hooks install
 ```
 
+The first `sync` maps routes and calls and writes a wiki for every repo: about 30–40 minutes and
+$10–15 in all, most of it eshop (about $3.70 and 11 minutes for its routes alone). Read any
+`dropped:` and `removed:` lines it prints.
+
 | Command | Expect |
 |---|---|
-| `wiki laravel-api`, then `page laravel-api api` | Four pages for a PHP repo the parsers can't read; the API page lists the RealWorld endpoints, each cited to `routes/api.php`, including `GET articles/{article}` and the other routes `Route::resource` declares without naming |
-| `wiki flask-api`, then `page flask-api api` | The same for Python: blueprints in `conduit/*/views.py`, `JWT_HEADER_TYPE = 'Token'` cited to `conduit/settings.py` |
-| `card aspnet-api` | `Wiki: 4 pages (…)` once generated; `Seams: 19 routes`; `Called by: react-web (22 calls)` |
-| `card react-web` | `22 calls (+4 with run-time URLs)`; `Calls: aspnet-api (19 endpoints) · express-api (19 endpoints)` |
+| `page laravel-api api` | A PHP repo's API page listing the RealWorld endpoints, each cited to `routes/api.php`, including `GET articles/{article}` and the other routes `Route::resource` declares without naming |
+| `page flask-api api` | The same for Python: blueprints in `conduit/*/views.py`, `JWT_HEADER_TYPE = 'Token'` cited to `conduit/settings.py` |
+| `card aspnet-api` | `Seams: 20 routes, 1 call · llm-generated` (the RealWorld routes under `/api`, the Swagger endpoint, a `curl` in the Makefile); `Called by: react-web (22 calls)` |
+| `card react-web` | `0 routes, 22 calls`; `Calls: aspnet-api (19 endpoints) · express-api (19 endpoints) · flask-api (19 endpoints) · laravel-api (19 endpoints)`: one front end, four backends in four languages |
+| `card laravel-api` | `22 routes, 78 calls` (its tests call its own API); `Called by: react-web (22 calls)` and **not** the other backends, whose tests call the same paths but serve them too |
 | `card express-api` | `Called by: react-web` and **not** eshop. Both serve or call `/`, which says nothing about which service is meant |
-| `card eshop` | `dotnet build eShop.slnx` (not the nested `ClientApp.sln`); `28 projects (8 web, 2 app, 9 library, 9 test)`; the root package.json's Playwright scripts |
-| `card citation-harness-library` | `Seams: none found · not extracted: Python` |
-| `consumers "GET /api/articles/:slug"` | Two servers (the C# `ArticlesController` and the Express controller) and one caller, `react-web · src/agent.js:62`, all marked `suffix` because `/api` is a base path neither declares |
-| `consumers "DELETE /profiles/{username}/follow"` | A method filter: two servers, one caller |
+| `card eshop` | `Seams: 77 routes, 57 calls (+2 with run-time URLs)`: the APIs, health checks, Identity's MVC routes and Blazor pages, and the clients calling them |
+| `card citation-harness-library` | Its seams (likely none: it serves no HTTP) and its wiki |
+| `consumers "GET /api/articles/:slug"` | Four servers (C#, TypeScript, Python, PHP) at their declaring lines, `react-web · src/agent.js:61-62` as the caller, then Laravel's own tests marked `same repo` |
+| `consumers "GET /api/profiles/:username" --detailed` | `path built with …` on each: aspnet's `Program.cs` prefix convention, Express's `routes.ts` mount, Laravel's `RouteServiceProvider` group |
+| `consumers "DELETE /api/profiles/{username}/follow"` | A method filter: four servers; react-web's call (written `requests.del(…)`) among the callers |
 | `impact aspnet-api --path src/Conduit/Features/Articles/ArticlesController.cs` | 6 routes and 9 callers, all in `react-web · src/agent.js` |
-| `impact eshop --route "GET /api/catalog/items/{id}"` | One route from the minimal API, with the two OpenAPI specs listed as "also declared in", and the functional tests as callers |
+| `impact eshop --route "GET /api/catalog/items/{id}"` | The minimal API route in `CatalogApi.cs`, with the three client `CatalogService.cs` files and the functional tests as `same repo` callers |
 | `card nope` | `No readable repo named "nope"`, listing only the repos you enrolled |
-| `sync` (run it twice) | The second run says `+0 ~0 -0`: unchanged files are skipped |
+| `sync` (run it twice) | The second run says `+0 ~0 -0`, `no code changed (no AI run)` and `wiki up to date`: nothing is redone and nothing is spent |
 
 ## Part C: Claude Code uses the brain on its own
 

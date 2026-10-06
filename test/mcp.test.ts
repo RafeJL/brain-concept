@@ -43,7 +43,7 @@ describe("MCP server", () => {
     const result = await client.callTool({ name: "brain_repo_card", arguments: { repo: "orders" } });
 
     expect(result.isError).toBe(false);
-    expect(JSON.stringify(result.content)).toContain("up to date · parser-built");
+    expect(JSON.stringify(result.content)).toContain("· up to date");
   });
 
   it("flags unknown repos as errors without throwing", async () => {

@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { checkPage, parseCitations } from "../src/wiki/check.js";
+import { checkPage, parseCitations } from "../src/ai/check.js";
 import { repoFromFixture } from "./helpers.js";
 
 const PAGE = readFileSync(fileURLToPath(new URL("./fixtures/wiki/page-to-check.md", import.meta.url)), "utf8");

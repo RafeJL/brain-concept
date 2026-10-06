@@ -44,7 +44,7 @@ export async function getPage(deps: ToolDeps, caller: Caller, input: PageInput):
 
   const pages = deps.store.pages(repo.name);
   if (pages.length === 0) {
-    return { ok: false, text: `${repo.name} has no wiki yet. Generate it with: brain wiki ${repo.name}` };
+    return { ok: false, text: `${repo.name} has no wiki yet. Generate it with: brain sync ${repo.name}` };
   }
   const newest = wikiCommit(pages, state.commit);
   const keptNote = (p: WikiPage) =>

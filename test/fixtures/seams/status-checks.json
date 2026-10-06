@@ -1,0 +1,6 @@
+{
+  "seams": [
+    { "kind": "call", "method": "GET", "path": "/", "runtime": false, "cites": [{ "file": "src/smoke.ts", "start": 1, "end": 1 }] },
+    { "kind": "call", "method": "GET", "path": "/status", "runtime": false, "cites": [{ "file": "src/smoke.ts", "start": 2, "end": 2 }] }
+  ]
+}

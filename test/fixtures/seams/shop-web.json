@@ -1,0 +1,6 @@
+{
+  "seams": [
+    { "kind": "call", "method": "GET", "path": "/api/orders/{id}", "runtime": false, "cites": [{ "file": "src/api.ts", "start": 1, "end": 1 }] },
+    { "kind": "call", "method": "GET", "path": "url", "runtime": true, "cites": [{ "file": "src/api.ts", "start": 2, "end": 2 }] }
+  ]
+}
