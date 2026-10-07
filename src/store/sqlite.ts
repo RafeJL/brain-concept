@@ -117,8 +117,8 @@ export class SqliteStore implements Store {
     const clearAll = this.db.prepare("DELETE FROM seams WHERE repo = ?");
     const clear = this.db.prepare("DELETE FROM seams WHERE repo = ? AND path = ?");
     const insert = this.db.prepare(
-      `INSERT INTO seams (repo, path, kind, method, raw_path, route_key, start_line, end_line, plugin, cites, commit_sha)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'claude', ?, ?)`,
+      `INSERT INTO seams (repo, path, kind, method, raw_path, route_key, start_line, end_line, cites, commit_sha)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const state = this.db.prepare("UPDATE repo_state SET seams_commit = ? WHERE repo = ?");
     this.transaction(() => {

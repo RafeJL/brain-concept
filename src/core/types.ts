@@ -41,7 +41,7 @@ export interface WikiPage {
   /** Markdown in which every claim cites `[path:start-end]`. */
   markdown: string;
   commit: string;
-  /** Claims the citation checker examined, and how many it removed (0 and 0 before W2). */
+  /** Claims the citation checker examined, and how many it removed (0 and 0 for pages stored before it existed). */
   claims: number;
   removed: number;
   model: string;

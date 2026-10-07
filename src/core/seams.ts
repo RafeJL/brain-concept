@@ -1,12 +1,10 @@
 /** A place where one repo meets another: a route it serves or a call it makes. */
 export type SeamKind = "http-route" | "http-call";
 
-/** Lines in a file, 1-based and inclusive. */
-export interface SeamCite {
-  path: string;
-  start: number;
-  end: number;
-}
+import type { Citation } from "./citations.js";
+
+/** Lines in a file that a seam's path is built from: the same shape as a wiki citation. */
+export type SeamCite = Citation;
 
 /** A route or call Claude Code found and the brain verified against the lines it cites. */
 export interface Seam {

@@ -310,7 +310,7 @@ describe("brain_get", () => {
 
     expect(noWiki).toMatchObject({ ok: false, text: "api has no wiki yet. Generate it with: brain sync api" });
     expect(noPage.text).toBe('api has no page "nope". Pages: overview, build-run-test, api.');
-    expect(hidden.text).toBe('No readable repo named "api". No repos are enrolled yet.');
+    expect(hidden.text).toBe('No readable repo named "api". No repos are enrolled yet. Add one with: brain add <path>');
   });
 
   it("puts the wiki on the repo card", async () => {

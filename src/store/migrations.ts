@@ -101,4 +101,8 @@ export const MIGRATIONS: (string | ((db: DatabaseSync) => void))[] = [
   `,
   // W5: the search index over wiki sections and seams.
   createSearchIndex,
+  // Every seam comes from Claude Code since W4, so the column saying which parser found it is gone.
+  `
+  ALTER TABLE seams DROP COLUMN plugin;
+  `,
 ];

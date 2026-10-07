@@ -2,7 +2,7 @@ import type { Seam } from "../../core/seams.js";
 import type { SectionHit } from "../../store/store.js";
 import type { Caller } from "../access.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
-import { builtFrom, count, PAGE_SIZE, pointer, readableRepos, type Format, type ToolDeps, type ToolResult } from "./common.js";
+import { builtFrom, count, PAGE_SIZE, pointer, readableRepos, TIER, type Format, type ToolDeps, type ToolResult } from "./common.js";
 import { wikiCommit } from "./get-page.js";
 
 export interface SearchInput {
@@ -60,7 +60,8 @@ export async function search(deps: ToolDeps, caller: Caller, input: SearchInput)
   if (!match) return { ok: false, text: `"${input.query}" has no words to search for.` };
   const readable = await readableRepos(deps, caller);
   const scope = input.repos?.length ? readable.filter((name) => input.repos!.includes(name)) : readable;
-  if (scope.length === 0) return { ok: false, text: "None of the requested repos are enrolled or readable." };
+  if (readable.length === 0) return { ok: false, text: "No repos are enrolled yet. Add one with: brain add <path>" };
+  if (scope.length === 0) return { ok: false, text: `None of the requested repos are enrolled or readable. Repos you can read: ${readable.join(", ")}.` };
 
   const offset = input.offset ?? 0;
   const detailed = input.format === "detailed";
@@ -129,7 +130,7 @@ async function render(deps: ToolDeps, answer: SearchAnswer, scope: string[], for
   if (endpoints.length) lines.push("For every server and caller of an endpoint, use brain_find_consumers.");
   if (noWikiNote) lines.push(noWikiNote);
   lines.push(`Indexed: ${(await indexedAt(deps, [...found].sort())).join("; ")}`);
-  lines.push("llm-generated: written by Claude Code from the code; confirm at the citation before relying on it.");
+  lines.push(`${TIER}: written by Claude Code from the code; confirm at the citation before relying on it.`);
   return lines.join("\n");
 }
 

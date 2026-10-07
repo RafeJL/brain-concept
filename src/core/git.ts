@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -9,17 +9,24 @@ const run = promisify(execFile);
 
 /** Runs git in a repo without a shell, so paths and refs are never interpreted by one. */
 export async function git(repoPath: string, args: string[]): Promise<string> {
-  const { stdout } = await run("git", ["-C", repoPath, ...args], {
-    maxBuffer: 512 * 1024 * 1024,
-    windowsHide: true,
-  });
-  return stdout;
+  try {
+    const { stdout } = await run("git", ["-C", repoPath, ...args], {
+      maxBuffer: 512 * 1024 * 1024,
+      windowsHide: true,
+    });
+    return stdout;
+  } catch (error) {
+    if ((error as { code?: string }).code === "ENOENT") throw new BrainError("git isn't installed or isn't on PATH. Install it, then check with: brain doctor");
+    throw error;
+  }
 }
 
+/** git's output, or null when git says no (an unknown ref, not a repo). A missing git still throws. */
 async function tryGit(repoPath: string, args: string[]): Promise<string | null> {
   try {
     return (await git(repoPath, args)).trim();
-  } catch {
+  } catch (error) {
+    if (error instanceof BrainError) throw error;
     return null;
   }
 }
@@ -83,40 +90,6 @@ export async function listTree(repoPath: string, commit: string): Promise<TreeEn
     entries.push({ path: record.slice(tab + 1), blob: object, bytes: Number(size) || 0 });
   }
   return entries;
-}
-
-/**
- * Reads many blobs through one `git cat-file --batch` process, instead of one process per file
- * (which costs ~20ms each on Windows). Missing blobs are left out of the result.
- */
-export async function readBlobs(repoPath: string, blobs: readonly string[]): Promise<Map<string, Buffer>> {
-  const result = new Map<string, Buffer>();
-  if (blobs.length === 0) return result;
-
-  const child = spawn("git", ["-C", repoPath, "cat-file", "--batch"], { windowsHide: true });
-  const chunks: Buffer[] = [];
-  child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
-  const done = new Promise<void>((resolve, reject) => {
-    child.on("error", reject);
-    child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`git cat-file exited with ${code}`))));
-  });
-  child.stdin.end(blobs.join("\n") + "\n");
-  await done;
-
-  // Each answer is "<sha> blob <size>\n<content>\n" or "<sha> missing\n".
-  const out = Buffer.concat(chunks);
-  let offset = 0;
-  while (offset < out.length) {
-    const newline = out.indexOf(0x0a, offset);
-    if (newline < 0) break;
-    const [sha, type, size] = out.subarray(offset, newline).toString("utf8").split(" ");
-    offset = newline + 1;
-    if (type === "missing" || !sha) continue;
-    const length = Number(size);
-    result.set(sha, out.subarray(offset, offset + length));
-    offset += length + 1;
-  }
-  return result;
 }
 
 /** Commits reachable from `to` but not from `from`, or null if either is unknown. */

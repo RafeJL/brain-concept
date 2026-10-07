@@ -217,7 +217,7 @@ describe("search index upkeep", () => {
     expect(store.searchSeams({ repos: ["orders-api"], match: '"orders"', limit: 10 }).total).toBe(0);
   });
 
-  it("indexes the pages and seams of a store made before search (migration 8)", () => {
+  it("indexes the pages and seams of a store made before search (migration 8), and drops the parser column (migration 9)", () => {
     const file = join(tempDir(), "brain.db");
     const old = new DatabaseSync(file);
     MIGRATIONS.slice(0, 7).forEach((m) => old.exec(m as string));
@@ -236,5 +236,9 @@ describe("search index upkeep", () => {
     expect(store.searchSections({ repos: ["shop"], match: '"token"', limit: 10 }).hits.map((h) => h.heading)).toEqual(["Token validation"]);
     expect(store.searchSeams({ repos: ["shop"], match: '"orders"', limit: 10 }).hits.map((h) => h.rawPath)).toEqual(["/api/orders"]);
     store.close();
+    const after = new DatabaseSync(file);
+    const columns = (after.prepare("PRAGMA table_info(seams)").all() as { name: string }[]).map((c) => c.name);
+    after.close();
+    expect(columns).not.toContain("plugin");
   });
 });

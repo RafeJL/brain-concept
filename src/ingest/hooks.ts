@@ -6,7 +6,7 @@ import type { Store } from "../store/store.js";
 import { requireRepo } from "./registry.js";
 
 /**
- * Keeps a repo's facts and wiki fresh without anyone running `brain sync`: a git
+ * Keeps a repo's index, routes, calls and wiki fresh without anyone running `brain sync`: a git
  * `reference-transaction` hook starts a background `brain sync` whenever the tracked ref moves. It catches pulls, merges,
  * rebases and plain fetches (which have no hook of their own), and never blocks git.
  */
@@ -33,6 +33,8 @@ export interface HookStatus {
   path: string;
   /** Set when a hook of ours can't be installed here, with the reason. */
   problem?: string;
+  /** Installed, but not what `brain hooks install` would write now (an older brain wrote it). */
+  outdated?: boolean;
 }
 
 /** A value quoted for sh, with Windows paths in the forward-slash form git's sh understands. */
@@ -85,10 +87,15 @@ async function hookLocation(repoPath: string): Promise<{ path: string; problem?:
   return { path };
 }
 
-export async function hookStatus(store: Store, name: string): Promise<HookStatus> {
+/** Whether the repo has the brain's hook; with `command`, also whether it is out of date. */
+export async function hookStatus(store: Store, name: string, command?: HookCommand): Promise<HookStatus> {
   const repo = requireRepo(store, name);
   const { path, problem } = await hookLocation(repo.path);
-  return { repo: name, installed: !problem && existsSync(path), path, problem };
+  const installed = !problem && existsSync(path);
+  if (!installed || !command) return { repo: name, installed, path, problem };
+  const trackedRef = await fullRefName(repo.path, repo.ref);
+  const outdated = !trackedRef || readFileSync(path, "utf8") !== hookScript(name, trackedRef, command);
+  return { repo: name, installed, path, outdated };
 }
 
 /** Installs (or refreshes) the hook for one repo. Idempotent. */

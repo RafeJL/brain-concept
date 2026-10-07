@@ -12,6 +12,7 @@ import {
   PAGE_SIZE,
   pointer,
   requireSyncedRepo,
+  TIER,
   type Format,
   type ToolDeps,
   type ToolResult,
@@ -85,7 +86,7 @@ async function render(deps: ToolDeps, { repo, path, routes, outgoingCalls }: Imp
   const quiet = routes.filter((r) => r.callers.length === 0);
   const callerRepos = new Set(withCallers.flatMap((r) => r.callers.map((c) => c.seam.repo)));
   const callerCount = withCallers.reduce((sum, r) => sum + r.callers.length, 0);
-  const out = [`${scope} · ${count(routes.length, "route")}, ${count(callerCount, "caller")} in ${count(callerRepos.size, "repo")} · llm-generated`];
+  const out = [`${scope} · ${count(routes.length, "route")}, ${count(callerCount, "caller")} in ${count(callerRepos.size, "repo")} · ${TIER}`];
 
   const shown = format === "detailed" ? routes : withCallers;
   const page = shown.slice(offset, offset + PAGE_SIZE);

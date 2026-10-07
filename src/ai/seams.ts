@@ -1,3 +1,4 @@
+import { cleanPath } from "../core/citations.js";
 import { changedFiles, withWorktree } from "../core/git.js";
 import { normalisePath, PARAM } from "../core/http.js";
 import { detectLanguage } from "../core/languages.js";
@@ -274,10 +275,6 @@ function moveCallSiteFirst(cites: SeamCite[], path: string, linesOf: (path: stri
     if (cite.path === cites[0]!.path && score(cite) > score(cites[best]!)) best = i;
   });
   cites.unshift(...cites.splice(best, 1));
-}
-
-function cleanPath(file: string): string {
-  return file.trim().replace(/\\/g, "/").replace(/^\.?\//, "");
 }
 
 function describe(item: unknown): string {

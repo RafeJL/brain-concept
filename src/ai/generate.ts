@@ -7,7 +7,7 @@ import { checkPage, type CheckedPage, type RemovedClaim } from "./check.js";
 import { prompt } from "./prompts.js";
 import type { Runner } from "./runner.js";
 
-/** W0 showed Sonnet writes pages as well as Opus at a quarter of the cost. */
+/** Sonnet wrote pages as well as Opus at a quarter of the cost in the first trial (docs/decisions.md). */
 export const DEFAULT_MODEL = "sonnet";
 
 /** At most this many changed files are listed in an update prompt; the AI can read the rest. */

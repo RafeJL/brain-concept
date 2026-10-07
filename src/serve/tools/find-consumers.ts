@@ -11,6 +11,7 @@ import {
   PAGE_SIZE,
   pointer,
   readableRepos,
+  TIER,
   unresolvedNote,
   type Format,
   type ToolDeps,
@@ -46,7 +47,8 @@ export async function findConsumers(deps: ToolDeps, caller: Caller, input: Consu
   }
   const readable = await readableRepos(deps, caller);
   const scope = input.repos?.length ? readable.filter((name) => input.repos!.includes(name)) : readable;
-  if (scope.length === 0) return { ok: false, text: "None of the requested repos are enrolled or readable." };
+  if (readable.length === 0) return { ok: false, text: "No repos are enrolled yet. Add one with: brain add <path>" };
+  if (scope.length === 0) return { ok: false, text: `None of the requested repos are enrolled or readable. Repos you can read: ${readable.join(", ")}.` };
 
   const matches = deps.store.seams({ repos: scope }).flatMap((seam) => {
     const match = matchEndpoints(endpointOf(seam), target);
@@ -82,7 +84,7 @@ async function render(deps: ToolDeps, { target, hits }: Consumers, scope: string
   const serving = new Set(hits.filter((h) => h.role === "server").map((h) => h.seam.repo));
   const repos = new Set(hits.map((h) => h.seam.repo));
   const page = hits.slice(offset, offset + PAGE_SIZE);
-  const out = [`${label} · ${count(servers, "server")}, ${count(hits.length - servers, "caller")} in ${count(repos.size, "repo")} · llm-generated`];
+  const out = [`${label} · ${count(servers, "server")}, ${count(hits.length - servers, "caller")} in ${count(repos.size, "repo")} · ${TIER}`];
   for (const role of ["server", "caller"] as const) {
     const rows = page.filter((h) => h.role === role);
     if (rows.length === 0) continue;
