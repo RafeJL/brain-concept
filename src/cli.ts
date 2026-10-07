@@ -9,7 +9,7 @@ import { enrolRepo, removeRepo, setRepoRef } from "./ingest/registry.js";
 import { syncRepo, type SyncResult } from "./ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy } from "./serve/access.js";
 import { describeFreshness, freshnessOf } from "./serve/freshness.js";
-import type { Format, ToolDeps, ToolResult } from "./serve/tools/common.js";
+import { count, type Format, type ToolDeps, type ToolResult } from "./serve/tools/common.js";
 import { findConsumers } from "./serve/tools/find-consumers.js";
 import { getPage } from "./serve/tools/get-page.js";
 import { impact } from "./serve/tools/impact.js";
@@ -169,10 +169,11 @@ function printSeams(result: SeamsResult): void {
   const calls = result.kept.filter((s) => s.kind === "http-call");
   const runtime = calls.filter((s) => s.key === null).length;
   const scope = result.mode === "full" ? "mapped" : `updated in ${result.redone.length} file${result.redone.length === 1 ? "" : "s"}`;
-  const dropped = result.dropped.length ? `, ${result.dropped.length} dropped` : "";
+  const retried = result.retried ? `, ${result.retried} dropped and asked for again` : "";
+  const dropped = result.dropped.length ? `, ${result.dropped.length} ${result.retried ? "still " : ""}dropped` : result.retried ? ", all recovered" : "";
   console.log(
-    `${result.repo}: routes and calls ${scope} at ${at} · ${routes} routes, ${calls.length - runtime} calls` +
-      `${runtime ? ` (+${runtime} run-time)` : ""}${dropped} · $${result.costUsd.toFixed(2)} · ${Math.round(result.durationMs / 1000)}s`,
+    `${result.repo}: routes and calls ${scope} at ${at} · ${count(routes, "route")}, ${count(calls.length - runtime, "call")}` +
+      `${runtime ? ` (+${runtime} run-time)` : ""}${retried}${dropped} · $${result.costUsd.toFixed(2)} · ${Math.round(result.durationMs / 1000)}s`,
   );
   for (const drop of result.dropped.slice(0, 3)) console.log(`    dropped: ${drop.reason} · ${drop.seam}`);
   if (result.dropped.length > 3) console.log(`    … and ${result.dropped.length - 3} more`);

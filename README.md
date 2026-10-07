@@ -201,7 +201,8 @@ call made, with the lines that declare each one and the lines its path is built 
 `api` prefix, a Flask blueprint prefix, a client's base URL). Each is verified before it is
 stored, with no AI: the cited lines must exist, its method must appear in them (GET can be
 implicit; a resource declaration implies its CRUD methods; `del(` counts as DELETE), and every
-fixed segment of its path must appear in them. Anything else is dropped and reported. A call
+fixed segment of its path must appear in them. Anything that fails is asked for once more, with
+the reasons (a base-URL line is easy to leave out); what still fails is dropped and reported. A call
 whose URL can't be worked out from the code is kept as run-time, as before.
 
 Against the parsers this replaced, on the RealWorld repos: every route and call they found was
@@ -325,7 +326,7 @@ Hooks run whichever brain code is checked out in this folder.
 | W1 | Wiki pages: `brain wiki`, `brain_get`; the old fact readers removed | ✅ |
 | W2 | Every citation checked automatically; unsupported claims removed; a failing page keeps its previous version | ✅ |
 | W3 | The wiki updates itself from the hooks, rewriting only affected pages; a failing page is retried once | ✅ |
-| W4 | Routes and calls in any language by Claude Code, verified like citations; the parsers removed | ✅ (this branch) |
+| W4 | Routes and calls in any language by Claude Code, verified like citations; the parsers removed | ✅ |
 | W5 | `brain_search` across wikis; final docs | Next |
 | 2, 4, 6 | Harness evals, curated context, hosting | After the switch |
 

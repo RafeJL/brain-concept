@@ -132,3 +132,20 @@ describe("sentences", () => {
     expect(checked).toMatchObject({ claims: 1, removed: [] });
   });
 });
+
+describe("tables", () => {
+  it("keeps a table's header row, and checks each body row as a claim", () => {
+    const table = [
+      "| Route | Auth | Where |",
+      "|---|---|---|",
+      "| `GET /articles/:slug` | `auth.optional` | [src/articles.ts:3] |",
+      "| `PATCH /articles/:slug` | `auth.required` | [src/articles.ts:4] |",
+    ].join("\n");
+
+    const checked = checkPage(table, repo());
+
+    expect(checked.claims).toBe(2);
+    expect(checked.removed.map((r) => r.text)).toEqual(["| `PATCH /articles/:slug` | `auth.required` | [src/articles.ts:4] |"]);
+    expect(checked.markdown).toBe(table.split("\n").slice(0, 3).join("\n"));
+  });
+});

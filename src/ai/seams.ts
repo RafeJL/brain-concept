@@ -66,7 +66,10 @@ export interface SeamsResult {
   /** Files whose seams were listed again in an update. Empty: nothing that could declare one changed, so no run. */
   redone: string[];
   kept: Seam[];
+  /** What was still dropped after the second pass (or the first, if nothing was). */
   dropped: DroppedSeam[];
+  /** How many the first pass dropped and were asked for again; 0 when none were. */
+  retried: number;
   costUsd: number;
   durationMs: number;
 }
@@ -100,19 +103,32 @@ export async function updateSeams(store: Store, runner: Runner, name: string, op
     redo = [...files].sort();
     if (redo.length === 0) {
       store.replaceSeams(name, { commit: state.commit, paths: [], seams: [] });
-      return { repo: name, commit: state.commit, mode: "update", redone: [], kept: [], dropped: [], costUsd: 0, durationMs: 0 };
+      return { repo: name, commit: state.commit, mode: "update", redone: [], kept: [], dropped: [], retried: 0, costUsd: 0, durationMs: 0 };
     }
   }
 
-  const { run, kept, dropped } = await withWorktree(repo.path, state.commit, async (cwd) => {
-    const run = await runner.run<{ seams?: unknown }>({
-      cwd,
-      prompt: prompt("list-seams", { scope: scopeText(redo) }),
-      schema: SCHEMA,
-      model: options.model ?? DEFAULT_MODEL,
-    });
+  let costUsd = 0;
+  let durationMs = 0;
+  const list = async (cwd: string, scope: string): Promise<unknown[]> => {
+    const run = await runner.run<{ seams?: unknown }>({ cwd, prompt: prompt("list-seams", { scope }), schema: SCHEMA, model: options.model ?? DEFAULT_MODEL });
+    costUsd += run.costUsd;
+    durationMs += run.durationMs;
     if (!Array.isArray(run.output?.seams)) throw new BrainError("The AI's seam list was malformed. Nothing was stored.");
-    return { run, ...verifySeams(run.output.seams, cwd, name, state.commit, redo) };
+    return run.output.seams;
+  };
+
+  const { kept, dropped, retried } = await withWorktree(repo.path, state.commit, async (cwd) => {
+    const first = verifySeams(await list(cwd, scopeText(redo)), cwd, name, state.commit, redo);
+    if (first.dropped.length === 0) return { ...first, retried: 0 };
+    // Output varies between runs and a contributing line is easy to leave out; ask once more for
+    // just the dropped entries, with the reasons, before giving up on them.
+    try {
+      const second = verifySeams(await list(cwd, retryScope(first.dropped, redo)), cwd, name, state.commit, redo);
+      return { kept: uniqueSeams([...first.kept, ...second.kept]), dropped: second.dropped, retried: first.dropped.length };
+    } catch (error) {
+      if (!(error instanceof BrainError)) throw error;
+      return { ...first, retried: 0 };
+    }
   });
 
   store.replaceSeams(name, { commit: state.commit, paths: redo, seams: kept });
@@ -123,9 +139,19 @@ export async function updateSeams(store: Store, runner: Runner, name: string, op
     redone: redo ?? [],
     kept,
     dropped,
-    costUsd: run.costUsd,
-    durationMs: run.durationMs,
+    retried,
+    costUsd,
+    durationMs,
   };
+}
+
+function retryScope(dropped: readonly DroppedSeam[], redo: readonly string[] | null): string {
+  return [
+    "An earlier pass listed these, and the automatic check dropped them for the reasons given:",
+    ...dropped.map((d) => `- ${d.seam}: ${d.reason}`),
+    "List again only the ones that are real, this time citing every line each fixed segment of the path comes from (such as a base-URL constant or a route prefix), and leave out any you can't support.",
+    ...(redo ? ["Only these files are being mapped:", ...redo.map((path) => `- ${path}`)] : []),
+  ].join("\n");
 }
 
 function scopeText(redo: readonly string[] | null): string {
@@ -153,7 +179,7 @@ export function verifySeams(
   only: readonly string[] | null = null,
 ): { kept: Seam[]; dropped: DroppedSeam[] } {
   const linesOf = fileReader(root);
-  const kept = new Map<string, Seam>();
+  const kept: Seam[] = [];
   const dropped: DroppedSeam[] = [];
   for (const item of found) {
     const reason = problemWith(item, linesOf);
@@ -178,9 +204,14 @@ export function verifySeams(
       cites: contributing,
       commit,
     };
-    kept.set(`${seam.kind} ${seam.method} ${seam.key ?? seam.rawPath} ${seam.path}:${seam.startLine}`, seam);
+    kept.push(seam);
   }
-  return { kept: [...kept.values()], dropped };
+  return { kept: uniqueSeams(kept), dropped };
+}
+
+/** One of each seam: the same kind, method and path declared at the same line. */
+function uniqueSeams(seams: readonly Seam[]): Seam[] {
+  return [...new Map(seams.map((s) => [`${s.kind} ${s.method} ${s.key ?? s.rawPath} ${s.path}:${s.startLine}`, s])).values()];
 }
 
 /**
