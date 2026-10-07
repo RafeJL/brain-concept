@@ -3,7 +3,7 @@ import type { Freshness, LanguageShare } from "../../core/types.js";
 import type { Caller } from "../access.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
 import { neighbours, type Neighbour, type Neighbours } from "../neighbours.js";
-import { count, requireSyncedRepo, type Format, type ToolDeps, type ToolResult } from "./common.js";
+import { count, requireSyncedRepo, TIER, type Format, type ToolDeps, type ToolResult } from "./common.js";
 import { wikiCommit } from "./get-page.js";
 
 export interface RepoCard {
@@ -102,7 +102,7 @@ function seamsLine({ repo, seams, freshness }: RepoCard): string {
       ? "none found"
       : `${count(routes, "route")}, ${count(calls, "call")}${unresolvedCalls ? ` (+${unresolvedCalls} with run-time URLs)` : ""}`;
   const older = seams.commit === freshness.commit ? "" : ` · mapped at @${seams.commit.slice(0, 7)}, older than the index`;
-  return `Seams: ${found} · llm-generated${older}`;
+  return `Seams: ${found} · ${TIER}${older}`;
 }
 
 function neighbourLines({ calls, calledBy }: Neighbours): string[] {

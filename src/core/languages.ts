@@ -24,12 +24,6 @@ const BY_FILENAME: Record<string, string> = {
   Jenkinsfile: "Groovy",
 };
 
-/** Languages that hold application code, as opposed to config, docs or markup. */
-export const CODE_LANGUAGES: ReadonlySet<string> = new Set([
-  "TypeScript", "JavaScript", "C#", "F#", "Visual Basic", "Java", "Kotlin", "Scala", "Groovy",
-  "Python", "Ruby", "PHP", "Go", "Rust", "Swift", "Dart", "C", "C++",
-]);
-
 /** Best-effort language from a path. Null for unknown or binary files. */
 export function detectLanguage(path: string): string | null {
   const name = basename(path);

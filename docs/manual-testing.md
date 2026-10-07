@@ -12,7 +12,8 @@ There are three parts:
 - **Part C** checks Claude Code reaches for the brain on its own.
 
 Run every `npm run brain -- …` command from the brain-concept folder, and stay on one branch
-throughout. Background syncs run whatever brain code is checked out.
+throughout. Background syncs run whatever brain code is checked out. Start with
+`npm run brain -- doctor`: it should show ✓ for Node, git, Claude Code and the MCP server.
 
 ## Before you start: the test repos
 
@@ -357,6 +358,7 @@ $10–15 in all, most of it eshop (about $3.70 and 11 minutes for its routes alo
 | `search "where are orders cancelled"` | eshop's Ordering sections first, and `PUT /api/orders/cancel` as a route in `src/Ordering.API/Apis/OrdersApi.cs` |
 | `search "kafka"` | `No wiki sections or endpoints match "kafka" in 7 repos.` |
 | `card nope` | `No readable repo named "nope"`, listing only the repos you enrolled |
+| `doctor` | ✓ on every line, including a `Hook:` line per repo saying it syncs automatically |
 | `sync` (run it twice) | The second run says `+0 ~0 -0`, `no code changed (no AI run)` and `wiki up to date`: nothing is redone and nothing is spent |
 
 ## Part C: Claude Code uses the brain on its own

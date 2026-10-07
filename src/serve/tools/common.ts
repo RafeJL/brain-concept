@@ -7,6 +7,9 @@ import { describeFreshness, freshnessOf } from "../freshness.js";
 
 export type Format = "concise" | "detailed";
 
+/** How every answer's facts were made: by Claude Code, with each citation checked. */
+export const TIER = "llm-generated";
+
 export interface ToolDeps {
   store: Store;
   access: AccessPolicy;
@@ -38,7 +41,7 @@ export async function requireSyncedRepo(deps: ToolDeps, caller: Caller, name: st
   const readable = await readableRepos(deps, caller);
   const repo = readable.includes(name) ? deps.store.getRepo(name) : undefined;
   if (!repo) {
-    const list = readable.length ? `Repos you can read: ${readable.join(", ")}.` : "No repos are enrolled yet.";
+    const list = readable.length ? `Repos you can read: ${readable.join(", ")}.` : "No repos are enrolled yet. Add one with: brain add <path>";
     return { ok: false, text: `No readable repo named "${name}". ${list}` };
   }
   const state = deps.store.getState(name);

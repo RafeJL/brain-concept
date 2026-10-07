@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinPaths, matchKeys, methodFromVerb, normalisePath } from "../src/core/http.js";
+import { matchKeys, methodFromVerb, normalisePath } from "../src/core/http.js";
 
 describe("normalisePath", () => {
   it.each([
@@ -42,14 +42,8 @@ describe("matchKeys", () => {
 
 describe("helpers", () => {
   it("maps verbs to methods", () => {
-    expect(methodFromVerb("del")).toBe("DELETE");
-    expect(methodFromVerb("all")).toBe("*");
+    expect(methodFromVerb("delete")).toBe("DELETE");
+    expect(methodFromVerb("Get")).toBe("GET");
     expect(methodFromVerb("use")).toBeNull();
-  });
-
-  it("joins prefixes without doubling slashes", () => {
-    expect(joinPaths("/api/", "/users")).toBe("/api/users");
-    expect(joinPaths("", "users")).toBe("/users");
-    expect(joinPaths("cats", "")).toBe("/cats");
   });
 });

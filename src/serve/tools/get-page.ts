@@ -1,7 +1,7 @@
 import type { Freshness, WikiPage } from "../../core/types.js";
 import type { Caller } from "../access.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
-import { requireSyncedRepo, type ToolDeps, type ToolResult } from "./common.js";
+import { requireSyncedRepo, TIER, type ToolDeps, type ToolResult } from "./common.js";
 
 export interface PageInput {
   repo: string;
@@ -53,7 +53,7 @@ export async function getPage(deps: ToolDeps, caller: Caller, input: PageInput):
     const rows = pages.map((p) => `  ${p.slug.padEnd(24)} ${p.title}${keptNote(p) ? ` (${keptNote(p)})` : ""}`);
     const freshness = await freshnessOf(repo, { ...state, commit: newest });
     const text = [
-      `${repo.name} wiki · ${pages.length} pages · ${describeFreshness(freshness, repo.ref)} · llm-generated`,
+      `${repo.name} wiki · ${pages.length} pages · ${describeFreshness(freshness, repo.ref)} · ${TIER}`,
       ...rows,
       "",
       `Read one with page set to its name, e.g. "${pages[0]!.slug}".`,
@@ -67,7 +67,7 @@ export async function getPage(deps: ToolDeps, caller: Caller, input: PageInput):
   }
   const freshness = await freshnessOf(repo, { ...state, commit: page.commit });
   const text = [
-    `${repo.name} · ${page.slug} · ${describeFreshness(freshness, repo.ref)} · llm-generated · ${checkedNote(page)}`,
+    `${repo.name} · ${page.slug} · ${describeFreshness(freshness, repo.ref)} · ${TIER} · ${checkedNote(page)}`,
     ...(keptNote(page) ? [`Note: ${keptNote(page)}, so this older version is shown.`] : []),
     "",
     page.markdown,

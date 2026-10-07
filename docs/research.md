@@ -1,5 +1,9 @@
 # Research summary (September 2026)
 
+> A snapshot of the research the design started from. Some conclusions were later revised on
+> evidence: routes and calls are now found by Claude Code and verified against cited lines, not
+> parsed. See `decisions.md` (2026-10-05 onwards) for what changed and why.
+
 What others built, what paid off, and what didn't. Condensed from three research passes:
 codebase brains, organisation-wide context layers, and AI software factories. Vendor claims are
 marked as such.
@@ -69,7 +73,8 @@ Sources: [Stripe](https://stripe.dev/blog/minions-stripes-one-shot-end-to-end-co
 
 ## What it means for this repo
 
-1. The cross-repo seam map is the core, and it is parser-built.
+1. The cross-repo seam map is the core, and it is parser-built. (Revised in October 2026: it
+   is found by Claude Code and every entry is verified against the lines it cites.)
 2. Curated content is human-owned; agents draft PRs.
 3. Wiki pages are advisory, cited, and checked.
 4. Freshness is handled on merge, in the write path.

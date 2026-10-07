@@ -21,12 +21,17 @@ function citationsIn(inside: string): Citation[] {
   return inside.split(";").flatMap((part) => {
     const source = SOURCE.exec(part);
     if (!source) return [];
-    const path = source[1]!.replace(/^\.?\//, "");
+    const path = cleanPath(source[1]!);
     return source[2]!.split(",").map((range) => {
       const [start, end = start] = range.split("-").map((n) => Number(n.trim()));
       return { path, start: start!, end: end! };
     });
   });
+}
+
+/** A cited path as stored: forward slashes, no leading `./` or `/`. */
+export function cleanPath(file: string): string {
+  return file.trim().replace(/\\/g, "/").replace(/^\.?\//, "");
 }
 
 /** The text with its citations taken out; other brackets (`[Authorize]`, links) stay. */

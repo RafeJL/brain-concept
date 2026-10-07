@@ -47,15 +47,11 @@ export function makeRepo(files: Record<string, string>): string {
 const FIXTURE_REPOS = fileURLToPath(new URL("./fixtures/repos/", import.meta.url));
 const FIXTURE_CHANGES = fileURLToPath(new URL("./fixtures/changes/", import.meta.url));
 
-const BUILD_OUTPUT = new Set(["bin", "obj"]);
-
 /** Every file under `root`, keyed by its path relative to it with forward slashes. */
 function readTree(root: string, dir = root): Record<string, string> {
   const files: Record<string, string> = {};
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
-    // Build output an IDE writes next to fixture projects (dotnet restore) isn't part of the fixture.
-    if (entry.isDirectory() && BUILD_OUTPUT.has(entry.name)) continue;
     if (entry.isDirectory()) Object.assign(files, readTree(root, full));
     else files[relative(root, full).replace(/\\/g, "/")] = readFileSync(full, "utf8");
   }

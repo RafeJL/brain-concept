@@ -400,3 +400,32 @@ answers because the wording differs from the wiki's.
 | redux store setup | react-web · redux-data-flow › localStorageMiddleware |
 | favorite an article | aspnet-api · api › Favorites |
 | event bus integration events | eshop · ordering-api › Transactional outbox for integration events |
+
+## 2026-10-07: easy to trial locally; parser-era leftovers removed
+
+Colleagues should be able to go from clone to asking Claude about their own repo in about ten
+minutes. A fresh-clone walkthrough found:
+- the quick start sat about 250 lines into the README;
+- a missing git gave "Ref main does not resolve";
+- a missing Claude Code showed up only when a sync failed;
+- registering the MCP server meant typing your own path.
+
+**What changed:**
+- **`brain doctor`** checks Node, git, Claude Code, the store, the MCP registration (that it
+  runs *this* checkout and connects) and each repo's hook. Every failure comes with its fix. The
+  fix for an unregistered server is the exact `claude mcp add` command for this machine.
+- **`brain add <path>`** enrols, syncs and installs the hook in one step. Before the AI runs it
+  prints a rough cost and time from the repo's file count, measured on the trial repos.
+- **`brain wiki` is gone.** `brain sync` does everything, so there is one command to learn. The
+  `--wiki` flag old hooks passed is gone too: `brain doctor` flags those hooks as written by an
+  older brain, and `brain hooks install` refreshes them.
+- **The README is for trialists;** developer material moved to `docs/development.md`.
+- **Removed leftovers:**
+  - the `yaml` dependency;
+  - three unused functions (`readBlobs`, `CODE_LANGUAGES`, `joinPaths`);
+  - the `seams.plugin` column (migration 9);
+  - a `.gitignore` rule (and a test-helper skip) for .NET build output: no .NET projects remain in
+    the fixtures, and the rule also hid new files in the real `bin/`;
+  - the `del`, `all` and `any` verb aliases, which only the Express and Laravel parsers needed.
+- **Merged duplicates:** `SeamCite` and `Citation` are one type, there is one `cleanPath`, and
+  the `llm-generated` label is a constant ready for `human-reviewed`.

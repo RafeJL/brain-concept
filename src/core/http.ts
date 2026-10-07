@@ -2,11 +2,10 @@
 export const PARAM = "{}";
 
 const VERBS: Record<string, string> = {
-  get: "GET", post: "POST", put: "PUT", patch: "PATCH", delete: "DELETE", del: "DELETE",
-  head: "HEAD", options: "OPTIONS", all: "*", any: "*",
+  get: "GET", post: "POST", put: "PUT", patch: "PATCH", delete: "DELETE", head: "HEAD", options: "OPTIONS",
 };
 
-/** "get" → "GET", "del" → "DELETE", "all" → "*"; null for anything that isn't an HTTP verb. */
+/** "get" → "GET"; null for anything that isn't an HTTP verb. */
 export function methodFromVerb(verb: string): string | null {
   return VERBS[verb.toLowerCase()] ?? null;
 }
@@ -39,15 +38,6 @@ export function normalisePath(raw: string): string {
     .filter((segment) => segment.length > 0 && segment !== ".")
     .map((segment) => (isParamSegment(segment) ? PARAM : segment.toLowerCase()));
   return "/" + segments.join("/");
-}
-
-/** Joins a prefix and a route the way frameworks do, without doubling or dropping slashes. */
-export function joinPaths(prefix: string, path: string): string {
-  const left = prefix.replace(/\/+$/, "");
-  const right = path.replace(/^\/+/, "");
-  if (!left) return "/" + right;
-  if (!right) return left.startsWith("/") ? left : "/" + left;
-  return `${left.startsWith("/") ? "" : "/"}${left}/${right}`;
 }
 
 export type MatchQuality = "exact" | "suffix";

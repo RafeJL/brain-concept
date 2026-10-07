@@ -1,9 +1,11 @@
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { resolveDbPath } from "./config.js";
 import { runQueued } from "./core/queue.js";
-import { BrainError } from "./core/types.js";
+import { listTree, resolveCommit } from "./core/git.js";
+import { BrainError, type RepoRecord } from "./core/types.js";
+import { doctor, execProgram, formatChecks } from "./doctor.js";
 import { hookStatus, installHook, removeHook, type HookCommand } from "./ingest/hooks.js";
 import { enrolRepo, removeRepo, setRepoRef } from "./ingest/registry.js";
 import { syncRepo, type SyncResult } from "./ingest/sync.js";
@@ -23,25 +25,29 @@ import type { Store } from "./store/store.js";
 
 const HELP = `brain: organisation-wide context for coding agents
 
-Usage:
-  brain repo add <path> [--name <name>] [--ref <branch>]   enrol a local clone
-  brain repo list                                          enrolled repos and freshness
-  brain repo set-ref <name> <ref>                          index a different ref, e.g. origin/main
-  brain repo remove <name>                                 remove a repo, its facts and its hook
-  brain sync [<name>] [--full] [--no-ai]                   index the tracked branch, then have Claude Code bring the
-                                                           repo's routes, calls and wiki up to it (all repos if no
-                                                           name); --full redoes them from scratch, --no-ai skips them
-  brain hooks install|remove [<name>]                      re-sync automatically when the tracked ref moves
-  brain hooks status                                       which repos sync automatically
-  brain wiki <name> [--full] [--model <model>]             sync, then bring only the wiki up to date (default ${DEFAULT_MODEL})
-  brain page <name> [<page>]                               a wiki page (or the page list) as an agent gets it
-  brain card <name> [--detailed]                           the repo card an agent would get
+Get started:
+  brain doctor                                             check Node, git, Claude Code and the MCP registration
+  brain add <path> [--name <name>] [--no-hook] [--no-ai]   add a repo: index it, have Claude Code write its wiki and
+                                                           map its routes and calls, and keep it up to date
+
+Keep repos up to date:
+  brain sync [<name>] [--full] [--no-ai] [--model <m>]     bring repos up to their tracked branch (all if no name);
+                                                           --full redoes everything, --no-ai indexes only
+  brain hooks install|remove|status [<name>]               re-sync automatically whenever the tracked branch moves
+  brain repo list                                          repos and how up to date each is
+  brain repo add <path> [--name <name>] [--ref <branch>]   enrol only (no AI); then brain sync <name>
+  brain repo set-ref <name> <ref>                          track a different branch, e.g. origin/release
+  brain repo remove <name>                                 remove a repo, everything held about it, and its hook
+
+See what an agent gets:
+  brain search "<query>" [--repo <name>]... [--detailed]   search every repo's wiki and endpoints
+  brain card <name> [--detailed]                           what a repo is, its wiki, what it calls and what calls it
+  brain page <name> [<page>]                               a wiki page, or the list of pages
   brain consumers "<METHOD /path>" [--detailed]            who serves and who calls an endpoint
   brain impact <repo> [--path <file>] [--route "<METHOD /path>"] [--detailed]
-                                                           routes a repo or file serves, and their callers
-  brain search "<query>" [--repo <name>]... [--detailed]   search every wiki and endpoint, as brain_search does
+                                                           routes a repo or file serves, and who calls each
 
-Store: ${resolveDbPath()} (set BRAIN_DB to change)`;
+Store: ${resolveDbPath()} (set BRAIN_DB to change). Model: ${DEFAULT_MODEL} unless --model is given.`;
 
 async function main(argv: string[]): Promise<void> {
   const { values, positionals } = parseArgs({
@@ -55,9 +61,8 @@ async function main(argv: string[]): Promise<void> {
       repo: { type: "string", multiple: true },
       offset: { type: "string" },
       model: { type: "string" },
-      // Hooks installed before W4 run "sync --wiki"; sync now always updates the wiki.
-      wiki: { type: "boolean", default: false },
       "no-ai": { type: "boolean", default: false },
+      "no-hook": { type: "boolean", default: false },
       full: { type: "boolean", default: false },
       detailed: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
@@ -92,27 +97,40 @@ async function main(argv: string[]): Promise<void> {
         } else if (sub === "remove" && arg) {
           if (store.getRepo(arg)) await removeHook(store, arg);
           removeRepo(store, arg);
-          console.log(`Removed ${arg}, its facts and its hook.`);
+          console.log(`Removed ${arg}, everything the brain held about it, and its hook.`);
         } else {
           throw new BrainError("Usage: brain repo add <path> | list | set-ref <name> <ref> | remove <name>");
         }
         break;
       case "sync": {
         const names = sub ? [sub] : store.listRepos().map((repo) => repo.name);
-        if (names.length === 0) throw new BrainError("No repos enrolled. Run: brain repo add <path>");
+        if (names.length === 0) throw new BrainError("No repos enrolled. Add one with: brain add <path>");
         for (const name of names) {
           if (values["no-ai"]) printSync(await syncRepo(store, name));
-          else await syncAndRefresh(store, name, { model: values.model, full: values.full, seams: true });
+          else await syncAndRefresh(store, name, { model: values.model, full: values.full });
         }
+        break;
+      }
+      case "add": {
+        if (!sub) throw new BrainError("Usage: brain add <path to a git repo> [--name <name>] [--no-hook] [--no-ai]");
+        await addRepo(store, sub, { name: values.name, ref: values.ref, model: values.model, ai: !values["no-ai"], hook: !values["no-hook"] });
+        break;
+      }
+      case "doctor": {
+        const checks = await doctor({
+          store,
+          dbPath: resolve(resolveDbPath()),
+          nodeVersion: process.versions.node,
+          exec: execProgram,
+          hook: hookCommand(),
+          mcpEntry: fileURLToPath(new URL("../bin/brain-mcp.mjs", import.meta.url)),
+        });
+        console.log(formatChecks(checks, store.listRepos().length > 0));
+        if (checks.some((check) => !check.ok)) process.exitCode = 1;
         break;
       }
       case "hooks":
         await hooks(store, sub, arg);
-        break;
-      case "wiki":
-        if (!sub) throw new BrainError("Usage: brain wiki <name> [--full] [--model <model>]");
-        console.log(`Bringing ${sub}'s wiki up to date with Claude Code (${values.model ?? DEFAULT_MODEL}); writing pages takes a few minutes...`);
-        await syncAndRefresh(store, sub, { model: values.model, full: values.full, seams: false });
         break;
       case "page":
         if (!sub) throw new BrainError("Usage: brain page <name> [<page>]");
@@ -143,15 +161,15 @@ async function main(argv: string[]): Promise<void> {
 }
 
 /**
- * Syncs a repo, then has Claude Code bring its routes and calls (unless `seams` is false) and
- * its wiki up to the new commit. One run per repo at a time: a hook firing mid-run is folded into
- * one more pass when this one finishes. A failed AI step is reported and the next one still runs.
+ * Syncs a repo, then has Claude Code bring its routes and calls and its wiki up to the new
+ * commit. One run per repo at a time: a hook firing mid-run is folded into one more pass when
+ * this one finishes. A failed AI step is reported and the next one still runs.
  */
-async function syncAndRefresh(store: Store, name: string, options: { model?: string; full?: boolean; seams: boolean }): Promise<void> {
+async function syncAndRefresh(store: Store, name: string, options: { model?: string; full?: boolean }): Promise<void> {
   let full = options.full;
   const outcome = await runQueued(join(dirname(resolveDbPath()), "locks"), name, async () => {
     printSync(await syncRepo(store, name));
-    if (options.seams) await reported(name, "routes and calls", async () => printSeams(await updateSeams(store, claudeRunner, name, { model: options.model, full })));
+    await reported(name, "routes and calls", async () => printSeams(await updateSeams(store, claudeRunner, name, { model: options.model, full })));
     await reported(name, "wiki", async () => printWiki(await generateWiki(store, claudeRunner, name, { model: options.model, full })));
     full = false;
   });
@@ -242,7 +260,7 @@ async function hooks(store: Store, action: string | undefined, name: string | un
 async function listRepos(store: Store): Promise<void> {
   const repos = store.listRepos();
   if (repos.length === 0) {
-    console.log("No repos enrolled. Run: brain repo add <path>");
+    console.log("No repos enrolled. Add one with: brain add <path>");
     return;
   }
   for (const repo of repos) {
@@ -250,6 +268,47 @@ async function listRepos(store: Store): Promise<void> {
     const status = state ? describeFreshness(await freshnessOf(repo, state), repo.ref) : "not synced";
     console.log(`${repo.name.padEnd(32)} ${status.padEnd(34)} ${repo.path}`);
   }
+}
+
+/**
+ * Everything a person trying the brain needs for one repo: enrol it, index it, have Claude Code
+ * write its wiki and map its routes and calls, and install the hook that keeps it current. Says
+ * roughly what the AI step costs before it starts.
+ */
+async function addRepo(
+  store: Store,
+  path: string,
+  options: { name?: string; ref?: string; model?: string; ai: boolean; hook: boolean },
+): Promise<void> {
+  const repo = await enrolRepo(store, { path, name: options.name, ref: options.ref });
+  console.log(`Added ${repo.name}, tracking ${repo.ref}, from ${repo.path}`);
+  if (options.ai) {
+    console.log(await estimate(repo));
+    await syncAndRefresh(store, repo.name, { model: options.model });
+  } else {
+    printSync(await syncRepo(store, repo.name));
+  }
+  if (options.hook) {
+    try {
+      await installHook(store, repo.name, hookCommand());
+      console.log(`${repo.name}: will re-sync in the background whenever ${repo.ref} moves (log: ${hookCommand().logPath})`);
+    } catch (error) {
+      if (!(error instanceof BrainError)) throw error;
+      console.log(`${repo.name}: no hook installed (${error.message}). Run brain sync ${repo.name} after pulling.`);
+    }
+  }
+  console.log("");
+  console.log(options.ai ? `Next: ask Claude Code "what does ${repo.name} do?", or run: brain card ${repo.name}` : `Next: brain sync ${repo.name} to have Claude Code write its wiki`);
+}
+
+/** Rough first-sync cost and time from the repo's size, measured on the trial repos. */
+async function estimate(repo: RepoRecord): Promise<string> {
+  const files = (await listTree(repo.path, await resolveCommit(repo.path, repo.ref))).length;
+  const [cost, time] = files <= 300 ? ["$0.50–2", "3–6 minutes"] : files <= 1000 ? ["$1–3", "5–10 minutes"] : ["$3–8", "10–20 minutes"];
+  return (
+    `${repo.name} has ${files} files. Claude Code will now read it to map its routes and calls and write its wiki: ` +
+    `roughly ${cost} of your Claude Code allowance and ${time}. Later updates cost cents.`
+  );
 }
 
 function print(result: ToolResult<unknown>): void {

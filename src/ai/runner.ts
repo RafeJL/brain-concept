@@ -77,7 +77,7 @@ export const claudeRunner: Runner = {
       child.stdout.on("data", (chunk) => (stdout += chunk));
       child.stderr.on("data", (chunk) => (stderr += chunk));
       child.on("error", (error) =>
-        reject(new BrainError(`Could not start Claude Code ("claude" on PATH): ${error.message}`)),
+        reject(new BrainError(`Could not start Claude Code ("claude" on PATH): ${error.message}. Install it, run \`claude\` once to sign in, then check with: brain doctor`)),
       );
       child.on("close", (code) => {
         if (!stdout.trim()) return reject(new BrainError(`Claude Code exited with ${code} and no output. ${stderr.slice(0, 300)}`));
