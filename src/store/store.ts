@@ -25,6 +25,37 @@ export interface SeamFilter {
   includeUnresolved?: boolean;
 }
 
+/** A search over the index: an FTS5 `match` expression, limited to the caller's repos. */
+export interface SearchFilter {
+  /** Only these repos. Always pass the caller's readable set. */
+  repos: readonly string[];
+  match: string;
+  limit: number;
+  offset?: number;
+  /** Snippet length in words. */
+  snippetWords?: number;
+}
+
+/** A wiki section that matched, best first. */
+export interface SectionHit {
+  repo: string;
+  slug: string;
+  pageTitle: string;
+  heading: string;
+  /** The matching part of the section, citations taken out. */
+  snippet: string;
+  /** Files the section cites. */
+  paths: string[];
+}
+
+export interface SearchPage<T> {
+  /** How many rows match in all, for paging. */
+  total: number;
+  /** Every repo with a matching row, not only those on this page. */
+  repos: string[];
+  hits: T[];
+}
+
 /**
  * Everything the brain knows, keyed by repo. SQLite implements it for the POC; Postgres will
  * implement it when hosted. Keep it small: callers compose queries, the store stays dumb.
@@ -52,6 +83,11 @@ export interface Store {
   replacePages(repo: string, pages: readonly WikiPage[]): void;
   /** A repo's wiki pages in the order they were written. */
   pages(repo: string): WikiPage[];
+
+  /** Wiki sections matching a search, best first. Kept in step with pages by `replacePages`. */
+  searchSections(filter: SearchFilter): SearchPage<SectionHit>;
+  /** Routes and calls matching a search, best first. Kept in step with seams by `replaceSeams`. */
+  searchSeams(filter: SearchFilter): SearchPage<Seam>;
 
   close(): void;
 }

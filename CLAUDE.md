@@ -22,9 +22,9 @@ calls it; nothing is ever moved out of the harness into here.
 - **Agent-facing tools are read-only.** Only ingest writes to the store.
 - **Permission checks go through `AccessPolicy`** before any query reads rows. Unknown and
   unreadable repos get the same answer.
-- **Few broad tools.** The planned set is `brain_find_consumers`, `brain_impact`,
-  `brain_repo_card`, `brain_search` and `brain_get`. Don't add tools outside it without a
-  decision entry. Default to concise output and return pointers, not pasted code.
+- **Few broad tools.** The set is `brain_find_consumers`, `brain_impact`, `brain_repo_card`,
+  `brain_search` and `brain_get`, all built. Don't add tools outside it without a decision
+  entry. Default to concise output and return pointers, not pasted code.
 - **AI output is cited and checked deterministically before it is stored.** Wiki claims go
   through the citation checker; routes and calls through seam verification. Both drop what the
   cited lines don't support and report why.
@@ -47,6 +47,10 @@ calls it; nothing is ever moved out of the harness into here.
   through `runQueued` (`src/core/queue.ts`), one run per repo at a time. `syncRepo` itself never
   calls the AI.
 - Neighbours are never stored; they come from the seam graph at query time.
+- **The search index** (`src/store/search-index.ts`, FTS5) has a row per wiki section and per
+  seam. Rows are added only in `replacePages` and `replaceSeams` and removed by triggers, so it
+  can't drift from what it indexes; don't write to it anywhere else. Ranking weights were tuned
+  on real questions (decisions, 2026-10-07): re-run them if you change the weights.
 - **Recorded AI answers are fixtures**: `test/fixtures/seams/<repo>.json` is what Claude Code
   would answer for `test/fixtures/repos/<repo>`, so the tools are tested against real
   verification. Keep cited line numbers in step with the fixture files.

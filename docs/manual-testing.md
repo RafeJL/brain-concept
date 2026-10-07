@@ -137,6 +137,21 @@ git -C $P\aspnet-api worktree list
   and check they say what the sentence claims;
 - `worktree list` shows one line: the temporary worktree Claude Code ran in was removed.
 
+Then search across both repos:
+
+```
+npm run brain -- search "favorite an article"
+npm run brain -- search "favorite an article" --repo pg-react-web --detailed
+```
+
+**Expect:**
+- sections from both wikis, each as `repo · page › heading` with a snippet that has no
+  `[path:lines]` citations in it;
+- an `Endpoints:` list with `POST /api/articles/{slug}/favorite` as a route in pg-aspnet-api and a
+  call in pg-react-web;
+- with `--repo pg-react-web`, nothing from pg-aspnet-api. `--detailed` adds each section's page
+  title and the files it cites.
+
 ### A3. A teammate pushes, you fetch, and the brain updates itself
 
 As the teammate, add a new endpoint. Open `$P\teammate\aspnet-api\src\Conduit\Features\Articles\ArticlesController.cs` and add this
@@ -338,6 +353,9 @@ $10–15 in all, most of it eshop (about $3.70 and 11 minutes for its routes alo
 | `consumers "DELETE /api/profiles/{username}/follow"` | A method filter: four servers; react-web's call (written `requests.del(…)`) among the callers |
 | `impact aspnet-api --path src/Conduit/Features/Articles/ArticlesController.cs` | 6 routes and 9 callers, all in `react-web · src/agent.js` |
 | `impact eshop --route "GET /api/catalog/items/{id}"` | The minimal API route in `CatalogApi.cs`, with the three client `CatalogService.cs` files and the functional tests as `same repo` callers |
+| `search "how do I run the tests"` | `build-run-test` sections from several repos at the top, e.g. the harness's `Test` and eshop's `End-to-end tests (Playwright)` |
+| `search "where are orders cancelled"` | eshop's Ordering sections first, and `PUT /api/orders/cancel` as a route in `src/Ordering.API/Apis/OrdersApi.cs` |
+| `search "kafka"` | `No wiki sections or endpoints match "kafka" in 7 repos.` |
 | `card nope` | `No readable repo named "nope"`, listing only the repos you enrolled |
 | `sync` (run it twice) | The second run says `+0 ~0 -0`, `no code changed (no AI run)` and `wiki up to date`: nothing is redone and nothing is spent |
 
@@ -353,6 +371,7 @@ changes to the server's instructions. Ask in plain words, without naming tools:
 | *What talks to express-api?* | call `brain_repo_card` and name react-web |
 | *If I change GET /articles/:slug in express-api, what else breaks?* | call `brain_find_consumers` or `brain_impact` and point at `react-web · src/agent.js` |
 | *What would break if I removed the DELETE endpoint in aspnet-api's ArticlesController?* | call `brain_impact` |
+| *Where do we validate JWTs?* (no repo named) | call `brain_search`, then `brain_get` on the best section's page |
 
 If it searches the web, greps folders or clones instead, note the exact wording. That is how the
 server instructions in `src/serve/mcp.ts` get improved.

@@ -6,6 +6,7 @@ import { findConsumers } from "./tools/find-consumers.js";
 import { getPage } from "./tools/get-page.js";
 import { impact } from "./tools/impact.js";
 import { repoCard } from "./tools/repo-card.js";
+import { search } from "./tools/search.js";
 
 export interface ServerDeps extends ToolDeps {
   caller: Caller;
@@ -33,7 +34,8 @@ export const INSTRUCTIONS =
   "ask the brain first instead of searching the web, cloning, or changing folder. People may name " +
   "a repo by its folder, its GitHub name or the service it runs: call brain_repo_card with any name " +
   "to see which repos are enrolled; when it says the repo has a wiki, brain_get reads its pages " +
-  "(overview, how to build and test, its API, key modules). Before changing, " +
+  "(overview, how to build and test, its API, key modules). When you don't know which repo or page " +
+  "holds the answer (\"where do we validate tokens?\"), call brain_search. Before changing, " +
   "renaming or removing an HTTP endpoint, call brain_find_consumers to see who else depends on it. " +
   "Before changing a controller, router or service that serves endpoints, call brain_impact. " +
   "Every answer names the commit it describes and how far behind the tracked branch that is; " +
@@ -122,6 +124,27 @@ export function createServer(deps: ServerDeps): McpServer {
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async (input) => answer(await getPage(deps, deps.caller, input)),
+  );
+
+  server.registerTool(
+    "brain_search",
+    {
+      title: "Search every repo's wiki and endpoints",
+      description:
+        "Search the wikis and HTTP endpoints of every repo you can read with a question or keywords, e.g. " +
+        "\"jwt validation\" or \"how are basket items checked out\". Returns ranked wiki sections (repo, page " +
+        "and heading, with the matching text) and matching endpoints with file:line pointers. Use it when you " +
+        "don't know which repo or page holds the answer, then read a page with brain_get. Keyword search: " +
+        "use the words the code would use (\"auth\", \"basket\"), not a long sentence.",
+      inputSchema: {
+        query: z.string().min(1).describe("Keywords or a question, e.g. \"order cancellation\"."),
+        repos: z.array(z.string()).optional().describe("Limit the search to these repos."),
+        format: formatSchema,
+        offset: offsetSchema,
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async (input) => answer(await search(deps, deps.caller, input)),
   );
 
   return server;
