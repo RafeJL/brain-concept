@@ -190,6 +190,29 @@ describe("mapping and updating a repo's routes and calls", () => {
     expect(store.seams({ repos: ["api"] }).map((s) => s.key)).toEqual(["/v2/tags"]);
   });
 
+  it("asks once more for what the check dropped, with the reasons, and keeps what then passes", async () => {
+    const store = new SqliteStore(":memory:");
+    const service = ['private readonly string baseUrl = "api/catalog/";', "", "", "", "", "", 'var items = await httpClient.GetAsync($"{baseUrl}items");'].join("\n");
+    await enrolRepo(store, { path: makeRepo({ "CatalogService.cs": service }), name: "web" });
+    await syncRepo(store, "web");
+    const call = (...lines: number[]) => ({ kind: "call", method: "GET", path: "/api/catalog/items", runtime: false, cites: lines.map((l) => ({ file: "CatalogService.cs", start: l, end: l })) });
+    const answers = [{ seams: [call(7)] }, { seams: [call(7, 1)] }];
+    const prompts: string[] = [];
+    const runner = {
+      async run<T>(request: { prompt: string }) {
+        prompts.push(request.prompt);
+        return { output: answers[prompts.length - 1] as T, costUsd: 0.05, durationMs: 1000, model: "claude-sonnet-5" };
+      },
+    };
+
+    const result = await updateSeams(store, runner as never, "web");
+
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain('call GET /api/catalog/items (CatalogService.cs:7): "api" isn\'t in the cited lines');
+    expect(result).toMatchObject({ retried: 1, dropped: [], costUsd: 0.1 });
+    expect(store.seams({ repos: ["web"] }).map((s) => [s.key, s.startLine, s.cites])).toEqual([["/api/catalog/items", 7, [{ path: "CatalogService.cs", start: 1, end: 1 }]]]);
+  });
+
   it("runs no AI when only Markdown changed", async () => {
     const { store, apiDir } = await twoRepos();
     commit(apiDir, { "README.md": "# changed" });

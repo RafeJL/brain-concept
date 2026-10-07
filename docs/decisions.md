@@ -331,3 +331,15 @@ Removed: `src/ingest/extractors/`, `parse.ts`, `extract.ts`, the tree-sitter dep
 extractor fixtures and tests, `EXTRACTOR_VERSION` (migration 7 drops its column and the parser
 seams), the `parser-built` tier and the card's "not extracted" note. Tests now use recorded AI
 answers per fixture repo (`test/fixtures/seams/`), with real verification.
+
+## 2026-10-06: dropped seams get a second pass; table headers aren't claims
+
+The first full sync of the real store dropped 12 real eshop calls: `CatalogService.cs` builds
+them from `remoteServiceBaseUrl = "api/catalog/"` on line 9, and that run cited only the call
+lines, so nothing showed the `api` segment. The gate run and a later scoped run both cited line 9,
+so this is variation between runs. As with wiki pages, entries the check drops are now asked for
+once more, with each reason, before being given up. It costs nothing when nothing is dropped.
+
+The same sync showed the citation checker removing table header rows (`| Command | Script |`) as
+uncited claims, which left tables without headers. The row above a `|---|` line is a header and
+is no longer checked.

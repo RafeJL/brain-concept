@@ -37,6 +37,9 @@ const RESOURCE = /route::(api)?resources?\s*\(|->(api)?resources?\s*\(|^\s*resou
 const CRUD = new Set(["get", "post", "put", "patch", "delete"]);
 const CRUD_ACTIONS = new Set(["index", "create", "new", "store", "show", "edit", "update", "destroy"]);
 
+/** The line under a Markdown table's header: |---|:---:|. */
+const TABLE_RULE = /^\s*\|?\s*:?-{3}/;
+
 const BRACKET = /\[([^[\]]+)\](?!\()/g;
 const SOURCE = /^\s*([^\s:;,[\]]+):(\d+(?:\s*-\s*\d+)?(?:\s*,\s*\d+(?:\s*-\s*\d+)?)*)\s*$/;
 
@@ -125,20 +128,23 @@ export function checkPage(markdown: string, root: string): CheckedPage {
 
   const out: string[] = [];
   let inCode = false;
-  for (const line of markdown.split(/\r?\n/)) {
+  const lines = markdown.split(/\r?\n/);
+  lines.forEach((line, i) => {
     if (/^\s*(```|~~~)/.test(line)) inCode = !inCode;
-    if (inCode || /^\s*(```|~~~|#|\|?\s*:?-{3})/.test(line) || line.trim() === "") {
+    // A table's header row (the row above its |---| line) names columns; it claims nothing.
+    const header = /^\s*\|/.test(line) && TABLE_RULE.test(lines[i + 1] ?? "");
+    if (inCode || header || /^\s*(```|~~~|#)/.test(line) || TABLE_RULE.test(line) || line.trim() === "") {
       out.push(line);
-      continue;
+      return;
     }
     // List items and table rows are one claim each; paragraphs are split into sentences.
     if (/^\s*([-*+]|\d+\.)\s|^\s*\|/.test(line)) {
       if (keep(line)) out.push(line);
-      continue;
+      return;
     }
     const kept = sentences(line).filter(keep);
     if (kept.length) out.push(kept.join(" "));
-  }
+  });
 
   return {
     markdown: out.join("\n").replace(/\[([^\]]+)\]\(https?:[^)]*\)/g, "$1"),
