@@ -46,11 +46,15 @@ MCP server run from any folder. Revisit if the policy changes or when we build t
 
 ## 2026-09-29: phase 1 stacks are OpenAPI, TS/JS and C#/ASP.NET
 
+*Superseded on 2026-10-06: Claude Code finds routes and calls; the parsers were removed.*
+
 OpenAPI/AsyncAPI specs cover the serving side of any backend that publishes one. TS/JS covers
 both sides (most frontends are the callers). C#/ASP.NET is the backend stack. Other stacks are
 added when an enrolled repo needs them, and repo cards list code languages with no extractor.
 
 ## 2026-09-29: tree-sitter through `@vscode/tree-sitter-wasm`
+
+*Superseded on 2026-10-06: Claude Code finds routes and calls; the parsers were removed.*
 
 One package with the WASM runtime and grammars for TS, TSX, JS, C#, Java, Python, PHP and Go,
 built and versioned together by the VS Code team. WASM avoids native builds and group policy.
@@ -70,6 +74,8 @@ Calls on receivers that don't look like HTTP clients are skipped rather than rec
 
 ## 2026-09-29: extractor version forces a full re-extract
 
+*Superseded on 2026-10-06: Claude Code finds routes and calls; the parsers were removed.*
+
 `EXTRACTOR_VERSION` is stored per repo. When a plugin changes, bump it; each repo is fully
 re-extracted on its next sync instead of mixing old and new rules. This is also how phase 0
 databases gain seams.
@@ -81,6 +87,8 @@ purely numeric and GUID segments normalise to `{}`. Word segments stay literal, 
 `/articles/feed` still never matches `/articles/{slug}`.
 
 ## 2026-09-29: conventionally routed C# controllers are skipped
+
+*Superseded on 2026-10-06: Claude Code finds routes and calls; the parsers were removed.*
 
 `[HttpGet]` with no template on the action or the class is a verb constraint on a route table
 defined elsewhere (`MapControllerRoute`). The path isn't in the file, so no route is emitted.
@@ -94,11 +102,15 @@ declaration; only the answers are merged, so callers aren't repeated per spec fi
 
 ## 2026-09-29: ambiguous C# method names need a client-like receiver
 
+*Superseded on 2026-10-06: Claude Code finds routes and calls; the parsers were removed.*
+
 `GetAsync`/`PostAsync`/... also exist on caches and repositories. They count as HTTP only when
 the receiver's name contains "client" or "http", or the URL contains a "/". HttpClient-only
 extensions (`GetFromJsonAsync`, `PostAsJsonAsync`, ...) always count.
 
 ## 2026-09-29: extractor tests are annotated fixture files
+
+*Superseded on 2026-10-06: Claude Code finds routes and calls; the parsers were removed.*
 
 Test inputs are real source files in their own language (`test/fixtures/extractors/`), with the
 expected seam written as a comment on its line, the convention Semgrep and tree-sitter use for
@@ -109,12 +121,16 @@ strings. Integration tests build their repos from `test/fixtures/repos/`.
 
 ## 2026-09-29: TS/JS calls need a client-named receiver
 
+*Superseded on 2026-10-06: Claude Code finds routes and calls; the parsers were removed.*
+
 Running both TS plugins over whole fixture files showed `cache.get("/key", fallback)` counted as
 an HTTP call. Member calls now count only when the receiver is named like a client (`api`,
 `http`, `requests`, `axios`, `*Client`, `*Api`, ...). `fetch` and `axios(...)` always count.
 Seam counts on the RealWorld repos and eShop were unchanged.
 
 ## 2026-09-29: a trailing run-time path makes the URL run-time
+
+*Superseded on 2026-10-06: Claude Code finds routes and calls; the parsers were removed.*
 
 `API + url`, `` `${API}${path}` `` and `$"{Base}/{relativePath}"` used to produce made-up keys
 like `/api/{}`. A run-time value at the end of a URL now makes the whole URL "run-time" when it
@@ -280,8 +296,8 @@ the code.
 ## 2026-10-06: routes and calls come from Claude Code; the parsers are removed
 
 Supersedes the 2026-09-29 entries on phase 1 stacks, tree-sitter, the extractor version,
-extractor fixtures, client-named receivers, conventionally routed controllers and trailing
-run-time paths. Endpoint matching, run-time URLs and one-entry-per-endpoint stand.
+extractor fixtures, client-named receivers (TS/JS and C#), conventionally routed controllers and
+trailing run-time paths. Endpoint matching, run-time URLs and one-entry-per-endpoint stand.
 
 One Claude Code run per repo lists every route served and HTTP call made, with the lines that
 declare each and the lines its path is built from. Each is verified with no AI before it is
@@ -343,3 +359,44 @@ once more, with each reason, before being given up. It costs nothing when nothin
 The same sync showed the citation checker removing table header rows (`| Command | Script |`) as
 uncited claims, which left tables without headers. The row above a `|---|` line is a header and
 is no longer checked.
+
+## 2026-10-07: search is keywords over wiki sections and endpoints
+
+`brain_search` ranks wiki sections and endpoints across every repo the caller can read. It uses
+SQLite's FTS5 with Porter stemming ("tests" finds "testing") and bm25 ranking. There are no
+embeddings (architecture: "not in v1" unless evals show a gain): the pages are AI-written prose that names the code's own terms,
+and every gate question below found a sensible section without them. Revisit if agents miss
+answers because the wording differs from the wiki's.
+
+- **Sections, not pages.** Pages are split at `##`/`###` headings, so a hit says where to read.
+  Citations are taken out of the text (snippets stay readable). The files a section cites are
+  searched separately, with camelCase written apart ("orders controller" finds
+  `OrdersController.cs`).
+- **Endpoints match on method and path only.** Matching their file paths made every `tests/`
+  call match "tests".
+- **Words are OR'd, without prefixes.** Stemming covers word forms. Prefix matching made "run"
+  find "runtime" and "calls" find `/External/Callback`.
+- **Headings weigh most** (repo 1, page title 1, heading 4, body 1, cited files 1). Weighting the
+  page title ×5 ranked the shortest section of every "Build, run and test" page first for any
+  build question.
+- **The index can't drift.** Rows are added where pages and seams are written, and removed by
+  triggers, so a deleted file or removed repo takes its rows with it. Migration 8 indexes what is
+  already stored, so nobody re-syncs. Migrations can now be code as well as SQL, because sections
+  are split in code.
+- **Permissions:** rows are filtered to the caller's repos inside the query, like every other
+  tool.
+
+**Gate**, on the real store (7 repos): for each of 10 questions, a sensible section in the top 3.
+
+| Question | Top result |
+|---|---|
+| how do I run the tests | citation-harness-library · build-run-test › Test |
+| jwt authentication | react-web · redux-data-flow › localStorageMiddleware |
+| basket checkout | eshop · api › Basket (`Basket.API`, gRPC) |
+| who calls articles | flask-api · api › Articles |
+| database migrations | express-api · build-run-test › Prisma setup |
+| skill evaluation cost | citation-harness-library · api › Skill slash-command surface |
+| where are orders cancelled | eshop · api › Ordering; endpoint `PUT /api/orders/cancel` |
+| redux store setup | react-web · redux-data-flow › localStorageMiddleware |
+| favorite an article | aspnet-api · api › Favorites |
+| event bus integration events | eshop · ordering-api › Transactional outbox for integration events |

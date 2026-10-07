@@ -14,6 +14,7 @@ import { findConsumers } from "./serve/tools/find-consumers.js";
 import { getPage } from "./serve/tools/get-page.js";
 import { impact } from "./serve/tools/impact.js";
 import { repoCard } from "./serve/tools/repo-card.js";
+import { search } from "./serve/tools/search.js";
 import { SqliteStore } from "./store/sqlite.js";
 import { DEFAULT_MODEL, generateWiki, type WikiResult } from "./ai/generate.js";
 import { claudeRunner } from "./ai/runner.js";
@@ -38,6 +39,7 @@ Usage:
   brain consumers "<METHOD /path>" [--detailed]            who serves and who calls an endpoint
   brain impact <repo> [--path <file>] [--route "<METHOD /path>"] [--detailed]
                                                            routes a repo or file serves, and their callers
+  brain search "<query>" [--repo <name>]... [--detailed]   search every wiki and endpoint, as brain_search does
 
 Store: ${resolveDbPath()} (set BRAIN_DB to change)`;
 
@@ -50,6 +52,8 @@ async function main(argv: string[]): Promise<void> {
       ref: { type: "string" },
       path: { type: "string" },
       route: { type: "string" },
+      repo: { type: "string", multiple: true },
+      offset: { type: "string" },
       model: { type: "string" },
       // Hooks installed before W4 run "sync --wiki"; sync now always updates the wiki.
       wiki: { type: "boolean", default: false },
@@ -125,6 +129,10 @@ async function main(argv: string[]): Promise<void> {
       case "impact":
         if (!sub) throw new BrainError("Usage: brain impact <repo> [--path <file>] [--route \"GET /path\"] [--detailed]");
         print(await impact(tools, LOCAL_CALLER, { repo: sub, path: values.path, route: values.route, format }));
+        break;
+      case "search":
+        if (!sub) throw new BrainError('Usage: brain search "<query>" [--repo <name>]... [--detailed] [--offset <n>]');
+        print(await search(tools, LOCAL_CALLER, { query: sub, repos: values.repo, format, offset: Number(values.offset ?? 0) || 0 }));
         break;
       default:
         throw new BrainError(`Unknown command "${command}".\n\n${HELP}`);

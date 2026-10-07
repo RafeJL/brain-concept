@@ -70,14 +70,19 @@ Two halves share only the store:
 
 1. A merge to main queues a job for that repo: commit a → b.
 2. `git diff a..b` gives the changed files.
-3. Extractors re-run on those files only; the graph is updated and re-linked across repos. No LLM.
+3. Claude Code maps routes and calls again in the changed files, and in files whose seams cite a
+   changed file (a moved prefix). Each is verified against its cited lines before it replaces the
+   old ones; Markdown and other files that can't declare an endpoint cost no run. Cross-repo
+   links are worked out at query time, so nothing else is re-linked.
 4. Wiki pages that cite a changed file, or a folder a file was added to, are rewritten in one
    Claude Code run and must pass the citation check. Pass → publish tagged with b. Fail → written
    once more with the removed claims as feedback; fail again → keep the old page, which then
    shows it was kept from an older commit. Pages that cite nothing changed are re-checked against
    b without AI and moved to b. One run per repo at a time; a trigger mid-run is folded into one
-   more pass. (Built in W3: the git hook runs `brain sync --wiki`.)
-5. Curated facts citing changed lines are never rewritten automatically; the owner gets a draft PR.
+   more pass. (Built in W3 and W4: the git hook runs `brain sync`.)
+5. The search index changes with the pages and seams, in the same transaction, so it never
+   describes a different commit from them.
+6. Curated facts citing changed lines are never rewritten automatically; the owner gets a draft PR.
 
 ## MCP tools
 
@@ -89,10 +94,20 @@ paginated lists, pointers rather than pasted code. No free-text "ask" tool.
 | `brain_find_consumers` | Who produces or consumes an endpoint, event or package, across repos | Contract review, technical planning | Built for HTTP endpoints |
 | `brain_impact` | What depends on a route, symbol or file, in the repo and across repos | Technical planning, scope drift, maintainability review | Built for routes and files; symbols in phase 3b |
 | `brain_repo_card` | What a repo is: freshness, languages, neighbours, seam counts, where its wiki is | Technical planning | Built |
-| `brain_search` | Ranked pointers to facts and pages | Any | Planned |
+| `brain_search` | Ranked wiki sections and endpoints for keywords, across every readable repo | Any, when you don't know which repo holds the answer | Built over wiki sections and endpoints; curated context in phase 4 |
 | `brain_get` | One item in full (page, glossary entry, ADR, symbol map) with citations | Feature planning, development | Built for wiki pages |
 
 A hit looks like: `orders-web · src/api/orders.ts:42-58 · @9f3c1e2 · 2 commits behind · llm-generated`.
+
+### Search
+
+One SQLite FTS5 index with a row per wiki section (pages split at `##`/`###` headings) and per
+route or call. Sections are searched on their repo, page title, heading, text (citations taken
+out) and the files they cite, with camelCase file names also written apart. Endpoints are
+searched on their method and path only. A query's words are OR'd and ranked by bm25 with Porter
+stemming, headings weighted most. Rows are added where pages and seams are written and removed
+by triggers, so a page rewrite, a deleted file or a removed repo can't leave stale hits.
+Keyword search only: embeddings wait until evals show a gain (see "Not in v1").
 
 ## Local POC vs hosted
 

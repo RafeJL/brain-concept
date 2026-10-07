@@ -1,6 +1,6 @@
 import { posix } from "node:path";
 import type { ChangedFile } from "../core/git.js";
-import { parseCitations } from "./check.js";
+import { parseCitations } from "../core/citations.js";
 
 /**
  * Whether a change could make a page wrong or incomplete: a file it cites was changed or

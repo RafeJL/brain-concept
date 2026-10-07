@@ -12,10 +12,10 @@ tracked branch that is, and how it was made, so the agent knows how far to trust
 It is a separate service. The Citation delivery harness (`citation-harness-library`) calls it
 over MCP and keeps all of its own skills.
 
-**Status:** local proof of concept, part-way through the switch to AI-written wikis (W4 of W0–W5:
-wiki pages and the routes and calls between repos both come from Claude Code, in any language;
-every citation is checked before an agent sees it; both update themselves when the code changes.
-Search across wikis is next). See [Where it's going](#where-its-going).
+**Status:** local proof of concept, with the switch to AI-written wikis complete (W0–W5): wiki
+pages and the routes and calls between repos both come from Claude Code, in any language; every
+citation is checked before an agent sees it; both update themselves when the code changes; and
+one search covers every repo's wiki and endpoints. See [Where it's going](#where-its-going).
 
 ## What it can do today
 
@@ -25,8 +25,9 @@ Search across wikis is next). See [Where it's going](#where-its-going).
 | What repos does it talk to, and is there a wiki? | `brain_repo_card` | The index: freshness, languages, the seam graph, the wiki's pages |
 | Who serves this endpoint, and who calls it? | `brain_find_consumers` | HTTP routes and calls in every enrolled repo |
 | What would break if I changed this repo, file or endpoint? | `brain_impact` | The routes declared there, and every caller of each one across repos |
+| Where is this handled? I don't know which repo or page | `brain_search` | Every readable repo's wiki sections and endpoints, ranked |
 
-All four are read-only. The examples below are real output from the
+All five are read-only. The examples below are real output from the
 [RealWorld](https://github.com/gothinkster/realworld) example apps.
 
 ### "How do I build and test it?": `brain_get`
@@ -149,6 +150,41 @@ GET /api/articles/{slug}  (39)
 Pass a repo, a file in it (`--path`) or one endpoint (`--route`). Routes with the most callers
 come first, and callers in the same repo (its own tests) are marked `same repo`.
 
+### "Where do we handle this?": `brain_search`
+
+For when you don't know which repo or page holds the answer. Keywords or a question search the
+wiki sections and endpoints of every repo you can read:
+
+```
+16 sections and 18 endpoints match "where are orders cancelled" across 4 repos
+
+eshop · api › Ordering (`Ordering.API`, group `api/orders`)
+  Routes are declared in `MapOrdersApiV1` and mapped with `orders.MapOrdersApiV1().RequireAuthorization()` in `Program.cs`, so the whole group requires authentication. - `PUT api/orders/cancel…
+eshop · ordering-api › Aggregate model
+  `Order` is the aggregate root (`Order: Entity, IAggregateRoot`). Its constructor sets the initial `OrderStatus.Submitted` …
+eshop · ordering-api › Request pipeline: minimal API → MediatR
+  `CancelOrderAsync` and `ShipOrderAsync` follow the same pattern with `CancelOrderCommand`/`ShipOrderCommand`.
+…
+
+Endpoints:
+  PUT /api/orders/cancel · eshop · src/Ordering.API/Apis/OrdersApi.cs:9 (route)
+  PUT /api/orders/cancel · eshop · tests/Ordering.FunctionalTests/OrderingApiTests.cs:46 (call)
+  …
+
+Showing sections 1-8 of 16. Pass offset=8 for more.
+Read a section's page with brain_get, e.g. repo "eshop", page "api".
+For every server and caller of an endpoint, use brain_find_consumers.
+```
+
+- **Sections, not pages:** each hit names the repo, page and heading, so `brain_get` opens the
+  right page. Snippets have their citations taken out to stay readable.
+- **Keywords:** "tests" finds "testing", and a file name finds the sections that cite it
+  ("orders controller" finds `OrdersController.cs`). It doesn't know synonyms: search "auth"
+  rather than "login security".
+- **Always current:** the index changes in the same step as the pages and seams, with no extra
+  AI run.
+- Repos with no wiki yet are named, so "nothing found" isn't read as "doesn't exist".
+
 ### Every answer says how far to trust it
 
 - **`@a397d11 · up to date`**: the commit the answer describes, and how many commits behind the
@@ -217,7 +253,8 @@ mapped again, and a Markdown-only change costs nothing.
 
 - **Re-planning the page set:** an update keeps the same pages. If a repo's structure changes a
   lot, run `brain sync <repo> --full`.
-- **Search across wikis:** `brain_search`, in W5.
+- **Search by meaning:** `brain_search` matches words, not synonyms. Embeddings come only if
+  evals show agents missing answers because of wording.
 - **Curated knowledge** (people correcting and confirming facts): phase 4.
 - **Hosting:** today it runs on your machine against your local clones. Hosted (Azure, cloud
   containers for the runs, GitHub-backed permissions) is phase 6.
@@ -255,14 +292,15 @@ don't need to name the tools. Questions like these go to the brain:
 - *How does laravel-api handle authentication?*
 - *If I change `GET /articles/:slug` in express-api, what else breaks?*
 - *What would break if I removed the DELETE endpoint in ArticlesController?*
+- *Where do we validate JWTs?* (`brain_search` across every repo)
 
 Start a new session after the brain changes, so it picks up new tool descriptions.
 
 ## Commands
 
 Run from this folder with `npm run brain -- <command>`, or from anywhere with
-`node <path-to>\brain-concept\bin\brain.mjs <command>`. The `page`, `card`, `consumers` and
-`impact` commands print exactly what an agent gets over MCP.
+`node <path-to>\brain-concept\bin\brain.mjs <command>`. The `page`, `card`, `consumers`,
+`impact` and `search` commands print exactly what an agent gets over MCP.
 
 | Command | Does |
 |---|---|
@@ -278,6 +316,7 @@ Run from this folder with `npm run brain -- <command>`, or from anywhere with
 | `card <name> [--detailed]` | `brain_repo_card`. `--detailed` adds the full commit and a language table. |
 | `consumers "<METHOD /path>" [--detailed]` | `brain_find_consumers`. |
 | `impact <repo> [--path file] [--route "<METHOD /path>"] [--detailed]` | `brain_impact`. |
+| `search "<query>" [--repo name]... [--offset n] [--detailed]` | `brain_search`. `--repo` limits it to some repos; `--detailed` shows 20 sections with the files each cites. |
 
 The store lives at `%USERPROFILE%\.brain\brain.db`. Set `BRAIN_DB` to use a different file, for
 example a throwaway one while testing.
@@ -327,7 +366,7 @@ Hooks run whichever brain code is checked out in this folder.
 | W2 | Every citation checked automatically; unsupported claims removed; a failing page keeps its previous version | ✅ |
 | W3 | The wiki updates itself from the hooks, rewriting only affected pages; a failing page is retried once | ✅ |
 | W4 | Routes and calls in any language by Claude Code, verified like citations; the parsers removed | ✅ |
-| W5 | `brain_search` across wikis; final docs | Next |
+| W5 | `brain_search` across every wiki and endpoint; final docs | ✅ |
 | 2, 4, 6 | Harness evals, curated context, hosting | After the switch |
 
 Read [`docs/architecture.md`](docs/architecture.md) for the design,

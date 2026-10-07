@@ -1,0 +1,35 @@
+/** One cited span: `path` lines `start`–`end` (1-based, inclusive). */
+export interface Citation {
+  path: string;
+  start: number;
+  end: number;
+}
+
+const BRACKET = /\[([^[\]]+)\](?!\()/g;
+const SOURCE = /^\s*([^\s:;,[\]]+):(\d+(?:\s*-\s*\d+)?(?:\s*,\s*\d+(?:\s*-\s*\d+)?)*)\s*$/;
+
+/**
+ * Citations in a piece of text, in every form the AI writes them: `[a.ts:12]`, `[a.ts:12-20]`,
+ * `[a.ts:1-2,13-14]`, `[a.ts:3; b.ts:4-9]`, and several brackets in a row. Markdown links
+ * (`[text](url)`) and bracketed prose are ignored.
+ */
+export function parseCitations(text: string): Citation[] {
+  return [...text.matchAll(BRACKET)].flatMap(([, inside]) => citationsIn(inside!));
+}
+
+function citationsIn(inside: string): Citation[] {
+  return inside.split(";").flatMap((part) => {
+    const source = SOURCE.exec(part);
+    if (!source) return [];
+    const path = source[1]!.replace(/^\.?\//, "");
+    return source[2]!.split(",").map((range) => {
+      const [start, end = start] = range.split("-").map((n) => Number(n.trim()));
+      return { path, start: start!, end: end! };
+    });
+  });
+}
+
+/** The text with its citations taken out; other brackets (`[Authorize]`, links) stay. */
+export function withoutCitations(text: string): string {
+  return text.replace(BRACKET, (whole, inside: string) => (citationsIn(inside).length ? "" : whole));
+}

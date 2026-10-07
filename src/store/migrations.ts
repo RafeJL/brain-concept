@@ -1,8 +1,12 @@
+import type { DatabaseSync } from "node:sqlite";
+import { createSearchIndex } from "./search-index.js";
+
 /**
  * Schema versions, applied in order. Never edit a shipped migration; add a new one.
  * The index in this array + 1 is the schema version stored in PRAGMA user_version.
+ * A migration is SQL, or code when it needs more than SQL can do.
  */
-export const MIGRATIONS: string[] = [
+export const MIGRATIONS: (string | ((db: DatabaseSync) => void))[] = [
   `
   CREATE TABLE repos (
     name        TEXT PRIMARY KEY,
@@ -95,4 +99,6 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE repo_state ADD COLUMN seams_commit TEXT;
   ALTER TABLE repo_state DROP COLUMN extractor_version;
   `,
+  // W5: the search index over wiki sections and seams.
+  createSearchIndex,
 ];

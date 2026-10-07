@@ -4,7 +4,8 @@ import { DatabaseSync } from "node:sqlite";
 import type { Seam, SeamCoverage } from "../core/seams.js";
 import type { FileRecord, LanguageShare, RepoRecord, RepoState, WikiPage } from "../core/types.js";
 import { MIGRATIONS } from "./migrations.js";
-import type { SeamFilter, SeamUpdate, Store, SyncUpdate } from "./store.js";
+import { indexPage, indexSeam, SEARCH_WEIGHTS } from "./search-index.js";
+import type { SearchFilter, SearchPage, SeamFilter, SeamUpdate, SectionHit, Store, SyncUpdate } from "./store.js";
 
 type Row = Record<string, unknown>;
 
@@ -25,7 +26,9 @@ export class SqliteStore implements Store {
     const { user_version: current } = this.db.prepare("PRAGMA user_version").get() as { user_version: number };
     for (let version = current; version < MIGRATIONS.length; version++) {
       this.transaction(() => {
-        this.db.exec(MIGRATIONS[version]!);
+        const migration = MIGRATIONS[version]!;
+        if (typeof migration === "string") this.db.exec(migration);
+        else migration(this.db);
         this.db.exec(`PRAGMA user_version = ${version + 1}`);
       });
     }
@@ -122,7 +125,8 @@ export class SqliteStore implements Store {
       if (update.paths === null) clearAll.run(repo);
       else for (const path of update.paths) clear.run(repo, path);
       for (const s of update.seams) {
-        insert.run(repo, s.path, s.kind, s.method, s.rawPath, s.key, s.startLine, s.endLine, JSON.stringify(s.cites), s.commit);
+        const { lastInsertRowid } = insert.run(repo, s.path, s.kind, s.method, s.rawPath, s.key, s.startLine, s.endLine, JSON.stringify(s.cites), s.commit);
+        indexSeam(this.db, Number(lastInsertRowid), s);
       }
       state.run(update.commit, repo);
     });
@@ -144,18 +148,7 @@ export class SqliteStore implements Store {
     const rows = this.db
       .prepare(`SELECT * FROM seams WHERE ${where.join(" AND ")} ORDER BY repo, path, start_line`)
       .all(...params) as Row[];
-    return rows.map((row) => ({
-      repo: String(row.repo),
-      path: String(row.path),
-      kind: String(row.kind) as Seam["kind"],
-      method: String(row.method),
-      rawPath: String(row.raw_path),
-      key: row.route_key === null ? null : String(row.route_key),
-      startLine: Number(row.start_line),
-      endLine: Number(row.end_line),
-      cites: JSON.parse(String(row.cites)) as Seam["cites"],
-      commit: String(row.commit_sha),
-    }));
+    return rows.map(toSeam);
   }
 
   seamCoverage(repo: string): SeamCoverage {
@@ -192,9 +185,11 @@ export class SqliteStore implements Store {
     );
     this.transaction(() => {
       this.db.prepare("DELETE FROM pages WHERE repo = ?").run(repo);
-      pages.forEach((p, i) =>
-        insert.run(repo, p.slug, i, p.title, p.markdown, p.commit, p.claims, p.removed, p.model, p.costUsd, p.generatedAt),
-      );
+      // Deleting the pages deletes their sections and search rows.
+      pages.forEach((p, i) => {
+        insert.run(repo, p.slug, i, p.title, p.markdown, p.commit, p.claims, p.removed, p.model, p.costUsd, p.generatedAt);
+        indexPage(this.db, repo, p.slug, p.title, p.markdown);
+      });
     });
   }
 
@@ -214,9 +209,83 @@ export class SqliteStore implements Store {
     }));
   }
 
+  searchSections(filter: SearchFilter): SearchPage<SectionHit> {
+    const { where, params } = searchWhere(filter, 0);
+    const { total, repos } = this.searchCounts(where, params);
+    const words = filter.snippetWords ?? 24;
+    const rows = this.db
+      .prepare(
+        `SELECT sections.repo, sections.slug, sections.heading, sections.paths, pages.title,
+                snippet(search, 3, '', '', '…', ${Math.max(1, Math.min(64, words))}) AS snippet
+         FROM search
+         JOIN sections ON sections.id = search.rowid / 2
+         JOIN pages ON pages.repo = sections.repo AND pages.slug = sections.slug
+         WHERE ${where}
+         ORDER BY bm25(search, ${SEARCH_WEIGHTS}), sections.repo, pages.position, sections.position
+         LIMIT ? OFFSET ?`,
+      )
+      .all(...params, filter.limit, filter.offset ?? 0) as Row[];
+    return {
+      total,
+      repos,
+      hits: rows.map((row) => ({
+        repo: String(row.repo),
+        slug: String(row.slug),
+        pageTitle: String(row.title),
+        heading: String(row.heading),
+        snippet: String(row.snippet),
+        paths: String(row.paths).split(" ").filter(Boolean),
+      })),
+    };
+  }
+
+  searchSeams(filter: SearchFilter): SearchPage<Seam> {
+    // Only the method and path: a file under tests/ says nothing about which endpoint is meant.
+    const { where, params } = searchWhere({ ...filter, match: `title : (${filter.match})` }, 1);
+    const { total, repos } = this.searchCounts(where, params);
+    const rows = this.db
+      .prepare(
+        `SELECT seams.* FROM search
+         JOIN seams ON seams.id = (search.rowid - 1) / 2
+         WHERE ${where}
+         ORDER BY bm25(search, ${SEARCH_WEIGHTS}), seams.repo, seams.path, seams.start_line
+         LIMIT ? OFFSET ?`,
+      )
+      .all(...params, filter.limit, filter.offset ?? 0) as Row[];
+    return { total, repos, hits: rows.map(toSeam) };
+  }
+
+  /** How many rows match, and in which repos, for the answer's header and paging. */
+  private searchCounts(where: string, params: string[]): { total: number; repos: string[] } {
+    const rows = this.db.prepare(`SELECT repo, COUNT(*) AS n FROM search WHERE ${where} GROUP BY repo ORDER BY repo`).all(...params) as Row[];
+    return { total: rows.reduce((sum, row) => sum + Number(row.n), 0), repos: rows.map((row) => String(row.repo)) };
+  }
+
   close(): void {
     this.db.close();
   }
+}
+
+/** Rows of one kind (0 sections, 1 seams) matching the search in the given repos. */
+function searchWhere(filter: SearchFilter, kind: 0 | 1): { where: string; params: string[] } {
+  if (filter.repos.length === 0) return { where: "0", params: [] };
+  const repos = filter.repos.map(() => "?").join(", ");
+  return { where: `search MATCH ? AND search.rowid % 2 = ${kind} AND search.repo IN (${repos})`, params: [filter.match, ...filter.repos] };
+}
+
+function toSeam(row: Row): Seam {
+  return {
+    repo: String(row.repo),
+    path: String(row.path),
+    kind: String(row.kind) as Seam["kind"],
+    method: String(row.method),
+    rawPath: String(row.raw_path),
+    key: row.route_key === null ? null : String(row.route_key),
+    startLine: Number(row.start_line),
+    endLine: Number(row.end_line),
+    cites: JSON.parse(String(row.cites)) as Seam["cites"],
+    commit: String(row.commit_sha),
+  };
 }
 
 function toRepo(row: Row): RepoRecord {
