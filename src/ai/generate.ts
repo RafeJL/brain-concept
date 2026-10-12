@@ -17,7 +17,40 @@ function updatePrompt(pages: readonly WikiPage[], changes: readonly ChangedFile[
   const listed = (changes ?? []).slice(0, MAX_LISTED_CHANGES).map((c) => `- ${c.status} ${c.path}`);
   if (changes && changes.length > MAX_LISTED_CHANGES) listed.push(`- … and ${changes.length - MAX_LISTED_CHANGES} more`);
   if (changes === null) listed.push("- (the earlier commit can't be compared; check everything)");
-  return prompt("update-pages", { changes: listed.join("\n"), pages: pages.map((p) => pageBlock(p.slug, p.markdown)).join("\n") });
+  return prompt("update-pages", {
+    changes: listed.join("\n"),
+    pages: pages.map((p) => pageBlock(p.slug, p.markdown)).join("\n"),
+    product: productGuide(pages.map((p) => p.slug)),
+  });
+}
+
+/** Asks for pages every wiki should have but this one lacks, such as a wiki written before the product page existed. */
+function addPrompt(slugs: readonly string[]): string {
+  const wanted = requiredPages();
+  return prompt("add-pages", { pages: slugs.map((slug) => wanted.get(slug)!).join("\n"), product: productGuide(slugs) });
+}
+
+/** The product page's own rules, for any run that writes it. */
+function productGuide(slugs: readonly string[]): string {
+  return slugs.includes(PRODUCT) ? prompt("product-page") : "";
+}
+
+/** The slug of the page written in product language, for a PO or a new joiner. */
+export const PRODUCT = "product";
+
+/**
+ * The pages every wiki has (prompts/pages.md), by slug, with the line asking for each. The page
+ * on the most important module isn't among them: its slug is the AI's choice.
+ */
+export function requiredPages(): Map<string, string> {
+  return new Map(
+    prompt("pages")
+      .split(/\r?\n/)
+      .flatMap((line) => {
+        const slug = /^- slug "([a-z0-9-]+)"/.exec(line)?.[1];
+        return slug ? [[slug, line] as const] : [];
+      }),
+  );
 }
 
 function retryPrompt(failed: readonly Checked[]): string {
@@ -25,7 +58,7 @@ function retryPrompt(failed: readonly Checked[]): string {
     const removed = check.removed.map((r) => `- "${r.text}": ${r.reason}`).join("\n");
     return `${pageBlock(draft.slug, draft.markdown)}\nClaims the check removed from it:\n${removed || "- (none: the page had no cited claims)"}`;
   });
-  return prompt("retry-pages", { pages: blocks.join("\n") });
+  return prompt("retry-pages", { pages: blocks.join("\n"), product: productGuide(failed.map((c) => c.draft.slug)) });
 }
 
 function pageBlock(slug: string, markdown: string): string {
@@ -97,6 +130,8 @@ export interface WikiResult {
   reports: PageReport[];
   /** Pages moved to this commit without the AI: nothing they cite changed and they still pass. */
   carried: string[];
+  /** Pages every wiki should have that failed at this commit, so weren't tried again this run. */
+  waiting: string[];
   costUsd: number;
   durationMs: number;
 }
@@ -104,7 +139,8 @@ export interface WikiResult {
 /**
  * Brings a repo's wiki up to the commit the brain has indexed. A new wiki is written in full.
  * An existing one is updated: only pages a change affects are rewritten; the rest are re-checked
- * against the new commit and carried forward with no AI run. Every page the AI writes is checked
+ * against the new commit and carried forward with no AI run, and any page every wiki should have
+ * but this one lacks (prompts/pages.md) is written on its own. Every page the AI writes is checked
  * against that commit, and one that mostly fails is written once more; if it fails again its
  * previous version stays. All of it happens in a temporary worktree of the commit, so pages
  * never describe uncommitted work. Malformed output leaves the wiki as it was.
@@ -116,6 +152,9 @@ export async function generateWiki(store: Store, runner: Runner, name: string, o
   const model = options.model ?? DEFAULT_MODEL;
   const previous = store.pages(name);
   const mode = options.full || previous.length === 0 ? "full" : "update";
+  const lacking = mode === "update" ? [...requiredPages().keys()].filter((slug) => !previous.some((p) => p.slug === slug)) : [];
+  // A missing page that already failed at this commit waits for the code to change.
+  const missing = state.pagesFailedAt === state.commit ? [] : lacking;
 
   // What changed since each page was written. A page kept after a failed rewrite is older than the rest.
   const changesSince = new Map<string, ChangedFile[] | null>();
@@ -140,7 +179,7 @@ export async function generateWiki(store: Store, runner: Runner, name: string, o
     const carried = new Map<string, WikiPage>();
     let drafts: DraftPage[] = [];
     if (mode === "full") {
-      drafts = await write(cwd, prompt("write-pages"));
+      drafts = await write(cwd, prompt("write-pages", { pages: prompt("pages"), product: prompt("product-page") }));
     } else {
       const stale: WikiPage[] = [];
       for (const page of previous) {
@@ -159,6 +198,15 @@ export async function generateWiki(store: Store, runner: Runner, name: string, o
         // A page the AI left out counts as failed, so it's asked for again below.
         for (const page of stale) {
           if (!drafts.some((d) => d.slug === page.slug)) drafts.push({ slug: page.slug, title: page.title, markdown: "" });
+        }
+      }
+      // A page every wiki should have but this one lacks (the product page, for wikis written
+      // before it existed) is written on its own, without touching the others.
+      if (missing.length) {
+        const added = await write(cwd, addPrompt(missing), missing);
+        drafts.push(...added);
+        for (const slug of missing) {
+          if (!added.some((d) => d.slug === slug)) drafts.push({ slug, title: slug, markdown: "" });
         }
       }
     }
@@ -210,12 +258,17 @@ export async function generateWiki(store: Store, runner: Runner, name: string, o
         reports.map((r) => `${r.slug}: ${r.claims - r.removed.length}/${r.claims} claims supported`).join("; "),
     );
   }
-  // A full run sets the page list; an update keeps it. Either way a failed page keeps its old version.
+  // A full run sets the page list; an update keeps it, adding any missing page that passed. Either
+  // way a failed page keeps its old version.
   const before = new Map(previous.map((page) => [page.slug, page]));
-  const slugs = mode === "full" ? checked.map((c) => c.draft.slug) : previous.map((p) => p.slug);
+  const slugs = mode === "full" ? checked.map((c) => c.draft.slug) : [...previous.map((p) => p.slug), ...missing];
   const pages = slugs.flatMap((slug) => written.get(slug) ?? carried.get(slug) ?? before.get(slug) ?? []);
   store.replacePages(name, pages);
-  return { repo: name, commit: state.commit, mode, pages, reports, carried: [...carried.keys()], costUsd, durationMs };
+  const stillMissing = [...requiredPages().keys()].filter((slug) => !pages.some((p) => p.slug === slug));
+  // Only a run that tried a required page records whether it failed; a waiting page keeps waiting.
+  if (missing.length || mode === "full") store.setPagesFailedAt(name, stillMissing.length ? state.commit : null);
+  const waiting = missing.length ? [] : lacking;
+  return { repo: name, commit: state.commit, mode, pages, reports, carried: [...carried.keys()], waiting, costUsd, durationMs };
 }
 
 function counts(check: CheckedPage): Pick<WikiPage, "claims" | "removed"> {

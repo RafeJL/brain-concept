@@ -1,0 +1,118 @@
+import { firstSentence } from "../../core/sections.js";
+import type { SystemRecord } from "../../core/systems.js";
+import type { Caller } from "../access.js";
+import { neighbours, type Neighbour } from "../neighbours.js";
+import { findSystem, quoted, visibleSystems } from "../systems.js";
+import { count, indexedAt, readableRepos, type ToolDeps, type ToolResult } from "./common.js";
+
+export interface SystemMember {
+  repo: string;
+  /** The product page's opening sentence; null without one. */
+  product: string | null;
+  routes: number;
+  calls: number;
+}
+
+/** One repo's links to others: `to` are the repos it calls, with how many endpoints. */
+export interface SystemLink {
+  from: string;
+  to: Neighbour[];
+}
+
+export interface SystemOverview {
+  system: SystemRecord;
+  members: SystemMember[];
+  /** Calls between members. */
+  within: SystemLink[];
+  /** Calls from members to readable repos outside the system, and from those into it. */
+  outgoing: SystemLink[];
+  incoming: SystemLink[];
+}
+
+/** How long a member's product sentence may run in the overview's table. */
+const PRODUCT_WIDTH = 70;
+
+/**
+ * A system's overview, assembled when asked so it is never stale: its summary (from the
+ * suggestion or a person), each member's product sentence (from its checked product page) and the
+ * links between them (from verified seams). No AI. Only repos the caller can read are listed or
+ * counted. Backs `brain_get` with `system` and `brain systems show`.
+ */
+export async function systemOverview(deps: ToolDeps, caller: Caller, name: string): Promise<ToolResult<SystemOverview>> {
+  const readable = await readableRepos(deps, caller);
+  const system = findSystem(deps.store, name, readable);
+  if (!system) {
+    const names = visibleSystems(deps.store, readable).map((s) => s.name);
+    const list = names.length ? `Systems: ${names.join(", ")}.` : "No systems yet. Suggest them with: brain systems suggest";
+    return { ok: false, text: `No system named "${name}". ${list}` };
+  }
+
+  const members = system.repos.map((repo): SystemMember => {
+    const page = deps.store.pages(repo).find((p) => p.slug === "product");
+    const { routes, calls } = deps.store.seamCoverage(repo);
+    return { repo, product: page ? firstSentence(page.markdown) : null, routes, calls };
+  });
+  const within: SystemLink[] = [];
+  const outgoing: SystemLink[] = [];
+  const incoming = new Map<string, Neighbour[]>();
+  for (const repo of system.repos) {
+    const { calls, calledBy } = neighbours(deps.store, repo, readable);
+    const inside = calls.filter((n) => system.repos.includes(n.repo));
+    const outside = calls.filter((n) => !system.repos.includes(n.repo));
+    if (inside.length) within.push({ from: repo, to: inside });
+    if (outside.length) outgoing.push({ from: repo, to: outside });
+    for (const outsider of calledBy.filter((n) => !system.repos.includes(n.repo))) {
+      incoming.set(outsider.repo, [...(incoming.get(outsider.repo) ?? []), { ...outsider, repo }]);
+    }
+  }
+  const data: SystemOverview = {
+    system,
+    members,
+    within,
+    outgoing,
+    incoming: [...incoming].sort(([a], [b]) => a.localeCompare(b)).map(([from, to]) => ({ from, to })),
+  };
+  return { ok: true, data, text: await render(deps, data) };
+}
+
+async function render(deps: ToolDeps, { system, members, within, outgoing, incoming }: SystemOverview): Promise<string> {
+  const width = Math.max(...members.map((m) => m.repo.length)) + 2;
+  const out = [`${system.name} (${system.status}) · ${count(members.length, "repo")}`, ""];
+  out.push(system.summary || `(no summary yet: add one with brain systems set ${quoted(system.name)} --summary "<one line>")`, "");
+  out.push("Repos");
+  for (const m of members) {
+    const product = m.product ? clip(m.product, PRODUCT_WIDTH) : "(no product page yet)";
+    out.push(`  ${m.repo.padEnd(width)}${product.padEnd(PRODUCT_WIDTH + 2)}${count(m.routes, "route")} · ${count(m.calls, "call")}`);
+  }
+  out.push("How they connect", ...(within.length ? links(within, "endpoint") : ["  (none found)"]));
+  const outside = [...links(outgoing, "endpoint"), ...links(incoming, "call")];
+  out.push("Outside the system", ...(outside.length ? outside : ["  (none found)"]));
+  out.push("");
+  if (system.status === "suggested") {
+    out.push(`Suggested by Claude Code from the repos' cards and links${system.reason ? `: ${system.reason}` : ""}`);
+    out.push(`Not yet confirmed by a person (brain systems confirm ${quoted(system.name)}).`);
+  } else {
+    out.push(`Confirmed by a person${system.confirmedAt ? ` on ${system.confirmedAt.slice(0, 10)}` : ""}.`);
+  }
+  out.push('Each repo line is the opening of its product page (read it with brain_get, page "product"); links come from verified routes and calls.');
+  out.push(`Indexed: ${(await indexedAt(deps, members.map((m) => m.repo))).join("; ")}`);
+  return out.join("\n");
+}
+
+/**
+ * "react-web → aspnet-api, express-api   (22 endpoints each)", or a count per repo when they
+ * differ. `noun` says what is counted: endpoints called, or calls made into the system.
+ */
+function links(rows: readonly SystemLink[], noun: string): string[] {
+  return rows.map(({ from, to }) => {
+    const same = to.every((n) => n.count === to[0]!.count);
+    const targets = same
+      ? `${to.map((n) => n.repo).join(", ")}   (${count(to[0]!.count, noun)}${to.length > 1 ? " each" : ""})`
+      : to.map((n) => `${n.repo} (${count(n.count, noun)})`).join(", ");
+    return `  ${from} → ${targets}`;
+  });
+}
+
+function clip(text: string, width: number): string {
+  return text.length <= width ? text : `${text.slice(0, width - 1).trimEnd()}…`;
+}

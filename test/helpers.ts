@@ -3,21 +3,25 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach } from "vitest";
+import { afterAll, afterEach } from "vitest";
 import type { RunRequest, RunResult, Runner } from "../src/ai/runner.js";
 import { updateSeams, type SeamOptions } from "../src/ai/seams.js";
 import type { Store } from "../src/store/store.js";
 
-const created: string[] = [];
+/** Folders to delete after each test, and after the test file (for fixtures built once in `beforeAll`). */
+const created = { test: [] as string[], file: [] as string[] };
 
-afterEach(() => {
-  // Retries: on Windows a background sync can still hold a file for a moment after it finishes.
-  for (const dir of created.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-});
+// Retries: on Windows a background sync can still hold a file for a moment after it finishes.
+const remove = (dirs: string[]) => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+};
+afterEach(() => remove(created.test));
+afterAll(() => remove(created.file));
 
-export function tempDir(): string {
+/** A throwaway folder, deleted after the test, or after the whole file with `until: "file"`. */
+export function tempDir(until: "test" | "file" = "test"): string {
   const dir = mkdtempSync(join(tmpdir(), "brain-test-"));
-  created.push(dir);
+  created[until].push(dir);
   return dir;
 }
 
@@ -37,8 +41,8 @@ export function writeFiles(dir: string, files: Record<string, string>): void {
 }
 
 /** A throwaway git repo on branch main with one commit containing `files`. */
-export function makeRepo(files: Record<string, string>): string {
-  const dir = tempDir();
+export function makeRepo(files: Record<string, string>, until: "test" | "file" = "test"): string {
+  const dir = tempDir(until);
   git(dir, "init", "--quiet", "--initial-branch=main");
   commit(dir, files, "initial");
   return dir;
@@ -59,8 +63,8 @@ function readTree(root: string, dir = root): Record<string, string> {
 }
 
 /** A throwaway git repo holding a copy of test/fixtures/repos/<name>. */
-export function repoFromFixture(name: string): string {
-  return makeRepo(readTree(join(FIXTURE_REPOS, name)));
+export function repoFromFixture(name: string, until: "test" | "file" = "test"): string {
+  return makeRepo(readTree(join(FIXTURE_REPOS, name)), until);
 }
 
 /** Commits test/fixtures/changes/<name> on top of a repo, returns the new sha. */

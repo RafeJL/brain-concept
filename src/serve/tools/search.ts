@@ -1,9 +1,9 @@
 import type { Seam } from "../../core/seams.js";
+import type { SystemRecord } from "../../core/systems.js";
 import type { SectionHit } from "../../store/store.js";
 import type { Caller } from "../access.js";
-import { describeFreshness, freshnessOf } from "../freshness.js";
-import { builtFrom, count, PAGE_SIZE, pointer, readableRepos, TIER, type Format, type ToolDeps, type ToolResult } from "./common.js";
-import { wikiCommit } from "./get-page.js";
+import { visibleSystems } from "../systems.js";
+import { builtFrom, count, indexedAt, PAGE_SIZE, pointer, readableRepos, TIER, type Format, type ToolDeps, type ToolResult } from "./common.js";
 
 export interface SearchInput {
   query: string;
@@ -22,6 +22,8 @@ export interface SearchAnswer {
   matchedRepos: string[];
   /** Matching endpoints, one per repo, method and path, best first. Only on the first page. */
   endpoints: Seam[];
+  /** Systems whose name or summary match, best first. Only on the first page. */
+  systems: SystemRecord[];
 }
 
 /** Words that say how a question is asked, not what it's about. */
@@ -69,8 +71,10 @@ export async function search(deps: ToolDeps, caller: Caller, input: SearchInput)
   const seams = deps.store.searchSeams({ repos: scope, match, limit: ENDPOINT_POOL });
   const endpoints = offset === 0 ? distinctEndpoints(seams.hits) : [];
   const matchedRepos = [...new Set([...sections.repos, ...seams.repos])].sort();
+  const visible = visibleSystems(deps.store, scope);
+  const systems = offset === 0 ? deps.store.searchSystems(match).flatMap((name) => visible.filter((s) => s.name === name)) : [];
 
-  const data: SearchAnswer = { query: input.query, sections: sections.hits, sectionTotal: sections.total, matchedRepos, endpoints };
+  const data: SearchAnswer = { query: input.query, sections: sections.hits, sectionTotal: sections.total, matchedRepos, endpoints, systems };
   return { ok: true, data, text: await render(deps, data, scope, input.format, offset) };
 }
 
@@ -86,11 +90,11 @@ function distinctEndpoints(seams: readonly Seam[]): Seam[] {
 }
 
 async function render(deps: ToolDeps, answer: SearchAnswer, scope: string[], format: Format, offset: number): Promise<string> {
-  const { sections, sectionTotal, endpoints } = answer;
+  const { sections, sectionTotal, endpoints, systems } = answer;
   const noWiki = scope.filter((name) => deps.store.pages(name).length === 0);
   const noWikiNote = noWiki.length ? `No wiki yet, so not searched: ${noWiki.join(", ")} (brain sync <repo> writes one).` : "";
 
-  if (sectionTotal === 0 && endpoints.length === 0) {
+  if (sectionTotal === 0 && endpoints.length === 0 && systems.length === 0) {
     return [`No wiki sections or endpoints match "${answer.query}" in ${count(scope.length, "repo")}.`, noWikiNote].filter(Boolean).join("\n");
   }
 
@@ -99,7 +103,17 @@ async function render(deps: ToolDeps, answer: SearchAnswer, scope: string[], for
     ...(sectionTotal ? [count(sectionTotal, "section")] : []),
     ...(endpoints.length ? [count(endpoints.length, "endpoint")] : []),
   ].join(" and ");
-  const lines = [`${summary} match "${answer.query}" across ${count(answer.matchedRepos.length, "repo")}`, ""];
+  const lines = [summary ? `${summary} match "${answer.query}" across ${count(answer.matchedRepos.length, "repo")}` : `No wiki sections or endpoints match "${answer.query}"`, ""];
+
+  // Systems first: a match on a product's name or summary is usually what the question is about.
+  if (systems.length) {
+    lines.push("Systems:");
+    for (const system of systems) {
+      const label = system.status === "suggested" ? "suggested" : "confirmed";
+      lines.push(`  ${system.name} (${label}) · ${count(system.repos.length, "repo")}: ${system.repos.join(", ")}${system.summary ? ` · ${system.summary}` : ""}`);
+    }
+    lines.push(`  Read one with brain_get (system "${systems[0]!.name}").`, "");
+  }
 
   for (const hit of sections) {
     lines.push(`${hit.repo} · ${hit.slug} › ${hit.heading || hit.pageTitle}`);
@@ -129,21 +143,7 @@ async function render(deps: ToolDeps, answer: SearchAnswer, scope: string[], for
   if (first) lines.push(`Read a section's page with brain_get, e.g. repo "${first.repo}", page "${first.slug}".`);
   if (endpoints.length) lines.push("For every server and caller of an endpoint, use brain_find_consumers.");
   if (noWikiNote) lines.push(noWikiNote);
-  lines.push(`Indexed: ${(await indexedAt(deps, [...found].sort())).join("; ")}`);
+  if (found.size) lines.push(`Indexed: ${(await indexedAt(deps, [...found].sort())).join("; ")}`);
   lines.push(`${TIER}: written by Claude Code from the code; confirm at the citation before relying on it.`);
   return lines.join("\n");
-}
-
-/** Each repo's freshness: the commit its wiki describes, or its seams when it has no wiki. */
-async function indexedAt(deps: ToolDeps, repos: readonly string[]): Promise<string[]> {
-  const lines: string[] = [];
-  for (const name of repos) {
-    const repo = deps.store.getRepo(name);
-    const state = deps.store.getState(name);
-    if (!repo || !state) continue;
-    const pages = deps.store.pages(name);
-    const commit = pages.length ? wikiCommit(pages, state.commit) : (state.seamsCommit ?? state.commit);
-    lines.push(`${name} ${describeFreshness(await freshnessOf(repo, { ...state, commit }), repo.ref)}`);
-  }
-  return lines;
 }

@@ -45,3 +45,15 @@ export function searchWords(text: string): string {
   const apart = text.replace(/([a-z\d])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2");
   return apart === text ? text : `${text} ${apart}`;
 }
+
+/**
+ * A page's opening sentence, citations taken out: the product page's one-line summary of what a
+ * repo is for, shown on cards and system overviews. Null when the page has no text before its
+ * first `##` heading.
+ */
+export function firstSentence(markdown: string): string | null {
+  const opening = splitSections(markdown)[0];
+  if (!opening || opening.heading !== "") return null;
+  const body = opening.body.replace(/^([-*+]|\d+\.)\s+/, "");
+  return /^.+?[.!?](?=\s|$)/.exec(body)?.[0] ?? body;
+}

@@ -1,0 +1,4 @@
+- slug "overview": what the repository is, its main parts and how they fit together.
+- slug "build-run-test": how to install, build, run and test it, from the files that define this.
+- slug "api": the HTTP API it serves, grouped by area. If it serves none, say what it exposes instead.
+- slug "product": what it does for the people who use it, in product language (see "The product page" below).

@@ -45,7 +45,7 @@ Every fact records how it was made, and every answer carries that label.
 |---|---|---|---|
 | **index** | git only: the committed tree at the tracked ref. No LLM. | File inventory, languages, freshness | Rely on it |
 | **human-reviewed** | People, or an agent draft merged through a PR by an owner | Glossary, customers, features, ADRs, repo purposes | Treat as the team's stated intent |
-| **llm-generated** | Claude Code (headless, isolated, read-only) from the code at the indexed commit, with a citation on every claim | Wiki pages (W1); routes and calls in any language (W4), from which the seam graph and cross-repo links are built | Every citation is checked automatically (W2, W4); use as a map, and confirm at the citation before relying on a claim |
+| **llm-generated** | Claude Code (headless, isolated, read-only) from the code at the indexed commit, with a citation on every claim | Wiki pages (W1), including a product page (B2a); routes and calls in any language (W4), from which the seam graph and cross-repo links are built; suggested systems (B2a) | Every citation is checked automatically (W2, W4); use as a map, and confirm at the citation before relying on a claim |
 
 Why: generated context files lowered agent success in a controlled study, and public
 DeepWiki pages were often wrong, while code-derived structure helped (see `research.md`). The
@@ -60,7 +60,7 @@ Two halves share only the store:
 - **Ingest (writes):** registry → trigger → git index → Claude Code (seams, wiki pages) →
   deterministic checks (seam verification, citation checker).
   The gardener runs on a schedule and drafts PRs to owners.
-- **Store:** seam graph, symbol maps, repo cards, curated context, wiki pages, search index.
+- **Store:** seam graph, symbol maps, repo cards, curated context, wiki pages, systems, search index.
   Every row belongs to one repo at one commit. The repo is the unit of work, of permission and
   of deletion.
 - **Serve (reads):** MCP server → query engine → access filter (inside the query) → response
@@ -92,10 +92,10 @@ paginated lists, pointers rather than pasted code. No free-text "ask" tool.
 | Tool | Answers | Harness stage | Status |
 |---|---|---|---|
 | `brain_find_consumers` | Who produces or consumes an endpoint, event or package, across repos | Contract review, technical planning | Built for HTTP endpoints |
-| `brain_impact` | What depends on a route, symbol or file, in the repo and across repos | Technical planning, scope drift, maintainability review | Built for routes and files; symbols in phase 3b |
-| `brain_repo_card` | What a repo is: freshness, languages, neighbours, seam counts, where its wiki is | Technical planning | Built |
-| `brain_search` | Ranked wiki sections and endpoints for keywords, across every readable repo | Any, when you don't know which repo holds the answer | Built over wiki sections and endpoints; curated context in phase 4 |
-| `brain_get` | One item in full (page, glossary entry, ADR, symbol map) with citations | Feature planning, development | Built for wiki pages |
+| `brain_impact` | What depends on a route, symbol or file, in the repo and across repos; or, given a description of work, which systems, repos and endpoints it would most likely touch | Product brief, technical planning, scope drift, maintainability review | Built for routes, files and work descriptions; symbols in phase 3b |
+| `brain_repo_card` | What a repo is: what it is for (product line), its system, freshness, languages, neighbours, seam counts, where its wiki is | Product brief, technical planning | Built |
+| `brain_search` | Systems, then ranked wiki sections and endpoints for keywords, across every readable repo | Any, when you don't know which repo holds the answer | Built over systems, wiki sections and endpoints; curated context in phase 4 |
+| `brain_get` | One item in full (page, system overview, glossary entry, ADR, symbol map) with citations | Product brief, feature planning, development | Built for wiki pages and system overviews |
 
 A hit looks like: `orders-web · src/api/orders.ts:42-58 · @9f3c1e2 · 2 commits behind · llm-generated`.
 
@@ -107,7 +107,40 @@ out) and the files they cite, with camelCase file names also written apart. Endp
 searched on their method and path only. A query's words are OR'd and ranked by bm25 with Porter
 stemming, headings weighted most. Rows are added where pages and seams are written and removed
 by triggers, so a page rewrite, a deleted file or a removed repo can't leave stale hits.
-Keyword search only: embeddings wait until evals show a gain (see "Not in v1").
+Keyword search only: embeddings wait until evals show a gain (see "Not in v1"). System names
+and summaries have their own small FTS5 index, kept in step by triggers, and matching systems are
+listed first.
+
+### The product layer
+
+A PO's agent should answer what a product does, who uses it, its business rules and which
+systems a piece of work touches, without reading code or technical pages.
+
+- **The product page.** Every wiki has a page with slug `product`, in product language: who uses
+  it, what they can do, business rules, terms, what it depends on (named as products) and what it
+  doesn't do. Its text names no code: code names appear only in its citations, which point at
+  where each rule is enforced. It goes through the same citation check as every page. Wikis
+  written before it existed gain it on their next sync, in a run of its own, without rewriting the
+  other pages (an update writes any page every wiki should have but this one lacks). The repo
+  card opens with the page's first sentence.
+- **Systems** are the repos that make up one product. `brain systems suggest` gives Claude Code a
+  small file holding each repo's card facts, the opening of its product page and its links, and
+  no code. Each suggestion is checked against the facts (its repos exist, none is in two systems,
+  the name is free, and in a system of several repos each one calls or is called by another
+  member in the route map; one that isn't is left out) and stored as `suggested`. A person
+  confirms, edits or removes them, and editing one confirms it; a repo belongs to at most one. Repos in confirmed systems are left out of
+  later suggestions. After `brain add`, a new repo that calls or is called by a repo in a
+  confirmed system gets a suggestion to join it, worked out from the seam graph with no AI.
+- **A system overview** (`brain_get` with `system`) is assembled when asked, like neighbours: the
+  summary from the suggestion or a person, each repo's product sentence, and the links within and
+  outside the system from the seams. Nothing in it is unchecked, and nothing is stored, so it is
+  never stale. Agents see confirmed systems as facts and suggested ones labelled "suggested".
+- **`brain_impact` with `work`** searches wiki sections (product sections count double) and
+  endpoints for the description, ranks repos by their best few matching sections plus a little per
+  matching route, scaled by the square of the share of the description's words the repo matches
+  at all, groups them by system, and adds the repos that call the matching routes. Repos under
+  half the best score are only named as weaker matches. No AI
+  runs at query time; the calling agent does the reasoning. It keeps the tool set at five.
 
 ## Local POC vs hosted
 

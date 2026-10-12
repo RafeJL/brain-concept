@@ -14,9 +14,12 @@ import { describeFreshness, freshnessOf } from "./serve/freshness.js";
 import { count, type Format, type ToolDeps, type ToolResult } from "./serve/tools/common.js";
 import { findConsumers } from "./serve/tools/find-consumers.js";
 import { getPage } from "./serve/tools/get-page.js";
-import { impact } from "./serve/tools/impact.js";
 import { repoCard } from "./serve/tools/repo-card.js";
 import { search } from "./serve/tools/search.js";
+import { systemOverview } from "./serve/tools/system-overview.js";
+import { impactRequest } from "./serve/tools/work-impact.js";
+import { joinHint } from "./serve/systems.js";
+import { suggestSystems, type SuggestResult } from "./ai/systems.js";
 import { SqliteStore } from "./store/sqlite.js";
 import { DEFAULT_MODEL, generateWiki, type WikiResult } from "./ai/generate.js";
 import { claudeRunner } from "./ai/runner.js";
@@ -46,6 +49,17 @@ See what an agent gets:
   brain consumers "<METHOD /path>" [--detailed]            who serves and who calls an endpoint
   brain impact <repo> [--path <file>] [--route "<METHOD /path>"] [--detailed]
                                                            routes a repo or file serves, and who calls each
+  brain impact --work "<description of work>"              which systems, repos and endpoints the work would touch
+
+Systems (which repos make up a product):
+  brain systems                                            list systems and whether a person has confirmed them
+  brain systems suggest [--model <m>]                      have Claude Code suggest systems from the repos' cards (cents)
+  brain systems show <system>                              a system's overview: its repos and how they connect
+  brain systems confirm <system> | --all                   confirm suggested systems
+  brain systems set <system> [<repo>...] [--summary "<line>"]
+                                                           add or move repos into a system, or change its summary
+  brain systems rename <system> <new name>                 rename a system
+  brain systems remove <system>                            remove a system (its repos stay enrolled)
 
 Store: ${resolveDbPath()} (set BRAIN_DB to change). Model: ${DEFAULT_MODEL} unless --model is given.`;
 
@@ -58,6 +72,9 @@ async function main(argv: string[]): Promise<void> {
       ref: { type: "string" },
       path: { type: "string" },
       route: { type: "string" },
+      work: { type: "string" },
+      summary: { type: "string" },
+      all: { type: "boolean", default: false },
       repo: { type: "string", multiple: true },
       offset: { type: "string" },
       model: { type: "string" },
@@ -68,7 +85,7 @@ async function main(argv: string[]): Promise<void> {
       help: { type: "boolean", short: "h", default: false },
     },
   });
-  const [command, sub, arg, extra] = positionals;
+  const [command, sub, arg, extra, ...more] = positionals;
   if (!command || values.help || command === "help") {
     console.log(HELP);
     return;
@@ -145,8 +162,15 @@ async function main(argv: string[]): Promise<void> {
         print(await findConsumers(tools, LOCAL_CALLER, { target: sub, format }));
         break;
       case "impact":
-        if (!sub) throw new BrainError("Usage: brain impact <repo> [--path <file>] [--route \"GET /path\"] [--detailed]");
-        print(await impact(tools, LOCAL_CALLER, { repo: sub, path: values.path, route: values.route, format }));
+        if (!sub && !values.work) throw new BrainError('Usage: brain impact <repo> [--path <file>] [--route "GET /path"] [--detailed] | brain impact --work "<description>"');
+        print(await impactRequest(tools, LOCAL_CALLER, { repo: sub, work: values.work, path: values.path, route: values.route, format }));
+        break;
+      case "systems":
+        await systems(store, tools, sub, [arg, extra, ...more].filter((p): p is string => p !== undefined), {
+          all: values.all,
+          summary: values.summary,
+          model: values.model,
+        });
         break;
       case "search":
         if (!sub) throw new BrainError('Usage: brain search "<query>" [--repo <name>]... [--detailed] [--offset <n>]');
@@ -210,6 +234,7 @@ function printWiki(wiki: WikiResult): void {
   if (wiki.reports.length === 0) {
     const carried = wiki.carried.length ? `; ${wiki.carried.length} pages re-checked and moved to ${at}` : "";
     console.log(`${wiki.repo}: wiki up to date at ${at}, nothing its pages cite changed (no AI run${carried})`);
+    if (wiki.waiting.length) console.log(`  ${wiki.waiting.join(", ")} failed the check at ${at}; it's tried again after the next change, or with --full`);
     return;
   }
   const action = wiki.mode === "full" ? "written" : "updated";
@@ -297,6 +322,8 @@ async function addRepo(
       console.log(`${repo.name}: no hook installed (${error.message}). Run brain sync ${repo.name} after pulling.`);
     }
   }
+  const hint = joinHint(store, repo.name);
+  if (hint) console.log(hint);
   console.log("");
   console.log(options.ai ? `Next: ask Claude Code "what does ${repo.name} do?", or run: brain card ${repo.name}` : `Next: brain sync ${repo.name} to have Claude Code write its wiki`);
 }
@@ -309,6 +336,91 @@ async function estimate(repo: RepoRecord): Promise<string> {
     `${repo.name} has ${files} files. Claude Code will now read it to map its routes and calls and write its wiki: ` +
     `roughly ${cost} of your Claude Code allowance and ${time}. Later updates cost cents.`
   );
+}
+
+/** `brain systems`: list, suggest, show, confirm, set, rename, remove. */
+async function systems(
+  store: Store,
+  tools: ToolDeps,
+  action: string | undefined,
+  args: string[],
+  options: { all: boolean; summary?: string; model?: string },
+): Promise<void> {
+  const [name, ...rest] = args;
+  switch (action) {
+    case undefined:
+    case "list": {
+      const all = store.systems();
+      if (all.length === 0) {
+        console.log("No systems yet. Suggest them with: brain systems suggest");
+        return;
+      }
+      for (const system of all) {
+        console.log(`${system.name} (${system.status}) · ${count(system.repos.length, "repo")}: ${system.repos.join(", ") || "none"}`);
+        if (system.summary) console.log(`  ${system.summary}`);
+        if (system.status === "suggested" && system.reason) console.log(`  why: ${system.reason}`);
+      }
+      const grouped = new Set(all.flatMap((s) => s.repos));
+      const ungrouped = store.listRepos().map((r) => r.name).filter((r) => !grouped.has(r));
+      if (ungrouped.length) console.log(`In no system: ${ungrouped.join(", ")}`);
+      if (all.some((s) => s.status === "suggested")) console.log("\nConfirm with: brain systems confirm <system> (or --all); fix with: brain systems set <system> <repo>...");
+      return;
+    }
+    case "suggest":
+      printSuggestion(await suggestSystems(store, claudeRunner, { model: options.model }));
+      return;
+    case "show":
+      if (!name) throw new BrainError("Usage: brain systems show <system>");
+      print(await systemOverview(tools, LOCAL_CALLER, name));
+      return;
+    case "confirm": {
+      if (!name && !options.all) throw new BrainError("Usage: brain systems confirm <system> | --all");
+      const confirmed = store.confirmSystems(options.all ? null : [name!]);
+      if (confirmed.length) console.log(`Confirmed: ${confirmed.join(", ")}`);
+      else console.log(options.all ? "No suggested systems to confirm." : `No suggested system named "${name}". See: brain systems`);
+      return;
+    }
+    case "set": {
+      if (!name || (rest.length === 0 && options.summary === undefined)) throw new BrainError('Usage: brain systems set <system> <repo>... [--summary "<one line>"]');
+      const unknown = rest.filter((repo) => !store.getRepo(repo));
+      if (unknown.length) throw new BrainError(`Not enrolled: ${unknown.join(", ")}. See: brain repo list`);
+      const existed = store.systems().some((s) => s.name.toLowerCase() === name.toLowerCase());
+      store.setSystem(name, rest, options.summary);
+      const system = store.systems().find((s) => s.name.toLowerCase() === name.toLowerCase())!;
+      console.log(`${existed ? "Updated" : "Created"} ${system.name} (confirmed): ${system.repos.join(", ") || "no repos"}`);
+      return;
+    }
+    case "rename":
+      if (!name || !rest[0]) throw new BrainError("Usage: brain systems rename <system> <new name>");
+      if (!store.renameSystem(name, rest[0])) throw new BrainError(`No system named "${name}". See: brain systems`);
+      console.log(`Renamed ${name} to ${rest[0]}.`);
+      return;
+    case "remove":
+      if (!name) throw new BrainError("Usage: brain systems remove <system>");
+      if (!store.removeSystem(name)) throw new BrainError(`No system named "${name}". See: brain systems`);
+      console.log(`Removed ${name}. Its repos are still enrolled, now in no system.`);
+      return;
+    default:
+      throw new BrainError("Usage: brain systems [suggest | show <system> | confirm <system> | set <system> <repo>... | rename <system> <new> | remove <system>]");
+  }
+}
+
+function printSuggestion(result: SuggestResult): void {
+  if (result.costUsd === 0 && result.kept.length === 0 && result.dropped.length === 0) {
+    console.log("Every repo is already in a confirmed system, so there is nothing to suggest.");
+    return;
+  }
+  console.log(`Suggested ${count(result.kept.length, "system")} · $${result.costUsd.toFixed(2)} · ${Math.round(result.durationMs / 1000)}s`);
+  for (const system of result.kept) {
+    console.log(`  ${system.name}: ${system.repos.join(", ")}`);
+    if (system.summary) console.log(`    ${system.summary}`);
+    console.log(`    why: ${system.reason}`);
+  }
+  for (const drop of result.dropped) console.log(`  dropped ${drop.system}: ${drop.reason}`);
+  for (const note of result.leftOut) console.log(`  left out of ${note.system}: ${note.reason}`);
+  if (result.confirmed.length) console.log(`Already in confirmed systems, so left as they are: ${result.confirmed.join(", ")}`);
+  if (result.ungrouped.length) console.log(`In no system: ${result.ungrouped.join(", ")}`);
+  if (result.kept.length) console.log("Agents see these labelled suggested. Confirm with: brain systems confirm <system> (or --all)");
 }
 
 function print(result: ToolResult<unknown>): void {

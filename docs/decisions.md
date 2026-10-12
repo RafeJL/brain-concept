@@ -429,3 +429,70 @@ minutes. A fresh-clone walkthrough found:
   - the `del`, `all` and `any` verb aliases, which only the Express and Laravel parsers needed.
 - **Merged duplicates:** `SeamCite` and `Citation` are one type, there is one `cleanPath`, and
   the `llm-generated` label is a constant ready for `human-reviewed`.
+
+## 2026-10-08: the product layer (B2a): product pages, systems, impact from a description
+
+A PO's agent should answer what a product does, who uses it, its business rules and which
+systems a piece of work touches, without reading code.
+
+- **A fifth wiki page, `product`,** written for a PO or a new joiner: who uses it, what they can
+  do, business rules, terms, what it depends on (named as products) and what it doesn't do. Its
+  text names no code; code names appear only in citations, which point at where each rule is
+  enforced. It goes through the same citation check as every page; no new check was added, since
+  product sentences rarely use backticks and the check still confirms each citation exists and is
+  narrow.
+- **Existing wikis gain it on their next sync** in a run of its own: an update writes any page
+  listed in `prompts/pages.md` that the wiki lacks, leaving the others alone. This also refills a
+  fixed page (overview, build-run-test, api) that failed in a wiki's first run.
+- **The card opens with the page's first sentence** (`Product: …`) and names the repo's system.
+- **Systems: suggested by AI, confirmed by a person, assembled on request.** `brain systems
+  suggest` gives Claude Code a small file (card facts, the opening of each product page, links;
+  no code), so it costs cents. A suggestion is kept only if its repos exist and aren't in a
+  confirmed system, none appears twice and its name is free. In a system of several repos, each
+  must call or be called by another member in the route map: one that isn't is left out (looking
+  alike proves nothing), and a system left with fewer than two is dropped. The AI's own reason is
+  shown, but nothing rests on it. A person confirms, sets, renames or removes systems; setting a
+  suggested system's repos or summary confirms it, since a person has now decided it. Agents see unconfirmed ones labelled
+  "suggested", so a fresh install is useful before anyone confirms. Overviews (`brain_get` with
+  `system`) are built when asked from the summary, product pages and seams, and never stored.
+  System names and summaries have their own FTS5 index (migration 10), kept by triggers.
+- **`brain_impact` takes `work`,** a description of a piece of work, instead of adding a sixth
+  tool. It searches wiki sections (product sections ×2) and routes, ranks repos by their best five
+  sections plus 0.5 per matching route (up to 10), scales that by the square of the share of the
+  description's words the repo matches at all, groups by system, and adds the repos calling the
+  matching routes. Repos under half the best score are named as weaker matches. No AI at query
+  time.
+
+**Why the word-share scaling:** without it, the harness's long product page matched one common
+word ("codes", "add") in many sections and came second for "add discount codes to the basket"
+(20.9 against eshop's 24). Scaled, it falls to 5.2 and shows only as a weaker match.
+
+**Gate** (snapshot of the real store; product pages written for aspnet-api, react-web and the
+harness, $3.93 including an update of three harness pages the branch had moved past; the other
+four repos were left for budget):
+- Product pages: 35/35, 25/25 and 65/68 claims kept; the three removals were uncited bold
+  lead-ins. No backticks or code names in the text. Spot-checked rules match their citations
+  (unique username and email, author-only delete, 20 results per page).
+- `systems suggest` ($0.08–0.20): RealWorld (four APIs and react-web), eShop alone, the harness
+  alone. The first version checked "evidence" items the AI wrote, and a page existing counted as
+  support, which every repo passes; review replaced it with the link check above, computed from
+  the seam graph rather than taken from the AI. RealWorld passes it: react-web calls all four APIs.
+- `impact --work`: "save articles to read later" and "let users delete their account" give
+  aspnet-api and react-web (the other APIs, with no product page yet, as weaker matches);
+  "add discount codes to the basket" and "notify buyers when an order ships" give eshop (Basket;
+  Ordering with `PUT /api/orders/ship`); "add a cost report to skill evals" gives the harness.
+
+**Found on Rafe's first real sync** (all 7 repos, about $6.7): six product pages passed (23/23 to
+54/54 claims kept). eShop's failed twice, 12 of 34 claims kept, nearly all removed as "no
+citation" although the removed text visibly had brackets. The failed draft isn't stored, so the
+exact form is unknown; the checker now also reads several files in one bracket separated by
+commas and ranges written with an en or em dash, and a claim whose bracket still can't be read
+says so and shows it ("no citation it can read: [...]"). And because a missing page that fails
+was retried on every sync (eShop's would have cost about $3.60 each time), a failure is recorded
+(`repo_state.pages_failed_at`, migration 11) and the page waits until the code changes or
+`--full`. Work descriptions also drop words almost every one uses ("let", "users", "people"),
+which had ranked repos by their user routes for "let users save articles to read later".
+
+**What would change it:** re-tune the weights when every repo has a product page. Repos that make
+up one product but don't call each other over HTTP are left out of suggestions until B2b's
+event, gRPC and package links count too; a person can add them with `brain systems set`.

@@ -59,7 +59,7 @@ describe("Claude Code runner", () => {
     const result = parseClaudeResult<{ pages: unknown[] }>(RECORDED);
 
     expect(result).toMatchObject({ costUsd: 0.42, durationMs: 41250, model: "claude-sonnet-5" });
-    expect(result.output.pages).toHaveLength(3);
+    expect(result.output.pages).toHaveLength(4);
     expect(() => parseClaudeResult(JSON.stringify({ is_error: true, result: "rate limited" }))).toThrow(/rate limited/);
     expect(() => parseClaudeResult(JSON.stringify({ is_error: false, result: "hi" }))).toThrow(/no structured output/);
     expect(() => parseClaudeResult("not json")).toThrow(/did not return JSON/);
@@ -78,6 +78,7 @@ describe("brain wiki", () => {
       ["overview", sha, "claude-sonnet-5"],
       ["build-run-test", sha, "claude-sonnet-5"],
       ["api", sha, "claude-sonnet-5"],
+      ["product", sha, "claude-sonnet-5"],
     ]);
     expect(seen[0]!.request.model).toBe("sonnet");
   });
@@ -103,7 +104,7 @@ describe("brain wiki", () => {
     const bad = JSON.stringify({ is_error: false, structured_output: { pages: [{ slug: "Not A Slug", title: "x", markdown: "y" }] } });
 
     await expect(generateWiki(store, fakeRunner(bad).runner, "api", { full: true })).rejects.toThrow(/malformed/);
-    expect(store.pages("api").map((p) => p.slug)).toEqual(["overview", "build-run-test", "api"]);
+    expect(store.pages("api").map((p) => p.slug)).toEqual(["overview", "build-run-test", "api", "product"]);
   });
 
   it("checks every citation and stores what it found on each page", async () => {
@@ -115,11 +116,13 @@ describe("brain wiki", () => {
       ["overview", 1, 0, true],
       ["build-run-test", 1, 0, true],
       ["api", 2, 0, true],
+      ["product", 1, 0, true],
     ]);
     expect(store.pages("api").map((p) => [p.slug, p.claims, p.removed])).toEqual([
       ["overview", 1, 0],
       ["build-run-test", 1, 0],
       ["api", 2, 0],
+      ["product", 1, 0],
     ]);
   });
 
@@ -149,7 +152,7 @@ describe("brain wiki", () => {
     const bad = recorded([{ slug: "overview", title: "Overview", markdown: "# Overview\n\nIt uses `Kafka` [src/articles.ts:1]." }]);
 
     await expect(generateWiki(store, fakeRunner(bad).runner, "api", { full: true })).rejects.toThrow(/No page passed the citation check.*overview: 0\/1/);
-    expect(store.pages("api").map((p) => p.slug)).toEqual(["overview", "build-run-test", "api"]);
+    expect(store.pages("api").map((p) => p.slug)).toEqual(["overview", "build-run-test", "api", "product"]);
   });
 
   it("asks for a sync first when the repo hasn't been indexed", async () => {
@@ -187,7 +190,7 @@ describe("updating the wiki", () => {
 
     const wiki = await generateWiki(store, runner, "api");
 
-    expect(wiki).toMatchObject({ mode: "update", carried: ["build-run-test"] });
+    expect(wiki).toMatchObject({ mode: "update", carried: ["build-run-test", "product"] });
     expect(seen).toHaveLength(1);
     expect(seen[0]!.request.prompt).toContain("- M src/articles.ts");
     expect(seen[0]!.request.prompt).toContain('<page slug="api">');
@@ -197,6 +200,7 @@ describe("updating the wiki", () => {
       ["overview", next],
       ["build-run-test", next],
       ["api", next],
+      ["product", next],
     ]);
     expect(store.pages("api")[2]!.markdown).toBe(goodApi.markdown);
   });
@@ -218,7 +222,7 @@ describe("updating the wiki", () => {
     const wiki = await generateWiki(store, never, "api");
     const again = await generateWiki(store, never, "api");
 
-    expect(wiki).toMatchObject({ reports: [], carried: ["overview", "build-run-test", "api"], costUsd: 0 });
+    expect(wiki).toMatchObject({ reports: [], carried: ["overview", "build-run-test", "api", "product"], costUsd: 0 });
     expect(again).toMatchObject({ reports: [], carried: [] });
     expect(store.pages("api").every((p) => p.commit === next)).toBe(true);
   });
@@ -252,7 +256,7 @@ describe("updating the wiki", () => {
       ["overview", true, 1],
       ["api", false, 2],
     ]);
-    expect(store.pages("api").map((p) => p.commit)).toEqual([next, next, sha]);
+    expect(store.pages("api").map((p) => p.commit)).toEqual([next, next, sha, next]);
     expect(store.pages("api")[2]).toEqual(before);
     const kept = `kept from @${sha.slice(0, 7)}: its rewrite at @${next.slice(0, 7)} failed the citation check`;
     expect(list.text).toContain(`API (${kept})`);
@@ -268,7 +272,7 @@ describe("updating the wiki", () => {
     const wiki = await generateWiki(store, runner, "api");
 
     expect(seen[0]!.request.prompt).toContain("can't be compared");
-    expect(wiki.reports.map((r) => r.slug)).toEqual(["overview", "build-run-test", "api"]);
+    expect(wiki.reports.map((r) => r.slug)).toEqual(["overview", "build-run-test", "api", "product"]);
   });
 });
 
@@ -280,7 +284,7 @@ describe("brain_get", () => {
     const list = await getPage(deps, LOCAL_CALLER, { repo: "api" });
     const page = await getPage(deps, LOCAL_CALLER, { repo: "api", page: "api" });
 
-    expect(list.text).toContain(`api wiki · 3 pages · @${sha.slice(0, 7)} · up to date · llm-generated`);
+    expect(list.text).toContain(`api wiki · 4 pages · @${sha.slice(0, 7)} · up to date · llm-generated`);
     expect(list.text).toMatch(/build-run-test\s+Build, run and test/);
     expect(page.text).toContain("- `DELETE /articles/:slug` removes one; auth is required [src/articles.ts:4].");
     expect(page.text).toContain("llm-generated · citations checked: 2 of 2 claims kept");
@@ -297,7 +301,7 @@ describe("brain_get", () => {
     const card = await repoCard(deps, LOCAL_CALLER, "api", "concise");
 
     expect(page.text).toContain("1 commit behind main");
-    expect(card.text).toMatch(/Wiki: 3 pages \(overview, build-run-test, api\) · read with brain_get · written at @\w{7}, older than the index/);
+    expect(card.text).toMatch(/Wiki: 4 pages \(overview, build-run-test, api, product\) · read with brain_get · written at @\w{7}, older than the index/);
   });
 
   it("explains a missing wiki or page, and hides unreadable repos", async () => {
@@ -309,7 +313,7 @@ describe("brain_get", () => {
     const hidden = await getPage({ store, access: nobody }, LOCAL_CALLER, { repo: "api" });
 
     expect(noWiki).toMatchObject({ ok: false, text: "api has no wiki yet. Generate it with: brain sync api" });
-    expect(noPage.text).toBe('api has no page "nope". Pages: overview, build-run-test, api.');
+    expect(noPage.text).toBe('api has no page "nope". Pages: overview, build-run-test, api, product.');
     expect(hidden.text).toBe('No readable repo named "api". No repos are enrolled yet. Add one with: brain add <path>');
   });
 
@@ -320,6 +324,6 @@ describe("brain_get", () => {
     const after = await repoCard(deps, LOCAL_CALLER, "api", "concise");
 
     expect(before.text).toContain("Wiki: not generated yet (brain sync api)");
-    expect(after.text).toContain("Wiki: 3 pages (overview, build-run-test, api) · read with brain_get");
+    expect(after.text).toContain("Wiki: 4 pages (overview, build-run-test, api, product) · read with brain_get");
   });
 });

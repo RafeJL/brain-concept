@@ -18,6 +18,12 @@ export interface RepoState {
   fileCount: number;
   /** The commit the stored seams describe; null until Claude Code first lists them. */
   seamsCommit: string | null;
+  /**
+   * The commit at which a page every wiki should have was written and failed the check. It isn't
+   * tried again until the code moves on (or `--full`), so a page that keeps failing costs once per
+   * change, not once per sync.
+   */
+  pagesFailedAt: string | null;
 }
 
 /** One file in a repo's committed tree. */

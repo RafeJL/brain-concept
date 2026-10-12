@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
-import { parseCitations, withoutCitations, type Citation } from "../core/citations.js";
+import { parseCitations, unreadableCitation, withoutCitations, type Citation } from "../core/citations.js";
 
 export interface RemovedClaim {
   text: string;
@@ -137,7 +137,10 @@ function isClaim(text: string): boolean {
 /** Why a claim isn't supported by what it cites, or null if it is. */
 function unsupported(text: string, root: string, linesOf: (path: string) => string[] | null): string | null {
   const cites = parseCitations(text);
-  if (cites.length === 0) return "no citation";
+  if (cites.length === 0) {
+    const unreadable = unreadableCitation(text);
+    return unreadable ? `no citation it can read: ${unreadable.slice(0, 80)}` : "no citation";
+  }
 
   const spans: string[] = [];
   for (const cite of cites) {
