@@ -1,10 +1,12 @@
-import { matchEndpoints, parseEndpoint, type MatchQuality } from "../../core/http.js";
-import type { Seam } from "../../core/seams.js";
+import { matchEndpoints, type MatchQuality } from "../../core/http.js";
+import { parseTarget } from "../../core/links.js";
+import { familyOf, isProvider, type Seam, type SeamFamily } from "../../core/seams.js";
 import type { Caller } from "../access.js";
 import {
   alsoDeclared,
   count,
   endpointOf,
+  FAMILY_LABEL,
   footer,
   groupRoutes,
   lineRange,
@@ -20,14 +22,15 @@ import {
 
 export interface ImpactInput {
   repo: string;
-  /** A file in the repo: only routes declared there. */
+  /** A file in the repo: only what is declared there. */
   path?: string;
-  /** An endpoint: only routes of the repo matching it. */
+  /** An endpoint, event, gRPC method or package: only what the repo provides matching it. */
   route?: string;
   format: Format;
   offset?: number;
 }
 
+/** Something the repo provides (a route, a published event, a gRPC method, a package) and who uses it. */
 export interface RouteImpact {
   route: Seam;
   /** The same endpoint declared elsewhere in the repo, e.g. in an OpenAPI spec. */
@@ -38,30 +41,40 @@ export interface RouteImpact {
 export interface Impact {
   repo: string;
   path?: string;
+  /** Everything provided, routes or not. */
   routes: RouteImpact[];
   /** Calls the file or repo makes itself; reported so an empty answer still says something. */
   outgoingCalls: number;
+  /** The same for its event subscriptions, gRPC calls and package dependencies. */
+  otherUses: number;
 }
 
 /**
  * The seam-level blast radius of changing a repo, a file in it, or one endpoint: the routes it
- * serves and who calls each one, in any readable repo (its own included, e.g. e2e tests).
+ * serves, events it publishes, gRPC methods it serves and packages it publishes, and who uses
+ * each one, in any readable repo (its own included, e.g. e2e tests or its own event handlers).
  */
 export async function impact(deps: ToolDeps, caller: Caller, input: ImpactInput): Promise<ToolResult<Impact>> {
   const found = await requireSyncedRepo(deps, caller, input.repo);
   if (!found.ok) return found;
-  const target = input.route ? parseEndpoint(input.route) : null;
-  if (input.route && !target) return { ok: false, text: `"${input.route}" is not an endpoint. Try "GET /api/orders/{id}".` };
+  const target = input.route ? parseTarget(input.route) : null;
+  if (input.route && !target) {
+    return { ok: false, text: `"${input.route}" is not an endpoint, event, gRPC method or package. Try "GET /api/orders/{id}" or "event OrderStarted".` };
+  }
 
   const path = input.path?.replace(/\\/g, "/").replace(/^\.?\//, "");
-  const routes = deps.store
-    .seams({ repos: [input.repo], kind: "http-route", path })
-    .filter((route) => !target || matchEndpoints(endpointOf(route), target));
+  const routes = deps.store.seams({ repos: [input.repo], path }).filter((route) => {
+    if (!isProvider(route.kind)) return false;
+    if (!target) return true;
+    if (familyOf(route.kind) !== target.family) return false;
+    return target.family === "http" ? matchEndpoints(endpointOf(route), target.endpoint) !== null : route.key === target.key;
+  });
   const groups = groupRoutes(routes);
+  const everything = deps.store.seams({ repos: found.readable });
   const links = linkCalls(
-    deps.store.seams({ repos: found.readable, kind: "http-call" }),
+    everything.filter((seam) => !isProvider(seam.kind)),
     groups.map((g) => g.primary),
-    deps.store.seams({ repos: found.readable, kind: "http-route" }),
+    everything.filter((seam) => isProvider(seam.kind)),
   );
   const impacts: RouteImpact[] = groups.map(({ primary: route, also }) => ({
     route,
@@ -70,23 +83,28 @@ export async function impact(deps: ToolDeps, caller: Caller, input: ImpactInput)
   }));
   impacts.sort((a, b) => b.callers.length - a.callers.length || a.route.path.localeCompare(b.route.path) || a.route.startLine - b.route.startLine);
 
-  const outgoingCalls = deps.store.seams({ repos: [input.repo], kind: "http-call", path, includeUnresolved: true }).length;
-  const data: Impact = { repo: input.repo, path, routes: impacts, outgoingCalls };
+  const uses = deps.store.seams({ repos: [input.repo], path, includeUnresolved: true }).filter((seam) => !isProvider(seam.kind));
+  const outgoingCalls = uses.filter((seam) => seam.kind === "http-call").length;
+  const data: Impact = { repo: input.repo, path, routes: impacts, outgoingCalls, otherUses: uses.length - outgoingCalls };
   return { ok: true, data, text: await render(deps, data, found.readable, input.format, input.offset ?? 0) };
 }
 
-async function render(deps: ToolDeps, { repo, path, routes, outgoingCalls }: Impact, readable: string[], format: Format, offset: number): Promise<string> {
+async function render(deps: ToolDeps, { repo, path, routes, outgoingCalls, otherUses }: Impact, readable: string[], format: Format, offset: number): Promise<string> {
   const scope = path ? `${repo} · ${path}` : repo;
   if (routes.length === 0) {
-    const calls = outgoingCalls ? ` It makes ${count(outgoingCalls, "HTTP call")}; use brain_find_consumers on one to see who serves it.` : "";
-    return `No matching routes are declared in ${scope}.${calls}`;
+    const uses = [
+      ...(outgoingCalls ? [`makes ${count(outgoingCalls, "HTTP call")}`] : []),
+      ...(otherUses ? [`has ${count(otherUses, "event subscription, gRPC call or package dependency", "event subscriptions, gRPC calls or package dependencies")}`] : []),
+    ];
+    const calls = uses.length ? ` It ${uses.join(" and ")}; use brain_find_consumers on one to see who provides it.` : "";
+    return `No matching routes, events, gRPC methods or packages are declared in ${scope}.${calls}`;
   }
 
   const withCallers = routes.filter((r) => r.callers.length > 0);
   const quiet = routes.filter((r) => r.callers.length === 0);
   const callerRepos = new Set(withCallers.flatMap((r) => r.callers.map((c) => c.seam.repo)));
   const callerCount = withCallers.reduce((sum, r) => sum + r.callers.length, 0);
-  const out = [`${scope} · ${count(routes.length, "route")}, ${count(callerCount, "caller")} in ${count(callerRepos.size, "repo")} · ${TIER}`];
+  const out = [`${scope} · ${provided(routes.map((r) => r.route))}, ${count(callerCount, "caller")} in ${count(callerRepos.size, "repo")} · ${TIER}`];
 
   const shown = format === "detailed" ? routes : withCallers;
   const page = shown.slice(offset, offset + PAGE_SIZE);
@@ -113,8 +131,31 @@ async function render(deps: ToolDeps, { repo, path, routes, outgoingCalls }: Imp
       freshnessRepos: [repo, ...callerRepos],
       unresolvedIn: readable,
       relevantRepos: [repo, ...callerRepos],
+      families: familiesOf(routes.map((r) => r.route)),
       closing: "Only enrolled repos are covered. Confirm in the repo before editing.",
     })),
   );
   return out.join("\n");
+}
+
+const PROVIDED: Record<SeamFamily, [string, string]> = {
+  http: ["route", "routes"],
+  event: ["event published", "events published"],
+  grpc: ["gRPC method", "gRPC methods"],
+  package: ["package", "packages"],
+};
+
+/** "2 routes, 1 event published": what is provided, by family. */
+function provided(seams: readonly Seam[]): string {
+  return familiesOf(seams)
+    .map((family) => {
+      const n = seams.filter((s) => familyOf(s.kind) === family).length;
+      return `${n} ${PROVIDED[family][n === 1 ? 0 : 1]}`;
+    })
+    .join(", ");
+}
+
+/** The families present, HTTP first. */
+function familiesOf(seams: readonly Seam[]): SeamFamily[] {
+  return (Object.keys(FAMILY_LABEL) as SeamFamily[]).filter((family) => seams.some((s) => familyOf(s.kind) === family));
 }

@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { Seam, SeamCoverage } from "../core/seams.js";
+import type { Seam, SeamCoverage, SeamKind } from "../core/seams.js";
 import type { SystemRecord } from "../core/systems.js";
 import { BrainError, type FileRecord, type LanguageShare, type RepoRecord, type RepoState, type WikiPage } from "../core/types.js";
 import { MIGRATIONS } from "./migrations.js";
@@ -163,10 +163,17 @@ export class SqliteStore implements Store {
          FROM seams WHERE repo = ?`,
       )
       .get(repo) as Row;
+    const links = this.db
+      .prepare(
+        `SELECT kind, COUNT(*) AS count, SUM(route_key IS NULL) AS runtime
+         FROM seams WHERE repo = ? AND kind NOT LIKE 'http-%' GROUP BY kind ORDER BY kind`,
+      )
+      .all(repo) as Row[];
     return {
       routes: Number(counts.routes ?? 0),
       calls: Number(counts.calls ?? 0),
       unresolvedCalls: Number(counts.unresolved ?? 0),
+      links: links.map((row) => ({ kind: String(row.kind) as SeamKind, count: Number(row.count), runtime: Number(row.runtime ?? 0) })),
     };
   }
 

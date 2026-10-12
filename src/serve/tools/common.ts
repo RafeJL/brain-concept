@@ -1,5 +1,5 @@
 import { hasLiteralSegment, matchEndpoints, type Endpoint, type MatchQuality } from "../../core/http.js";
-import type { Seam } from "../../core/seams.js";
+import { FAMILIES, familyOf, type Seam, type SeamFamily } from "../../core/seams.js";
 import type { Freshness, RepoRecord, RepoState, WikiPage } from "../../core/types.js";
 import type { Store } from "../../store/store.js";
 import type { AccessPolicy, Caller } from "../access.js";
@@ -54,7 +54,18 @@ export function endpointOf(seam: Seam): Endpoint {
   return { method: seam.method, key: seam.key! };
 }
 
-/** A call that reaches a route, and how well the two matched. */
+/**
+ * How two seams of the same family match, if they do: HTTP by method and path (exact or suffix),
+ * events, gRPC and packages exactly on their normalised name.
+ */
+export function matchSeams(a: Seam, b: Seam): MatchQuality | null {
+  const family = familyOf(a.kind);
+  if (family !== familyOf(b.kind)) return null;
+  if (family === "http") return matchEndpoints(endpointOf(a), endpointOf(b));
+  return a.key === b.key ? "exact" : null;
+}
+
+/** A call that reaches a route (or a subscription its event, a dependency its package…), and how well the two matched. */
 export interface SeamLink {
   call: Seam;
   route: Seam;
@@ -62,26 +73,40 @@ export interface SeamLink {
 }
 
 /**
- * Every call that reaches one of the routes. Two kinds of call only link within their own repo:
+ * Every call that reaches one of the routes, or for the other families every use of what is
+ * provided (a handler of a published event, a gRPC call, a dependency on a package). Two kinds
+ * of use only link within their own repo:
  * - a key with no literal segment (`/`, `/{}`): every web app serves `/`, so across repos it says
  *   nothing about which one is meant;
  * - a call its own repo serves (`ownRoutes` holds the callers' routes): its tests or front end
  *   calling itself, which says nothing about another repo that happens to serve the same path.
+ *   Likewise an event a repo publishes and handles itself.
  */
 export function linkCalls(calls: readonly Seam[], routes: readonly Seam[], ownRoutes: readonly Seam[] = []): SeamLink[] {
   return calls.flatMap((call) => {
-    const selfServed = ownRoutes.some((own) => own.repo === call.repo && matchEndpoints(endpointOf(call), endpointOf(own)));
+    const selfServed = ownRoutes.some((own) => own.repo === call.repo && matchSeams(call, own));
     return routes.flatMap((route) => {
       if (call.repo !== route.repo && (selfServed || !hasLiteralSegment(route.key!))) return [];
-      const match = matchEndpoints(endpointOf(call), endpointOf(route));
+      const match = matchSeams(call, route);
       return match ? [{ call, route, match }] : [];
     });
   });
 }
 
+/** How each family is named in answers. */
+export const FAMILY_LABEL: Record<SeamFamily, string> = { http: "HTTP", event: "event", grpc: "gRPC", package: "package" };
+
+/** What each family's two sides are called in answers. */
+export const ROLES: Record<SeamFamily, { provider: string; consumer: string; providedBy: string; usedBy: string }> = {
+  http: { provider: "server", consumer: "caller", providedBy: "Served by", usedBy: "Called by" },
+  event: { provider: "publisher", consumer: "handler", providedBy: "Published by", usedBy: "Handled by" },
+  grpc: { provider: "server", consumer: "caller", providedBy: "Served by", usedBy: "Called by" },
+  package: { provider: "publisher", consumer: "dependent", providedBy: "Published by", usedBy: "Used by" },
+};
+
 /** "1 route", "3 routes". */
-export function count(n: number, noun: string): string {
-  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+export function count(n: number, noun: string, plural = `${noun}s`): string {
+  return `${n} ${n === 1 ? noun : plural}`;
 }
 
 export function lineRange(start: number, end: number): string {
@@ -135,9 +160,11 @@ export function builtFrom(seam: Seam): string {
  * Where the calls with run-time URLs are, so an agent can tell a wrapper (one file, a few
  * lines) from callers the index might be missing. Files in `relevant` repos (the ones the answer
  * is about) are listed first; the count covers every repo searched. Empty when there are none.
+ * For events and gRPC, the same for names only known at run time, on either side.
  */
-export function unresolvedNote(deps: ToolDeps, repos: readonly string[], relevant: Iterable<string> = []): string {
-  const calls = deps.store.seams({ repos, kind: "http-call", includeUnresolved: true }).filter((s) => s.key === null);
+export function unresolvedNote(deps: ToolDeps, repos: readonly string[], relevant: Iterable<string> = [], family: SeamFamily = "http"): string {
+  const kinds = family === "http" ? [FAMILIES.http.uses] : [FAMILIES[family].provides, FAMILIES[family].uses];
+  const calls = deps.store.seams({ repos, includeUnresolved: true }).filter((s) => s.key === null && kinds.includes(s.kind));
   if (calls.length === 0) return "";
   const byFile = new Map<string, { start: number; end: number }>();
   const repoOf = (place: string) => place.split(" · ")[0]!;
@@ -150,6 +177,10 @@ export function unresolvedNote(deps: ToolDeps, repos: readonly string[], relevan
   const ranked = [...byFile].sort(([a], [b]) => Number(!first.has(repoOf(a))) - Number(!first.has(repoOf(b))));
   const places = ranked.slice(0, 3).map(([place, r]) => `${place}:${lineRange(r.start, r.end)}`);
   const more = byFile.size > 3 ? `, +${byFile.size - 3} more files` : "";
+  if (family !== "http") {
+    const subject = `${count(calls.length, `${FAMILY_LABEL[family]} link`)} ${calls.length === 1 ? "uses a name" : "use names"}`;
+    return `${subject} only known at run time (${places.join(", ")}${more}), so a missing link isn't proof there is none.`;
+  }
   const subject = calls.length === 1 ? "1 call uses a URL" : `${calls.length} calls use URLs`;
   return `${subject} only known at run time (${places.join(", ")}${more}), so a missing caller isn't proof there is none.`;
 }
@@ -167,6 +198,8 @@ export interface FooterOptions {
   unresolvedIn: readonly string[];
   /** Repos the answer is about; their run-time URLs are listed first. */
   relevantRepos: Iterable<string>;
+  /** Which families' run-time URLs or names to point out; HTTP when not given. */
+  families?: readonly SeamFamily[];
   closing: string;
 }
 
@@ -181,8 +214,10 @@ export async function footer(deps: ToolDeps, options: FooterOptions): Promise<st
   const freshness = await freshnessByRepo(deps, options.freshnessRepos);
   const indexed = [...freshness].map(([name, f]) => `${name} ${describeFreshness(f, deps.store.getRepo(name)?.ref ?? "?")}`);
   lines.push(`Indexed: ${indexed.join("; ")}`);
-  const gap = unresolvedNote(deps, options.unresolvedIn, options.relevantRepos);
-  if (gap) lines.push(gap);
+  for (const family of options.families ?? ["http"]) {
+    const gap = unresolvedNote(deps, options.unresolvedIn, options.relevantRepos, family);
+    if (gap) lines.push(gap);
+  }
   lines.push(options.closing);
   return lines;
 }

@@ -1,0 +1,6 @@
+{
+  "seams": [
+    { "kind": "event-subscribe", "name": "OrderStartedIntegrationEvent", "runtime": false, "cites": [{ "file": "src/consumer.ts", "start": 2, "end": 2 }] },
+    { "kind": "event-subscribe", "name": "process.env.EXTRA_QUEUE", "runtime": true, "cites": [{ "file": "src/consumer.ts", "start": 3, "end": 3 }] }
+  ]
+}

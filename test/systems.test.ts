@@ -133,9 +133,9 @@ describe("brain systems suggest", () => {
       ["Shop", ["orders-api", "shop-web"]],
       ["Articles", ["articles-api"]],
     ]);
-    expect(result.leftOut).toEqual([{ system: "Shop", reason: "articles-web doesn't call or get called by any other repo in it, in the route map" }]);
+    expect(result.leftOut).toEqual([{ system: "Shop", reason: "articles-web doesn't call or get called by any other repo in it, in the link map" }]);
     expect(result.dropped).toEqual([
-      { system: "Lookalikes", reason: "none of its repos call each other in the route map" },
+      { system: "Lookalikes", reason: "none of its repos call each other in the link map" },
       { system: "Ghost", reason: "nope isn't an enrolled repo" },
       { system: "Again", reason: "orders-api is already in Shop" },
     ]);

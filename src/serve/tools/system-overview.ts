@@ -1,7 +1,7 @@
 import { firstSentence } from "../../core/sections.js";
 import type { SystemRecord } from "../../core/systems.js";
 import type { Caller } from "../access.js";
-import { neighbours, type Neighbour } from "../neighbours.js";
+import { linkSummary, neighbours, type Neighbour, type Neighbours } from "../neighbours.js";
 import { findSystem, quoted, visibleSystems } from "../systems.js";
 import { count, indexedAt, readableRepos, type ToolDeps, type ToolResult } from "./common.js";
 
@@ -84,8 +84,8 @@ async function render(deps: ToolDeps, { system, members, within, outgoing, incom
     const product = m.product ? clip(m.product, PRODUCT_WIDTH) : "(no product page yet)";
     out.push(`  ${m.repo.padEnd(width)}${product.padEnd(PRODUCT_WIDTH + 2)}${count(m.routes, "route")} · ${count(m.calls, "call")}`);
   }
-  out.push("How they connect", ...(within.length ? links(within, "endpoint") : ["  (none found)"]));
-  const outside = [...links(outgoing, "endpoint"), ...links(incoming, "call")];
+  out.push("How they connect", ...(within.length ? links(within, "calls") : ["  (none found)"]));
+  const outside = [...links(outgoing, "calls"), ...links(incoming, "calledBy")];
   out.push("Outside the system", ...(outside.length ? outside : ["  (none found)"]));
   out.push("");
   if (system.status === "suggested") {
@@ -94,21 +94,21 @@ async function render(deps: ToolDeps, { system, members, within, outgoing, incom
   } else {
     out.push(`Confirmed by a person${system.confirmedAt ? ` on ${system.confirmedAt.slice(0, 10)}` : ""}.`);
   }
-  out.push('Each repo line is the opening of its product page (read it with brain_get, page "product"); links come from verified routes and calls.');
+  out.push('Each repo line is the opening of its product page (read it with brain_get, page "product"); links come from verified routes, calls, events, gRPC and packages.');
   out.push(`Indexed: ${(await indexedAt(deps, members.map((m) => m.repo))).join("; ")}`);
   return out.join("\n");
 }
 
 /**
- * "react-web → aspnet-api, express-api   (22 endpoints each)", or a count per repo when they
- * differ. `noun` says what is counted: endpoints called, or calls made into the system.
+ * "react-web → aspnet-api, express-api   (22 endpoints each)", or the counts per repo when they
+ * differ. `side` says what is counted: what `from` uses of each, or its uses of each.
  */
-function links(rows: readonly SystemLink[], noun: string): string[] {
+function links(rows: readonly SystemLink[], side: keyof Neighbours): string[] {
   return rows.map(({ from, to }) => {
-    const same = to.every((n) => n.count === to[0]!.count);
-    const targets = same
-      ? `${to.map((n) => n.repo).join(", ")}   (${count(to[0]!.count, noun)}${to.length > 1 ? " each" : ""})`
-      : to.map((n) => `${n.repo} (${count(n.count, noun)})`).join(", ");
+    const summary = to.map((n) => linkSummary(n, side));
+    const targets = summary.every((s) => s === summary[0])
+      ? `${to.map((n) => n.repo).join(", ")}   (${summary[0]}${to.length > 1 ? " each" : ""})`
+      : to.map((n, i) => `${n.repo} (${summary[i]})`).join(", ");
     return `  ${from} → ${targets}`;
   });
 }

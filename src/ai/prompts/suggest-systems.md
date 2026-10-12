@@ -1,5 +1,5 @@
 You are grouping an organisation's code repositories into systems: the sets of repositories that together make up one product (for example a web front end and the APIs it calls), so a product owner can ask about a product rather than a repository.
-Read repos.md in this folder. For each repository it gives its remote, languages, how many routes it serves and calls it makes, which other repositories it calls and is called by (from a verified route map), its wiki pages and the opening of its product page.
+Read repos.md in this folder. For each repository it gives its remote, languages, how many routes it serves and calls it makes, which other repositories it calls and is called by (from verified routes, calls, events, gRPC and packages), its wiki pages and the opening of its product page.
 Propose systems. For each give:
 - name: the short name people use for the product, for example "RealWorld" or "eShop", with no brackets. Use a repository's name only when the product is that one repository.
 - summary: one sentence saying what the product is, for a product owner.

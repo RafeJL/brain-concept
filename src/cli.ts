@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { resolveDbPath } from "./config.js";
 import { runQueued } from "./core/queue.js";
 import { listTree, resolveCommit } from "./core/git.js";
+import { familyOf } from "./core/seams.js";
 import { BrainError, type RepoRecord } from "./core/types.js";
 import { doctor, execProgram, formatChecks } from "./doctor.js";
 import { hookStatus, installHook, removeHook, type HookCommand } from "./ingest/hooks.js";
@@ -34,8 +35,10 @@ Get started:
                                                            map its routes and calls, and keep it up to date
 
 Keep repos up to date:
-  brain sync [<name>] [--full] [--no-ai] [--model <m>]     bring repos up to their tracked branch (all if no name);
-                                                           --full redoes everything, --no-ai indexes only
+  brain sync [<name>] [--full] [--only links|wiki] [--no-ai] [--model <m>]
+                                                           bring repos up to their tracked branch (all if no name);
+                                                           --full redoes everything, --only links or --only wiki
+                                                           just that step, --no-ai indexes only
   brain hooks install|remove|status [<name>]               re-sync automatically whenever the tracked branch moves
   brain repo list                                          repos and how up to date each is
   brain repo add <path> [--name <name>] [--ref <branch>]   enrol only (no AI); then brain sync <name>
@@ -46,9 +49,11 @@ See what an agent gets:
   brain search "<query>" [--repo <name>]... [--detailed]   search every repo's wiki and endpoints
   brain card <name> [--detailed]                           what a repo is, its wiki, what it calls and what calls it
   brain page <name> [<page>]                               a wiki page, or the list of pages
-  brain consumers "<METHOD /path>" [--detailed]            who serves and who calls an endpoint
+  brain consumers "<METHOD /path>" [--detailed]            who serves and who calls an endpoint; also
+                                                           "event <name>", "grpc <Service/Method>", "package <name>"
   brain impact <repo> [--path <file>] [--route "<METHOD /path>"] [--detailed]
-                                                           routes a repo or file serves, and who calls each
+                                                           routes, events, gRPC methods and packages a repo or
+                                                           file provides, and who uses each
   brain impact --work "<description of work>"              which systems, repos and endpoints the work would touch
 
 Systems (which repos make up a product):
@@ -81,6 +86,7 @@ async function main(argv: string[]): Promise<void> {
       "no-ai": { type: "boolean", default: false },
       "no-hook": { type: "boolean", default: false },
       full: { type: "boolean", default: false },
+      only: { type: "string" },
       detailed: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
@@ -124,7 +130,7 @@ async function main(argv: string[]): Promise<void> {
         if (names.length === 0) throw new BrainError("No repos enrolled. Add one with: brain add <path>");
         for (const name of names) {
           if (values["no-ai"]) printSync(await syncRepo(store, name));
-          else await syncAndRefresh(store, name, { model: values.model, full: values.full });
+          else await syncAndRefresh(store, name, { model: values.model, full: values.full, only: onlyStep(values.only) });
         }
         break;
       }
@@ -189,12 +195,24 @@ async function main(argv: string[]): Promise<void> {
  * commit. One run per repo at a time: a hook firing mid-run is folded into one more pass when
  * this one finishes. A failed AI step is reported and the next one still runs.
  */
-async function syncAndRefresh(store: Store, name: string, options: { model?: string; full?: boolean }): Promise<void> {
+/** `--only links` maps routes, calls and other links without touching the wiki; `--only wiki` the reverse. */
+type Step = "links" | "wiki";
+
+function onlyStep(value: string | undefined): Step | undefined {
+  if (value === undefined || value === "links" || value === "wiki") return value;
+  throw new BrainError(`--only takes links or wiki, not "${value}".`);
+}
+
+async function syncAndRefresh(store: Store, name: string, options: { model?: string; full?: boolean; only?: Step }): Promise<void> {
   let full = options.full;
   const outcome = await runQueued(join(dirname(resolveDbPath()), "locks"), name, async () => {
     printSync(await syncRepo(store, name));
-    await reported(name, "routes and calls", async () => printSeams(await updateSeams(store, claudeRunner, name, { model: options.model, full })));
-    await reported(name, "wiki", async () => printWiki(await generateWiki(store, claudeRunner, name, { model: options.model, full })));
+    if (options.only !== "wiki") {
+      await reported(name, "routes and calls", async () => printSeams(await updateSeams(store, claudeRunner, name, { model: options.model, full })));
+    }
+    if (options.only !== "links") {
+      await reported(name, "wiki", async () => printWiki(await generateWiki(store, claudeRunner, name, { model: options.model, full })));
+    }
     full = false;
   });
   if (outcome === "queued") console.log(`${name}: already being synced; that run will go again to pick this up.`);
@@ -218,12 +236,16 @@ function printSeams(result: SeamsResult): void {
   const routes = result.kept.filter((s) => s.kind === "http-route").length;
   const calls = result.kept.filter((s) => s.kind === "http-call");
   const runtime = calls.filter((s) => s.key === null).length;
+  // Events, gRPC and packages by kind, e.g. ", event-publish 3, event-subscribe 5".
+  const byKind = new Map<string, number>();
+  for (const seam of result.kept.filter((s) => familyOf(s.kind) !== "http")) byKind.set(seam.kind, (byKind.get(seam.kind) ?? 0) + 1);
+  const links = [...byKind].map(([kind, n]) => `, ${kind} ${n}`).join("");
   const scope = result.mode === "full" ? "mapped" : `updated in ${result.redone.length} file${result.redone.length === 1 ? "" : "s"}`;
   const retried = result.retried ? `, ${result.retried} dropped and asked for again` : "";
   const dropped = result.dropped.length ? `, ${result.dropped.length} ${result.retried ? "still " : ""}dropped` : result.retried ? ", all recovered" : "";
   console.log(
     `${result.repo}: routes and calls ${scope} at ${at} · ${count(routes, "route")}, ${count(calls.length - runtime, "call")}` +
-      `${runtime ? ` (+${runtime} run-time)` : ""}${retried}${dropped} · $${result.costUsd.toFixed(2)} · ${Math.round(result.durationMs / 1000)}s`,
+      `${runtime ? ` (+${runtime} run-time)` : ""}${links}${retried}${dropped} · $${result.costUsd.toFixed(2)} · ${Math.round(result.durationMs / 1000)}s`,
   );
   for (const drop of result.dropped.slice(0, 3)) console.log(`    dropped: ${drop.reason} · ${drop.seam}`);
   if (result.dropped.length > 3) console.log(`    … and ${result.dropped.length - 3} more`);
@@ -331,7 +353,7 @@ async function addRepo(
 /** Rough first-sync cost and time from the repo's size, measured on the trial repos. */
 async function estimate(repo: RepoRecord): Promise<string> {
   const files = (await listTree(repo.path, await resolveCommit(repo.path, repo.ref))).length;
-  const [cost, time] = files <= 300 ? ["$0.50–2", "3–6 minutes"] : files <= 1000 ? ["$1–3", "5–10 minutes"] : ["$3–8", "10–20 minutes"];
+  const [cost, time] = files <= 300 ? ["$0.50–2", "3–6 minutes"] : files <= 1000 ? ["$1–3", "5–10 minutes"] : ["$4–10", "10–20 minutes"];
   return (
     `${repo.name} has ${files} files. Claude Code will now read it to map its routes and calls and write its wiki: ` +
     `roughly ${cost} of your Claude Code allowance and ${time}. Later updates cost cents.`

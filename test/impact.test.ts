@@ -55,7 +55,7 @@ describe("brain_impact", () => {
     const result = await impact(deps, LOCAL_CALLER, { repo: "shop-web", path: "./src/api.ts", format: "concise" });
 
     expect(result.text).toBe(
-      "No matching routes are declared in shop-web · src/api.ts. It makes 2 HTTP calls; use brain_find_consumers on one to see who serves it.",
+      "No matching routes, events, gRPC methods or packages are declared in shop-web · src/api.ts. It makes 2 HTTP calls; use brain_find_consumers on one to see who provides it.",
     );
   });
 

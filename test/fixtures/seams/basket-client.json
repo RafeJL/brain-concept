@@ -1,0 +1,5 @@
+{
+  "seams": [
+    { "kind": "grpc-call", "name": "Basket/GetBasket", "runtime": false, "cites": [{ "file": "basket_client.py", "start": 7, "end": 7 }, { "file": "basket_client.py", "start": 3, "end": 3 }] }
+  ]
+}

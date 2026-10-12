@@ -1,0 +1,5 @@
+{
+  "seams": [
+    { "kind": "package-publish", "name": "@citation/ui", "runtime": false, "cites": [{ "file": "package.json", "start": 2, "end": 2 }] }
+  ]
+}
