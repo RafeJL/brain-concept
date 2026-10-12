@@ -194,7 +194,7 @@ gets.
 | `repo set-ref <name> <ref>` | Tracks a different branch, e.g. `origin/release`. |
 | `repo remove <name>` | Removes a repo, everything held about it, and its hook. |
 | `search "<query>" [--repo n]... [--detailed]` | `brain_search`. |
-| `card <name> [--detailed]` | `brain_repo_card`. |
+| `card <name> [--detailed]` | `brain_repo_card`. Given a system's name, it shows that system's overview. |
 | `page <name> [<page>]` | `brain_get`: the page list, or one page (`product` for the product page). |
 | `consumers "<METHOD /path>" [--detailed]` | `brain_find_consumers`. Takes `:id` and `{id}` style paths, or full URLs. |
 | `impact <repo> [--path file] [--route "<METHOD /path>"]` | `brain_impact`. |

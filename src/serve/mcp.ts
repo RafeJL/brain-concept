@@ -5,7 +5,7 @@ import { firstSentence } from "../core/sections.js";
 import { visibleSystems } from "./systems.js";
 import { readableRepos, type ToolDeps, type ToolResult } from "./tools/common.js";
 import { findConsumers } from "./tools/find-consumers.js";
-import { repoCard } from "./tools/repo-card.js";
+import { cardRequest } from "./tools/repo-card.js";
 import { search } from "./tools/search.js";
 import { getRequest } from "./tools/get-page.js";
 import { impactRequest } from "./tools/work-impact.js";
@@ -98,14 +98,16 @@ export function createServer(deps: ServerDeps, instructions = INSTRUCTIONS): Mcp
         "Summarise one enrolled repository: whether it has a wiki (read it with brain_get: what the " +
         "repo is, how to build and test it, its API), which repos it calls and which call it, its " +
         "languages, and which commit the brain has indexed. Use it first for any question about a repo " +
-        "you don't know, before cloning or grepping. An unknown name returns the list of repos you can read.",
+        "you don't know, before cloning or grepping. A system's name (a product made of several repos, " +
+        "e.g. from the instructions' list) returns that system's overview instead. An unknown name " +
+        "returns the list of repos you can read.",
       inputSchema: {
-        repo: z.string().min(1).describe("Enrolled repo name, e.g. citation-harness-library."),
+        repo: z.string().min(1).describe("Enrolled repo or system name, e.g. citation-harness-library or RealWorld."),
         format: formatSchema,
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async ({ repo, format }) => answer(await repoCard(deps, deps.caller, repo, format)),
+    async ({ repo, format }) => answer(await cardRequest(deps, deps.caller, repo, format)),
   );
 
   server.registerTool(

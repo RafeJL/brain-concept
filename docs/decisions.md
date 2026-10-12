@@ -507,3 +507,12 @@ same, since they mean nothing to a model on their own.
 **What would change it:** re-tune the weights when every repo has a product page. Repos that make
 up one product but don't call each other over HTTP are left out of suggestions until B2b's
 event, gRPC and package links count too; a person can add them with `brain systems set`.
+
+## 2026-10-12: a card asked for a system's name answers with the system
+
+The second PO-style test ("What can users do in RealWorld, and what rules apply to profiles?")
+used the brain and answered at product level from three product pages, citing the rules that
+differ between implementations. Its one failed call was `brain_repo_card` with "realworld": the
+instructions tell agents to call the card with any name, and people name products as often as
+repos. `brain_repo_card` (and `brain card`) now answers a system's name with that system's
+overview, saying so first; a repo's name still gives its card.

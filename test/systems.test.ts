@@ -12,7 +12,7 @@ import { syncRepo } from "../src/ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy, type AccessPolicy } from "../src/serve/access.js";
 import { createServer } from "../src/serve/mcp.js";
 import { joinHint } from "../src/serve/systems.js";
-import { repoCard } from "../src/serve/tools/repo-card.js";
+import { cardRequest, repoCard } from "../src/serve/tools/repo-card.js";
 import { search } from "../src/serve/tools/search.js";
 import { getRequest } from "../src/serve/tools/get-page.js";
 import { systemOverview } from "../src/serve/tools/system-overview.js";
@@ -227,6 +227,18 @@ describe("systems as agents see them", () => {
     expect(confirmed.text).toContain('System: Conduit (with articles-web) · overview with brain_get (system "Conduit")');
     expect(hidden.text).toContain('System: Conduit · overview with brain_get (system "Conduit")');
     expect(hidden.text).not.toContain("articles-web");
+  });
+
+  it("answers a card for a system's name with its overview, and a repo's name with its card", async () => {
+    const { store, deps } = await world();
+    store.setSystem("Conduit", ["articles-api", "articles-web"]);
+
+    const system = await cardRequest(deps, LOCAL_CALLER, "conduit", "concise");
+    const repo = await cardRequest(deps, LOCAL_CALLER, "articles-api", "concise");
+
+    expect(system.text).toMatch(/^"conduit" is a system \(a product made of several repos\), not one repo\. Its overview:/);
+    expect(system.text).toContain("Conduit (confirmed) · 2 repos");
+    expect(repo.text).toContain("System: Conduit");
   });
 
   it("assembles an overview: summary, members' product lines, links within and outside", async () => {

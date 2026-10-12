@@ -3,10 +3,11 @@ import type { Freshness, LanguageShare } from "../../core/types.js";
 import type { Caller } from "../access.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
 import { neighbours, type Neighbour, type Neighbours } from "../neighbours.js";
-import { systemOf } from "../systems.js";
+import { findSystem, systemOf } from "../systems.js";
 import { firstSentence } from "../../core/sections.js";
 import type { SystemStatus } from "../../core/systems.js";
-import { count, requireSyncedRepo, TIER, wikiCommit, type Format, type ToolDeps, type ToolResult } from "./common.js";
+import { count, readableRepos, requireSyncedRepo, TIER, wikiCommit, type Format, type ToolDeps, type ToolResult } from "./common.js";
+import { systemOverview } from "./system-overview.js";
 
 export interface RepoCard {
   repo: string;
@@ -34,6 +35,23 @@ const CONCISE_LANGUAGES = 5;
  * its wiki is (which says what it is and how to build and test it). Backs `brain_repo_card` and
  * `brain card`.
  */
+/**
+ * `brain_repo_card` and `brain card`: a repo's card, or, when the name is a system's rather than a
+ * repo's ("RealWorld"), that system's overview. Agents are told to call the card with any name
+ * they're asked about, and people name products as often as repos.
+ */
+export async function cardRequest(deps: ToolDeps, caller: Caller, name: string, format: Format): Promise<ToolResult<unknown>> {
+  const readable = await readableRepos(deps, caller);
+  if (!readable.includes(name) && findSystem(deps.store, name, readable)) {
+    const overview = await systemOverview(deps, caller, name);
+    if (overview.ok) {
+      const note = `"${name}" is a system (a product made of several repos), not one repo. Its overview:`;
+      return { ...overview, text: `${note}\n\n${overview.text}\n\nRead a repo's card with brain_repo_card, or its product page with brain_get (page "product").` };
+    }
+  }
+  return repoCard(deps, caller, name, format);
+}
+
 export async function repoCard(deps: ToolDeps, caller: Caller, name: string, format: Format): Promise<ToolResult<RepoCard>> {
   const found = await requireSyncedRepo(deps, caller, name);
   if (!found.ok) return found;

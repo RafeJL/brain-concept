@@ -14,7 +14,7 @@ import { describeFreshness, freshnessOf } from "./serve/freshness.js";
 import { count, type Format, type ToolDeps, type ToolResult } from "./serve/tools/common.js";
 import { findConsumers } from "./serve/tools/find-consumers.js";
 import { getPage } from "./serve/tools/get-page.js";
-import { repoCard } from "./serve/tools/repo-card.js";
+import { cardRequest } from "./serve/tools/repo-card.js";
 import { search } from "./serve/tools/search.js";
 import { systemOverview } from "./serve/tools/system-overview.js";
 import { impactRequest } from "./serve/tools/work-impact.js";
@@ -155,7 +155,7 @@ async function main(argv: string[]): Promise<void> {
         break;
       case "card":
         if (!sub) throw new BrainError("Usage: brain card <name> [--detailed]");
-        print(await repoCard(tools, LOCAL_CALLER, sub, format));
+        print(await cardRequest(tools, LOCAL_CALLER, sub, format));
         break;
       case "consumers":
         if (!sub) throw new BrainError("Usage: brain consumers \"GET /api/orders/{id}\" [--detailed]");
