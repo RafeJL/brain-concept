@@ -243,9 +243,10 @@ function printSeams(result: SeamsResult): void {
   const scope = result.mode === "full" ? "mapped" : `updated in ${result.redone.length} file${result.redone.length === 1 ? "" : "s"}`;
   const retried = result.retried ? `, ${result.retried} dropped and asked for again` : "";
   const dropped = result.dropped.length ? `, ${result.dropped.length} ${result.retried ? "still " : ""}dropped` : result.retried ? ", all recovered" : "";
+  const swept = result.swept ? `, ${result.swept} more found on a second look` : "";
   console.log(
     `${result.repo}: routes and calls ${scope} at ${at} · ${count(routes, "route")}, ${count(calls.length - runtime, "call")}` +
-      `${runtime ? ` (+${runtime} run-time)` : ""}${links}${retried}${dropped} · $${result.costUsd.toFixed(2)} · ${Math.round(result.durationMs / 1000)}s`,
+      `${runtime ? ` (+${runtime} run-time)` : ""}${links}${swept}${retried}${dropped} · $${result.costUsd.toFixed(2)} · ${Math.round(result.durationMs / 1000)}s`,
   );
   for (const drop of result.dropped.slice(0, 3)) console.log(`    dropped: ${drop.reason} · ${drop.seam}`);
   if (result.dropped.length > 3) console.log(`    … and ${result.dropped.length - 3} more`);

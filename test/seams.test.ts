@@ -196,22 +196,22 @@ describe("mapping and updating a repo's routes and calls", () => {
     await enrolRepo(store, { path: makeRepo({ "CatalogService.cs": service }), name: "web" });
     await syncRepo(store, "web");
     const call = (...lines: number[]) => ({ kind: "call", method: "GET", path: "/api/catalog/items", runtime: false, cites: lines.map((l) => ({ file: "CatalogService.cs", start: l, end: l })) });
-    // The HTTP run and its retry; the run for other links, alongside, finds none.
+    // The HTTP run and its retry; the run for other links, alongside, finds none, and so does its second look.
     const prompts: string[] = [];
     const runner = {
       async run<T>(request: { prompt: string }) {
         prompts.push(request.prompt);
-        const answer = request.prompt.includes("mapped separately") ? [] : request.prompt.includes("An earlier pass") ? [call(7, 1)] : [call(7)];
+        const answer = request.prompt.includes("mapped separately") ? [] : request.prompt.includes("dropped them") ? [call(7, 1)] : [call(7)];
         return { output: { seams: answer } as T, costUsd: 0.05, durationMs: 1000, model: "claude-sonnet-5" };
       },
     };
 
     const result = await updateSeams(store, runner as never, "web");
 
-    expect(prompts).toHaveLength(3);
-    expect(prompts.find((p) => p.includes("An earlier pass"))).toContain('call GET /api/catalog/items (CatalogService.cs:7): "api" isn\'t in the cited lines');
+    expect(prompts).toHaveLength(4);
+    expect(prompts.find((p) => p.includes("dropped them"))).toContain('call GET /api/catalog/items (CatalogService.cs:7): "api" isn\'t in the cited lines');
     expect(result).toMatchObject({ retried: 1, dropped: [] });
-    expect(result.costUsd).toBeCloseTo(0.15);
+    expect(result.costUsd).toBeCloseTo(0.2);
     expect(store.seams({ repos: ["web"] }).map((s) => [s.key, s.startLine, s.cites])).toEqual([["/api/catalog/items", 7, [{ path: "CatalogService.cs", start: 1, end: 1 }]]]);
   });
 
@@ -226,7 +226,9 @@ describe("mapping and updating a repo's routes and calls", () => {
 
     await updateSeams(store, full.runner, "orders");
 
-    expect(full.requests.map((r) => r.prompt.includes("HTTP routes and calls are mapped separately"))).toEqual([false, true]);
+    // HTTP, links, then the links run's second look.
+    expect(full.requests.map((r) => r.prompt.includes("HTTP routes and calls are mapped separately"))).toEqual([false, true, true]);
+    expect(full.requests[2]!.prompt).toContain("- event-publish OrderStarted (Orders.cs)");
     expect(store.seams({ repos: ["orders"] }).map((s) => `${s.kind} ${s.key}`)).toEqual(["http-route /orders", "event-publish orderstarted"]);
 
     commit(dir, { "requirements.txt": "requests\n@citation/ui\n" });
@@ -234,8 +236,28 @@ describe("mapping and updating a repo's routes and calls", () => {
     const update = recordedRunner({ seams: [] });
     await updateSeams(store, update.runner, "orders");
 
+    // An update maps a few files, so it takes no second look.
     expect(update.requests).toHaveLength(1);
     expect(update.requests[0]!.prompt).toContain("HTTP routes and calls are mapped separately");
+  });
+
+  it("keeps what a full map's second look finds that the first links run missed", async () => {
+    const store = new SqliteStore(":memory:");
+    const files = { "Basket.cs": 'bus.Subscribe<OrderStarted>();\n', "WebApp.cs": 'bus.Subscribe<OrderPaid>();\n' };
+    await enrolRepo(store, { path: makeRepo(files), name: "shop" });
+    await syncRepo(store, "shop");
+    const handler = (name: string, file: string) => ({ kind: "event-subscribe", name, runtime: false, cites: [{ file, start: 1, end: 1 }] });
+    const runner = {
+      async run<T>(request: { prompt: string }) {
+        const answer = !request.prompt.includes("mapped separately") ? [] : request.prompt.includes("may have stopped") ? [handler("OrderPaid", "WebApp.cs"), handler("OrderStarted", "Basket.cs")] : [handler("OrderStarted", "Basket.cs")];
+        return { output: { seams: answer } as T, costUsd: 0.05, durationMs: 1000, model: "claude-sonnet-5" };
+      },
+    };
+
+    const result = await updateSeams(store, runner as never, "shop");
+
+    expect(result.swept).toBe(1);
+    expect(store.seams({ repos: ["shop"] }).map((s) => `${s.path} ${s.key}`)).toEqual(["Basket.cs orderstarted", "WebApp.cs orderpaid"]);
   });
 
   it("runs no AI when only Markdown changed", async () => {
