@@ -72,7 +72,7 @@ Two halves share only the store:
 
 1. A merge to main queues a job for that repo: commit a → b.
 2. `git diff a..b` gives the changed files.
-3. Claude Code maps routes and calls, and in a second run alongside it the other links (events,
+3. Claude Code maps routes and calls, and in a second run alongside it (with a second look on a full map) the other links (events,
    gRPC, packages), again in the changed files, and in files whose seams cite a changed file (a moved
    prefix). Each is verified against its cited lines before it replaces the
    old ones; Markdown and other files that can't declare an endpoint cost no run. Cross-repo

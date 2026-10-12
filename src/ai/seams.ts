@@ -52,6 +52,8 @@ interface Pass {
   kinds: ReadonlySet<string>;
   /** Whether a changed file could hold one of its kinds. */
   covers: (path: string) => boolean;
+  /** Whether a full map asks once more for what the first run missed. */
+  sweep: boolean;
 }
 
 /**
@@ -64,12 +66,16 @@ const PASSES: readonly Pass[] = [
     schema: schema({ kind: { type: "string", enum: ["route", "call"] }, method: { type: "string" }, path: { type: "string" } }),
     kinds: new Set(["route", "call"]),
     covers: (path) => detectLanguage(path) !== null,
+    sweep: false,
   },
   {
     prompt: "list-links",
     schema: schema({ kind: { type: "string", enum: [...NAMED_KINDS] }, name: { type: "string" } }),
     kinds: NAMED_KINDS,
     covers: () => true,
+    // On eshop the links run stopped early, skipping whole files: the web app's event handlers and
+    // the mobile app's gRPC calls were missed in two runs of three.
+    sweep: true,
   },
 ];
 
@@ -105,7 +111,10 @@ export interface SeamsResult {
   dropped: DroppedSeam[];
   /** How many the first pass dropped and were asked for again; 0 when none were. */
   retried: number;
+  /** How many a full map's second look found that the first run had missed. */
+  swept: number;
   costUsd: number;
+  /** Time taken, start to finish; the runs go side by side, so less than their sum. */
   durationMs: number;
 }
 
@@ -139,21 +148,21 @@ export async function updateSeams(store: Store, runner: Runner, name: string, op
     redo = [...files].sort();
     if (redo.length === 0) {
       store.replaceSeams(name, { commit: state.commit, paths: [], seams: [] });
-      return { repo: name, commit: state.commit, mode: "update", redone: [], kept: [], dropped: [], retried: 0, costUsd: 0, durationMs: 0 };
+      return { repo: name, commit: state.commit, mode: "update", redone: [], kept: [], dropped: [], retried: 0, swept: 0, costUsd: 0, durationMs: 0 };
     }
   }
 
+  const started = Date.now();
   let costUsd = 0;
-  let durationMs = 0;
   const list = async (cwd: string, pass: Pass, scope: string): Promise<unknown[]> => {
     const run = await runner.run<{ seams?: unknown }>({ cwd, prompt: prompt(pass.prompt, { scope }), schema: pass.schema, model: options.model ?? DEFAULT_MODEL });
     costUsd += run.costUsd;
-    durationMs += run.durationMs;
     if (!Array.isArray(run.output?.seams)) throw new BrainError("The AI's seam list was malformed. Nothing was stored.");
     return run.output.seams.filter((item) => pass.kinds.has((item as Partial<FoundSeam>)?.kind ?? ""));
   };
-  const map = async (cwd: string, pass: Pass): Promise<{ kept: Seam[]; dropped: DroppedSeam[]; retried: number }> => {
-    const first = verifySeams(await list(cwd, pass, scopeText(redo)), cwd, name, state.commit, redo);
+  type Mapped = { kept: Seam[]; dropped: DroppedSeam[]; retried: number };
+  const map = async (cwd: string, pass: Pass, scope: string): Promise<Mapped> => {
+    const first = verifySeams(await list(cwd, pass, scope), cwd, name, state.commit, redo);
     if (first.dropped.length === 0) return { ...first, retried: 0 };
     // Output varies between runs and a contributing line is easy to leave out; ask once more for
     // just the dropped entries, with the reasons, before giving up on them.
@@ -166,15 +175,27 @@ export async function updateSeams(store: Store, runner: Runner, name: string, op
     }
   };
 
-  const { kept, dropped, retried } = await withWorktree(repo.path, state.commit, async (cwd) => {
+  // A full map of a pass that sweeps then asks once more, with what was found, for anything missed.
+  // Its additions go through the same check. Updates cover only a few files, so they don't sweep.
+  const run = async (cwd: string, pass: Pass): Promise<Mapped & { swept: number }> => {
+    const found = await map(cwd, pass, scopeText(redo));
+    if (redo || !pass.sweep) return { ...found, swept: 0 };
+    try {
+      const more = await map(cwd, pass, sweepScope(found.kept));
+      const kept = uniqueSeams([...found.kept, ...more.kept]);
+      return { kept, dropped: [...found.dropped, ...more.dropped], retried: found.retried + more.retried, swept: kept.length - found.kept.length };
+    } catch (error) {
+      if (!(error instanceof BrainError)) throw error;
+      return { ...found, swept: 0 };
+    }
+  };
+
+  const { kept, dropped, retried, swept } = await withWorktree(repo.path, state.commit, async (cwd) => {
     // The runs are independent and only read the worktree, so they go side by side. An update
     // runs one only when a file it's redoing could hold that run's kinds.
-    const results = await Promise.all(PASSES.filter((pass) => !redo || redo.some(pass.covers)).map((pass) => map(cwd, pass)));
-    return {
-      kept: results.flatMap((r) => r.kept),
-      dropped: results.flatMap((r) => r.dropped),
-      retried: results.reduce((sum, r) => sum + r.retried, 0),
-    };
+    const results = await Promise.all(PASSES.filter((pass) => !redo || redo.some(pass.covers)).map((pass) => run(cwd, pass)));
+    const total = (key: "retried" | "swept") => results.reduce((sum, r) => sum + r[key], 0);
+    return { kept: results.flatMap((r) => r.kept), dropped: results.flatMap((r) => r.dropped), retried: total("retried"), swept: total("swept") };
   });
 
   store.replaceSeams(name, { commit: state.commit, paths: redo, seams: kept });
@@ -186,9 +207,18 @@ export async function updateSeams(store: Store, runner: Runner, name: string, op
     kept,
     dropped,
     retried,
+    swept,
     costUsd,
-    durationMs,
+    durationMs: Date.now() - started,
   };
+}
+
+function sweepScope(found: readonly Seam[]): string {
+  return [
+    "Cover the whole repository. An earlier pass found these, and may have stopped before it had looked everywhere:",
+    ...(found.length ? found.map((s) => `- ${s.kind} ${s.rawPath} (${s.path})`) : ["- (none)"]),
+    "Go through every service, app and project in turn (web, mobile and desktop front ends, APIs, workers, tests) and list only the ones it missed. An empty list is a fine answer.",
+  ].join("\n");
 }
 
 function retryScope(dropped: readonly DroppedSeam[], redo: readonly string[] | null): string {

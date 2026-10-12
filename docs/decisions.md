@@ -584,6 +584,17 @@ the check can catch: it proves what is kept is in the code, not that everything 
 Updates re-map only changed files, so a miss stays until those files change or `--full`. Worth
 watching on real repos (B6), where one missed caller matters.
 
+**The fix for that: a second look.** Rafe's next `--only links` run missed the web app's four
+order-status handlers, a Webhooks handler and the mobile app's gRPC calls again: the run stops
+before it has looked everywhere, skipping whole files. Now a full map of the links run asks once
+more, with the list of what was found, for anything missed in each service and app, and its
+additions go through the same check; updates map a few files and don't. The prompt also says to
+list each handler and each client's calls separately. Two gated full maps then found all 18
+handlers and all 6 gRPC calls, with the second look adding nothing either time: the prompt line
+may be what fixed it, and the second look stays as cover since the misses varied between runs.
+Each full map cost $4.41–4.65. The time sync prints is now start to finish (682s and 901s here);
+it had been the sum of the runs, which go side by side.
+
 **Gate of the single-run version** (a snapshot of the real store, `--full` seam re-maps only):
 
 | Repo | Found | Dropped | Cost |
