@@ -2,7 +2,8 @@ import { cleanPath } from "../core/citations.js";
 import { changedFiles, withWorktree } from "../core/git.js";
 import { normalisePath, PARAM } from "../core/http.js";
 import { detectLanguage } from "../core/languages.js";
-import type { Seam, SeamCite } from "../core/seams.js";
+import { normaliseName, withoutVersion, type NamedFamily } from "../core/links.js";
+import { familyOf, type Seam, type SeamCite, type SeamKind } from "../core/seams.js";
 import { BrainError } from "../core/types.js";
 import { requireRepo } from "../ingest/registry.js";
 import type { Store } from "../store/store.js";
@@ -14,47 +15,80 @@ import type { Runner } from "./runner.js";
 const METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "*"]);
 /** Files in these languages never declare a route or make a call, so changing one costs no run. */
 const NEVER_SEAMS = new Set(["Markdown", "CSS", "SCSS", "Less"]);
+/** Package manifests with no known language, which can still publish or use a package. */
+const MANIFESTS = new Set(["requirements.txt", "go.mod", "Gemfile", "Pipfile", "setup.cfg", "packages.config"]);
+/** Events, gRPC and packages: named, not a method and path. Their kinds are stored as given. */
+const NAMED_KINDS = new Set<string>(["event-publish", "event-subscribe", "grpc-serve", "grpc-call", "package-publish", "package-use"]);
+/** Kinds that declare something, so their name must be known; the rest may name it at run time. */
+const KNOWN_NAMES = new Set<string>(["route", "grpc-serve", "package-publish", "package-use"]);
 
-const SCHEMA = {
-  type: "object",
-  properties: {
-    seams: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          kind: { type: "string", enum: ["route", "call"] },
-          method: { type: "string" },
-          path: { type: "string" },
-          runtime: { type: "boolean" },
-          cites: {
-            type: "array",
-            minItems: 1,
-            items: {
-              type: "object",
-              properties: { file: { type: "string" }, start: { type: "integer" }, end: { type: "integer" } },
-              required: ["file", "start", "end"],
-            },
-          },
-        },
-        required: ["kind", "method", "path", "runtime", "cites"],
-      },
-    },
+const CITES = {
+  type: "array",
+  minItems: 1,
+  items: {
+    type: "object",
+    properties: { file: { type: "string" }, start: { type: "integer" }, end: { type: "integer" } },
+    required: ["file", "start", "end"],
   },
-  required: ["seams"],
 };
 
-/** One entry of the AI's answer, before verification. */
+function schema(fields: Record<string, unknown>): object {
+  return {
+    type: "object",
+    properties: {
+      seams: {
+        type: "array",
+        items: { type: "object", properties: { ...fields, runtime: { type: "boolean" }, cites: CITES }, required: [...Object.keys(fields), "runtime", "cites"] },
+      },
+    },
+    required: ["seams"],
+  };
+}
+
+/** One Claude Code run, with its prompt, schema and the kinds it may list. */
+interface Pass {
+  prompt: string;
+  schema: object;
+  kinds: ReadonlySet<string>;
+  /** Whether a changed file could hold one of its kinds. */
+  covers: (path: string) => boolean;
+}
+
+/**
+ * HTTP and the other links are mapped in separate runs. One run asked for both listed a quarter
+ * fewer routes and a third fewer calls on eShop, so HTTP keeps the prompt it was tuned on.
+ */
+const PASSES: readonly Pass[] = [
+  {
+    prompt: "list-seams",
+    schema: schema({ kind: { type: "string", enum: ["route", "call"] }, method: { type: "string" }, path: { type: "string" } }),
+    kinds: new Set(["route", "call"]),
+    covers: (path) => detectLanguage(path) !== null,
+  },
+  {
+    prompt: "list-links",
+    schema: schema({ kind: { type: "string", enum: [...NAMED_KINDS] }, name: { type: "string" } }),
+    kinds: NAMED_KINDS,
+    covers: () => true,
+  },
+];
+
+/**
+ * One entry of the AI's answer, before verification. A route or call has a method and path; the
+ * other kinds (an event published or subscribed to, a gRPC method served or called, a package
+ * published or used) have a name instead.
+ */
 export interface FoundSeam {
-  kind: "route" | "call";
-  method: string;
-  path: string;
+  kind: "route" | "call" | Exclude<SeamKind, "http-route" | "http-call">;
+  method?: string;
+  path?: string;
+  name?: string;
   runtime: boolean;
   cites: { file: string; start: number; end: number }[];
 }
 
 export interface DroppedSeam {
-  /** How the AI described it, e.g. "route GET /api/tags (src/tags.ts:3)". */
+  /** How the AI described it, e.g. "route GET /api/tags (src/tags.ts:3)" or "event-publish OrderStarted (src/a.cs:9)". */
   seam: string;
   reason: string;
 }
@@ -82,11 +116,12 @@ export interface SeamOptions {
 }
 
 /**
- * Has Claude Code list the HTTP routes a repo serves and the calls it makes, at the commit the
- * brain has indexed, verifies each against the lines it cites, and stores what passes. The first
- * run maps the whole repo. After that only files that changed are mapped again, plus any file
- * whose seams cite a changed file (a moved prefix or base URL), so a change costs little and a
- * Markdown-only change costs nothing.
+ * Has Claude Code list the HTTP routes a repo serves and the calls it makes, the events it
+ * publishes and handles, the gRPC methods it serves and calls, and the packages it publishes and
+ * uses, at the commit the brain has indexed, verifies each against the lines it cites, and
+ * stores what passes. The first run maps the whole repo. After that only files that changed are
+ * mapped again, plus any file whose seams cite a changed file (a moved prefix or base URL), so a
+ * change costs little and a Markdown-only change costs nothing.
  */
 export async function updateSeams(store: Store, runner: Runner, name: string, options: SeamOptions = {}): Promise<SeamsResult> {
   const repo = requireRepo(store, name);
@@ -110,26 +145,36 @@ export async function updateSeams(store: Store, runner: Runner, name: string, op
 
   let costUsd = 0;
   let durationMs = 0;
-  const list = async (cwd: string, scope: string): Promise<unknown[]> => {
-    const run = await runner.run<{ seams?: unknown }>({ cwd, prompt: prompt("list-seams", { scope }), schema: SCHEMA, model: options.model ?? DEFAULT_MODEL });
+  const list = async (cwd: string, pass: Pass, scope: string): Promise<unknown[]> => {
+    const run = await runner.run<{ seams?: unknown }>({ cwd, prompt: prompt(pass.prompt, { scope }), schema: pass.schema, model: options.model ?? DEFAULT_MODEL });
     costUsd += run.costUsd;
     durationMs += run.durationMs;
     if (!Array.isArray(run.output?.seams)) throw new BrainError("The AI's seam list was malformed. Nothing was stored.");
-    return run.output.seams;
+    return run.output.seams.filter((item) => pass.kinds.has((item as Partial<FoundSeam>)?.kind ?? ""));
   };
-
-  const { kept, dropped, retried } = await withWorktree(repo.path, state.commit, async (cwd) => {
-    const first = verifySeams(await list(cwd, scopeText(redo)), cwd, name, state.commit, redo);
+  const map = async (cwd: string, pass: Pass): Promise<{ kept: Seam[]; dropped: DroppedSeam[]; retried: number }> => {
+    const first = verifySeams(await list(cwd, pass, scopeText(redo)), cwd, name, state.commit, redo);
     if (first.dropped.length === 0) return { ...first, retried: 0 };
     // Output varies between runs and a contributing line is easy to leave out; ask once more for
     // just the dropped entries, with the reasons, before giving up on them.
     try {
-      const second = verifySeams(await list(cwd, retryScope(first.dropped, redo)), cwd, name, state.commit, redo);
+      const second = verifySeams(await list(cwd, pass, retryScope(first.dropped, redo)), cwd, name, state.commit, redo);
       return { kept: uniqueSeams([...first.kept, ...second.kept]), dropped: second.dropped, retried: first.dropped.length };
     } catch (error) {
       if (!(error instanceof BrainError)) throw error;
       return { ...first, retried: 0 };
     }
+  };
+
+  const { kept, dropped, retried } = await withWorktree(repo.path, state.commit, async (cwd) => {
+    // The runs are independent and only read the worktree, so they go side by side. An update
+    // runs one only when a file it's redoing could hold that run's kinds.
+    const results = await Promise.all(PASSES.filter((pass) => !redo || redo.some(pass.covers)).map((pass) => map(cwd, pass)));
+    return {
+      kept: results.flatMap((r) => r.kept),
+      dropped: results.flatMap((r) => r.dropped),
+      retried: results.reduce((sum, r) => sum + r.retried, 0),
+    };
   });
 
   store.replaceSeams(name, { commit: state.commit, paths: redo, seams: kept });
@@ -150,7 +195,7 @@ function retryScope(dropped: readonly DroppedSeam[], redo: readonly string[] | n
   return [
     "An earlier pass listed these, and the automatic check dropped them for the reasons given:",
     ...dropped.map((d) => `- ${d.seam}: ${d.reason}`),
-    "List again only the ones that are real, this time citing every line each fixed segment of the path comes from (such as a base-URL constant or a route prefix), and leave out any you can't support.",
+    "List again only the ones that are real, this time citing every line each fixed segment of the path, or each part of the name, comes from (such as a base-URL constant, a route prefix or the class a method belongs to), and leave out any you can't support.",
     ...(redo ? ["Only these files are being mapped:", ...redo.map((path) => `- ${path}`)] : []),
   ].join("\n");
 }
@@ -158,14 +203,14 @@ function retryScope(dropped: readonly DroppedSeam[], redo: readonly string[] | n
 function scopeText(redo: readonly string[] | null): string {
   if (!redo) return "Cover the whole repository.";
   return [
-    "Only list routes and calls declared in these files. Read any other file you need to resolve prefixes and base URLs:",
+    "Only list entries declared in these files. Read any other file you need to resolve prefixes, base URLs and names:",
     ...redo.map((path) => `- ${path}`),
   ].join("\n");
 }
 
 function mayDeclareSeams(path: string): boolean {
   const language = detectLanguage(path);
-  return language !== null && !NEVER_SEAMS.has(language);
+  return language === null ? MANIFESTS.has(path.split("/").at(-1)!) : !NEVER_SEAMS.has(language);
 }
 
 /**
@@ -190,22 +235,25 @@ export function verifySeams(
     }
     const entry = item as FoundSeam;
     const cites = entry.cites.map((c) => ({ path: cleanPath(c.file), start: c.start, end: c.end }));
-    if (entry.kind === "call" && !entry.runtime) moveCallSiteFirst(cites, entry.path, linesOf);
+    if (entry.kind === "call" && !entry.runtime) moveCallSiteFirst(cites, entry.path!, linesOf);
     const [declared, ...contributing] = cites;
     if (only && !only.includes(declared!.path)) continue;
-    const seam: Seam = {
-      repo,
-      path: declared!.path,
+    const place = { repo, path: declared!.path, startLine: declared!.start, endLine: declared!.end, cites: contributing, commit };
+    if (NAMED_KINDS.has(entry.kind)) {
+      // Named kinds fit the HTTP columns: the family stands in for the method, the name for the path.
+      const kind = entry.kind as SeamKind;
+      const family = familyOf(kind) as NamedFamily;
+      const rawPath = entry.name!.trim();
+      kept.push({ ...place, kind, method: family, rawPath, key: entry.runtime ? null : normaliseName(family, rawPath) });
+      continue;
+    }
+    kept.push({
+      ...place,
       kind: entry.kind === "route" ? "http-route" : "http-call",
-      method: entry.method.toUpperCase(),
-      rawPath: entry.path.trim(),
-      key: entry.runtime ? null : normalisePath(entry.path),
-      startLine: declared!.start,
-      endLine: declared!.end,
-      cites: contributing,
-      commit,
-    };
-    kept.push(seam);
+      method: entry.method!.toUpperCase(),
+      rawPath: entry.path!.trim(),
+      key: entry.runtime ? null : normalisePath(entry.path!),
+    });
   }
   return { kept: uniqueSeams(kept), dropped };
 }
@@ -219,23 +267,27 @@ function uniqueSeams(seams: readonly Seam[]): Seam[] {
  * Why an entry isn't supported by what it cites, or null. Its files and lines must exist; a
  * method other than GET (the default almost everywhere) must appear in the cited lines; and
  * every fixed segment of its path must too, which is how a prefix three files away is proven.
- * A run-time URL only needs its call site.
+ * A named entry (an event, gRPC method or package) needs its name, or each part of it, in the
+ * cited lines. A run-time URL or name only needs its call site.
  */
 function problemWith(item: unknown, linesOf: (path: string) => string[] | null): string | null {
   const entry = item as Partial<FoundSeam>;
+  const named = typeof entry?.kind === "string" && NAMED_KINDS.has(entry.kind);
   const shaped =
-    (entry?.kind === "route" || entry?.kind === "call") &&
-    typeof entry.method === "string" &&
-    typeof entry.path === "string" &&
-    entry.path.trim() !== "" &&
+    (entry?.kind === "route" || entry?.kind === "call" || named) &&
+    (named ? nonEmpty(entry.name) : typeof entry.method === "string" && nonEmpty(entry.path)) &&
     typeof entry.runtime === "boolean" &&
     Array.isArray(entry.cites) &&
     entry.cites.length > 0 &&
     entry.cites.every((c) => typeof c?.file === "string" && typeof c.start === "number" && typeof c.end === "number");
   if (!shaped) return "malformed entry";
-  const method = entry.method!.toUpperCase();
-  if (!METHODS.has(method)) return `unknown method "${entry.method}"`;
-  if (entry.runtime && entry.kind === "route") return "a route's path must be known";
+  const method = named ? "" : entry.method!.toUpperCase();
+  if (!named && !METHODS.has(method)) return `unknown method "${entry.method}"`;
+  if (entry.runtime && KNOWN_NAMES.has(entry.kind!)) return named ? `a ${entry.kind}'s name must be known` : "a route's path must be known";
+  const family = named ? (familyOf(entry.kind as SeamKind) as NamedFamily) : null;
+  if (family && !entry.runtime && !normaliseName(family, entry.name!)) {
+    return family === "grpc" ? `"${entry.name}" isn't a gRPC Service/Method` : `"${entry.name}" isn't a ${family} name`;
+  }
 
   const spans: string[] = [];
   for (const cite of entry.cites!) {
@@ -245,15 +297,23 @@ function problemWith(item: unknown, linesOf: (path: string) => string[] | null):
     spans.push(spanText(lines!, { path: cite.file, start: cite.start, end: cite.end }));
   }
   if (entry.runtime) return null;
+  const shown = (part: string) => spans.some((span) => span.includes(part.toLowerCase()) || loose(span).includes(loose(part)));
+  if (named) {
+    const name = family === "package" ? withoutVersion(entry.name!) : entry.name!.trim();
+    const missing = shown(name) ? undefined : name.split(/[/.:\s]+/).find((part) => part && !shown(part));
+    return missing === undefined ? null : `"${missing}" isn't in the cited lines`;
+  }
 
   if (method !== "GET" && method !== "*" && !methodShown(method, spans)) return `${method} isn't in the cited lines`;
   for (const segment of normalisePath(entry.path!).split("/")) {
     if (!segment || segment === PARAM) continue;
-    if (!spans.some((span) => span.includes(segment) || loose(span).includes(loose(segment)))) {
-      return `"${segment}" isn't in the cited lines`;
-    }
+    if (!shown(segment)) return `"${segment}" isn't in the cited lines`;
   }
   return null;
+}
+
+function nonEmpty(value: unknown): boolean {
+  return typeof value === "string" && value.trim() !== "";
 }
 
 /**
@@ -280,5 +340,6 @@ function moveCallSiteFirst(cites: SeamCite[], path: string, linesOf: (path: stri
 function describe(item: unknown): string {
   const entry = item as Partial<FoundSeam>;
   const at = Array.isArray(entry?.cites) && entry.cites[0] ? ` (${entry.cites[0].file}:${entry.cites[0].start})` : "";
+  if (typeof entry?.kind === "string" && NAMED_KINDS.has(entry.kind)) return `${entry.kind} ${entry.name ?? "?"}${at}`;
   return `${entry?.kind ?? "?"} ${entry?.method ?? "?"} ${entry?.path ?? "?"}${at}`;
 }

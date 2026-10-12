@@ -516,3 +516,86 @@ differ between implementations. Its one failed call was `brain_repo_card` with "
 instructions tell agents to call the card with any name, and people name products as often as
 repos. `brain_repo_card` (and `brain card`) now answers a system's name with that system's
 overview, saying so first; a repo's name still gives its card.
+
+## 2026-10-12: links beyond HTTP: events, gRPC and shared packages
+
+Repos meet over more than HTTP. Mapping a repo now also lists events published and handled
+(RabbitMQ, Kafka, Service Bus, SNS/SQS, an event bus between services), gRPC methods served and
+called, and packages published and depended on. They come from a second Claude Code run with its
+own prompt (`list-links.md`) and schema: each entry has a `name` and cites instead of a method and
+path. The HTTP run keeps the prompt it was tuned on (see below for why).
+
+- **Stored in the existing `seams` columns, with no migration.** The kinds are `event-publish` /
+  `event-subscribe`, `grpc-serve` / `grpc-call` and `package-publish` / `package-use`; `method`
+  holds the family (`event`, `grpc`, `package`), `raw_path` the name as written and `route_key`
+  its normalised form. The table is in `architecture.md` ("Seams").
+- **Verified like paths.** The cited lines must exist (80-line cap), and the name, or each part of
+  it (split at `/`, `.`, `:`), must appear in them. A package's version is ignored. A gRPC name
+  must be `Service/Method`. A name only known at run time is kept with no key, counted and
+  located, never guessed; served gRPC methods and packages must be named. Dropped entries get the
+  existing second pass with their reasons.
+- **Matched exactly on the normalised name:** case-insensitive; a gRPC method without its proto
+  package (clients rarely spell it); a package without its version. No suffix matching: a name has
+  no base path to differ by. When nothing matches, `brain_find_consumers` lists known names
+  containing the one asked for, so `event OrderStarted` points at `OrderStartedIntegrationEvent`.
+- **The HTTP rules carry over.** A repo handling its own event (or calling its own gRPC service)
+  links only within itself, marked `same repo`.
+- **Tools:** `brain_find_consumers` takes `event <name>` (or topic, queue, message), `grpc
+  <Service/Method>` and `package <name>`; `brain_impact` lists everything a repo or file provides
+  with its users, and its `route` filter takes the same forms; cards count every kind on the
+  Seams line and in Calls / Called by; search indexes the names.
+- **Systems count these links too.** A system's overview, the facts `systems suggest` reads, and
+  the check that each member links to another all use every kind, so repos that only share
+  events or a package can make up a system.
+- **Packages:** only packages the organisation may publish are listed (scoped or company-named,
+  private feeds, git references), not well-known public ones, so cards don't fill with `react`.
+  References between projects in one repo by path aren't packages.
+- **Shared databases are left out.** Table names like `users` repeat across unrelated databases,
+  so links would be wrong more often than right. A repo's own database can appear on its
+  technical pages without linking repos. Revisit if a real repo shows a clear, identifiable
+  shared database.
+
+**Why two runs.** The first version asked for everything in one run. On eshop it listed far
+fewer HTTP seams (53 routes and 22 calls, against 82 and 77 stored): no Identity MVC actions,
+health checks or functional-test calls. Telling it to be as thorough with routes and calls as if
+they were all it was asked for brought that to 63 and 51, still a quarter and a third short. So
+HTTP has its run back, unchanged, and the other links have their own. It costs a second run on a
+full map (about $3.50 on eshop, cents on a small repo). The two runs only read the worktree and
+don't depend on each other, so they run side by side: a full map takes about as long as the
+longer of the two, not both. Updates stay incremental: each run maps only the files being redone,
+and the HTTP run is skipped when those are all manifests such as `requirements.txt`.
+
+`brain sync <name> --only links` (or `--only wiki`) redoes one step. Checking a change to link
+mapping with `--full` had also rewritten eshop's whole wiki ($2.88), which wasn't wanted.
+
+**Gate of the two-run version** (eshop, a snapshot of the real store, `--full` seam re-map):
+84 routes and 56 calls (+2 run-time), against the stored map's 97 distinct HTTP seams: 89 match,
+3 are new, and 8 are missing (the two OpenAPI documents, and six calls whose URL is a variable
+such as `subs.DestUrl`). The other kinds came out the same as the single run: 13 events published,
+18 handled, 3 gRPC served, 6 called. 3 entries were retried and none were dropped. It cost $5.91,
+against $2.44 for the single run, so a full eshop map costs about $3.50 more. Small repos and
+updates cost cents.
+
+**Rafe's sync of the same commit** (`--full`, before the runs went side by side): 76 routes and
+105 call sites (48 distinct endpoints; the functional tests call the same ones many times), the
+same 31 events and 3 gRPC methods served, in 813s and $5.36. It found only the web app's 3 gRPC
+calls, not the mobile app's (`src/ClientApp`) as well. That is run-to-run recall, not something
+the check can catch: it proves what is kept is in the code, not that everything was listed.
+Updates re-map only changed files, so a miss stays until those files change or `--full`. Worth
+watching on real repos (B6), where one missed caller matters.
+
+**Gate of the single-run version** (a snapshot of the real store, `--full` seam re-maps only):
+
+| Repo | Found | Dropped | Cost |
+|---|---|---|---|
+| eshop | 13 events published, 18 handled; gRPC 3 served (`Basket/GetBasket`, `UpdateBasket`, `DeleteBasket`), 6 called (WebApp, ClientApp); 63 routes, 51 calls | 15 on the first pass, all recovered on the second | $2.44 (first run $2.09) |
+| react-web | 22 calls, no other kinds | 0 | $0.27, then $0.10 |
+| aspnet-api | 19 routes, 1 call, no other kinds | 0 | $0.64 |
+
+- `consumers "event OrderStartedIntegrationEvent"`: published by Ordering.API's
+  `CreateOrderCommandHandler.cs:32-33`, handled by Basket.API (`Extensions.cs:19`), `same repo`.
+  `OrderStatusChangedToPaidIntegrationEvent` has three handlers (Catalog, WebApp, Webhooks).
+- No false links among the RealWorld repos: their cards are unchanged, and none gained a package
+  or event.
+- A citation can be up to three lines off, as for wiki claims: in the first run one Webhooks subscription was
+  located on the line above its own.

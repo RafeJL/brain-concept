@@ -1,8 +1,9 @@
-import type { SeamCoverage } from "../../core/seams.js";
+import type { NamedFamily } from "../../core/links.js";
+import { FAMILIES, type SeamCoverage } from "../../core/seams.js";
 import type { Freshness, LanguageShare } from "../../core/types.js";
 import type { Caller } from "../access.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
-import { neighbours, type Neighbour, type Neighbours } from "../neighbours.js";
+import { linkSummary, neighbours, type Neighbour, type Neighbours } from "../neighbours.js";
 import { findSystem, systemOf } from "../systems.js";
 import { firstSentence } from "../../core/sections.js";
 import type { SystemStatus } from "../../core/systems.js";
@@ -144,22 +145,47 @@ function wikiLine({ repo, wiki, freshness }: RepoCard): string {
 
 function seamsLine({ repo, seams, freshness }: RepoCard): string {
   if (!seams.commit) return `Seams: not mapped yet (brain sync ${repo})`;
-  const { routes, calls, unresolvedCalls } = seams;
+  const { routes, calls, unresolvedCalls, links } = seams;
   const found =
-    routes + calls + unresolvedCalls === 0
+    routes + calls + unresolvedCalls + links.length === 0
       ? "none found"
-      : `${count(routes, "route")}, ${count(calls, "call")}${unresolvedCalls ? ` (+${unresolvedCalls} with run-time URLs)` : ""}`;
+      : [
+          ...(routes + calls + unresolvedCalls || !links.length
+            ? [`${count(routes, "route")}, ${count(calls, "call")}${unresolvedCalls ? ` (+${unresolvedCalls} with run-time URLs)` : ""}`]
+            : []),
+          ...linkCounts(links),
+        ].join("; ");
   const older = seams.commit === freshness.commit ? "" : ` · mapped at @${seams.commit.slice(0, 7)}, older than the index`;
   return `Seams: ${found} · ${TIER}${older}`;
 }
 
+const LINK_WORDS: Record<NamedFamily, { label: string; provides: string; uses: string }> = {
+  event: { label: "events", provides: "published", uses: "handled" },
+  grpc: { label: "gRPC", provides: "served", uses: "called" },
+  package: { label: "packages", provides: "published", uses: "used" },
+};
+
+/** "events: 3 published, 5 handled (+1 run-time)", one per family found. */
+function linkCounts(links: SeamCoverage["links"]): string[] {
+  return (Object.keys(LINK_WORDS) as NamedFamily[]).flatMap((family) => {
+    const sides = (["provides", "uses"] as const).flatMap((side) => {
+      const found = links.find((l) => l.kind === FAMILIES[family][side]);
+      if (!found) return [];
+      return [`${found.count - found.runtime} ${LINK_WORDS[family][side]}${found.runtime ? ` (+${found.runtime} run-time)` : ""}`];
+    });
+    return sides.length ? [`${LINK_WORDS[family].label}: ${sides.join(", ")}`] : [];
+  });
+}
+
 function neighbourLines({ calls, calledBy }: Neighbours): string[] {
   if (calls.length + calledBy.length === 0) return ["Neighbours: none found among enrolled repos"];
-  const list = (items: Neighbour[], noun: string) =>
-    items.map((n) => `${n.repo} (${count(n.count, noun)}${n.suffix ? ", suffix" : ""})`).join(" · ");
+  const list = (items: Neighbour[], side: "calls" | "calledBy") =>
+    items
+      .map((n) => `${n.repo} (${linkSummary(n, side)}${n.suffix ? ", suffix" : ""})`)
+      .join(" · ");
   return [
-    ...(calls.length ? [`Calls: ${list(calls, "endpoint")}`] : []),
-    ...(calledBy.length ? [`Called by: ${list(calledBy, "call")}`] : []),
+    ...(calls.length ? [`Calls: ${list(calls, "calls")}`] : []),
+    ...(calledBy.length ? [`Called by: ${list(calledBy, "calledBy")}`] : []),
   ];
 }
 
@@ -167,7 +193,7 @@ function notes(card: RepoCard): string[] {
   const lines: string[] = [];
   const { calls, calledBy } = card.neighbours;
   if ([...calls, ...calledBy].some((n) => n.suffix)) lines.push("suffix = matched ignoring a base path such as /api.");
-  if (calls.length + calledBy.length > 0) lines.push("brain_impact and brain_find_consumers give the endpoints and file:line pointers.");
+  if (calls.length + calledBy.length > 0) lines.push("brain_impact and brain_find_consumers give the endpoints, events and packages, with file:line pointers.");
   return lines.length ? ["", ...lines] : [];
 }
 

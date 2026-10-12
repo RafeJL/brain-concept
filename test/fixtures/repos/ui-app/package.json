@@ -1,0 +1,8 @@
+{
+  "name": "ui-app",
+  "private": true,
+  "dependencies": {
+    "@citation/ui": "^2.0.0",
+    "react": "^19.0.0"
+  }
+}

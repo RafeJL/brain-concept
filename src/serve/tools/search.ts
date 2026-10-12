@@ -1,4 +1,4 @@
-import type { Seam } from "../../core/seams.js";
+import { KIND_LABEL, type Seam } from "../../core/seams.js";
 import type { SystemRecord } from "../../core/systems.js";
 import type { SectionHit } from "../../store/store.js";
 import type { Caller } from "../access.js";
@@ -128,7 +128,7 @@ async function render(deps: ToolDeps, answer: SearchAnswer, scope: string[], for
     if (sections.length) lines.push("");
     lines.push("Endpoints:");
     for (const seam of shown) {
-      const role = seam.kind === "http-route" ? "route" : "call";
+      const role = KIND_LABEL[seam.kind];
       lines.push(`  ${seam.method} ${seam.rawPath} · ${pointer(seam)} (${role})${format === "detailed" ? builtFrom(seam) : ""}`);
     }
     if (endpoints.length > shown.length) lines.push(`  +${endpoints.length - shown.length} more.`);

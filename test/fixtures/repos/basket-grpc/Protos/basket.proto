@@ -1,0 +1,7 @@
+syntax = "proto3";
+package BasketApi;
+
+service Basket {
+  rpc GetBasket (GetBasketRequest) returns (CustomerBasketResponse);
+  rpc DeleteBasket (DeleteBasketRequest) returns (DeleteBasketResponse);
+}

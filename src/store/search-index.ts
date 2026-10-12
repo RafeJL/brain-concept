@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { searchWords, splitSections } from "../core/sections.js";
+import { KIND_LABEL, type SeamKind } from "../core/seams.js";
 
 /**
  * The search index: one FTS5 row per wiki section and per seam. A section's row id is twice its
@@ -50,13 +51,16 @@ export function indexPage(db: DatabaseSync, repo: string, slug: string, title: s
   });
 }
 
-/** Indexes a stored seam: `GET /api/orders/{id}` as its title, its kind as heading, its file as path. */
+/**
+ * Indexes a stored seam: `GET /api/orders/{id}` (or `event OrderStarted`) as its title, its kind
+ * as heading, its file as path.
+ */
 export function indexSeam(db: DatabaseSync, id: number, seam: { repo: string; path: string; kind: string; method: string; rawPath: string }): void {
   db.prepare("INSERT INTO search (rowid, repo, title, heading, body, paths) VALUES (?, ?, ?, ?, '', ?)").run(
     id * 2 + 1,
     seam.repo,
     searchWords(`${seam.method} ${seam.rawPath}`),
-    seam.kind === "http-route" ? "route" : "call",
+    KIND_LABEL[seam.kind as SeamKind] ?? seam.kind,
     searchWords(seam.path),
   );
 }

@@ -4,8 +4,7 @@ import { join } from "node:path";
 import { withoutCitations } from "../core/citations.js";
 import type { SystemRecord } from "../core/systems.js";
 import { BrainError } from "../core/types.js";
-import { neighbours } from "../serve/neighbours.js";
-import { count } from "../serve/tools/common.js";
+import { linkSummary, neighbours } from "../serve/neighbours.js";
 import type { Store } from "../store/store.js";
 import { DEFAULT_MODEL, PRODUCT } from "./generate.js";
 import { prompt } from "./prompts.js";
@@ -117,8 +116,8 @@ export function contextFile(store: Store, repos: readonly string[], all: readonl
       `Remote: ${repo.remote ?? "none"}`,
       `Languages: ${languages || "unknown"}`,
       `Routes served: ${coverage.routes} · calls made: ${coverage.calls}`,
-      `Calls: ${calls.map((n) => `${n.repo} (${count(n.count, "endpoint")})`).join(", ") || "none found"}`,
-      `Called by: ${calledBy.map((n) => `${n.repo} (${count(n.count, "call")})`).join(", ") || "none found"}`,
+      `Calls: ${calls.map((n) => `${n.repo} (${linkSummary(n, "calls")})`).join(", ") || "none found"}`,
+      `Called by: ${calledBy.map((n) => `${n.repo} (${linkSummary(n, "calledBy")})`).join(", ") || "none found"}`,
       `Wiki pages: ${pages.map((p) => p.slug).join(", ") || "none yet"}`,
       product ? `Opening of its ${product.slug} page: ${opening}` : "No product page yet.",
     ].join("\n");
@@ -135,7 +134,7 @@ function confirmedNote(systems: readonly SystemRecord[]): string {
 /**
  * Keeps the suggestions the facts support: every repo is enrolled and not already confirmed
  * elsewhere, no repo is in two systems, and names don't clash. In a system of several repos, each
- * must call or be called by another member in the route map; one that isn't is left out (looking
+ * must call or be called by another member in the link map; one that isn't is left out (looking
  * alike proves nothing), and a system left with fewer than two is dropped. A system of one needs
  * no link: the repo is a product on its own.
  */
@@ -186,11 +185,11 @@ export function verifySystems(
     if (repos.length > 1) {
       const linked = repos.filter((repo) => linksTo(store, repo, repos, all));
       if (linked.length < 2) {
-        drop("none of its repos call each other in the route map");
+        drop("none of its repos call each other in the link map");
         continue;
       }
       for (const repo of repos.filter((r) => !linked.includes(r))) {
-        leftOut.push({ system: label, reason: `${repo} doesn't call or get called by any other repo in it, in the route map` });
+        leftOut.push({ system: label, reason: `${repo} doesn't call or get called by any other repo in it, in the link map` });
       }
       repos = linked;
     }
@@ -201,7 +200,7 @@ export function verifySystems(
   return { kept, dropped, leftOut };
 }
 
-/** Whether `repo` calls, or is called by, another of `members` in the route map. */
+/** Whether `repo` calls, or is called by, another of `members` in the link map. */
 function linksTo(store: Store, repo: string, members: readonly string[], all: readonly string[]): boolean {
   const { calls, calledBy } = neighbours(store, repo, all);
   return [...calls, ...calledBy].some((n) => n.repo !== repo && members.includes(n.repo));

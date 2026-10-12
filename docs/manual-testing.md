@@ -335,9 +335,11 @@ npm run brain -- sync
 npm run brain -- hooks install
 ```
 
-The first `sync` maps routes and calls and writes a wiki for every repo: about 30–40 minutes and
-$10–15 in all, most of it eshop (about $3.70 and 11 minutes for its routes alone). Read any
-`dropped:` and `removed:` lines it prints.
+The first `sync` maps each repo's links (routes and calls in one run, events, gRPC and packages
+in another alongside it) and writes its wiki: about 30–40 minutes and $15–20 in all, most of it
+eshop (about $5–6 and 5–14 minutes for its links alone). Read any `dropped:` and `removed:` lines
+it prints. To re-check link mapping later without rewriting wikis, use
+`npm run brain -- sync <name> --full --only links`.
 
 | Command | Expect |
 |---|---|
@@ -347,13 +349,19 @@ $10–15 in all, most of it eshop (about $3.70 and 11 minutes for its routes alo
 | `card react-web` | `0 routes, 22 calls`; `Calls: aspnet-api (19 endpoints) · express-api (19 endpoints) · flask-api (19 endpoints) · laravel-api (19 endpoints)`: one front end, four backends in four languages |
 | `card laravel-api` | `22 routes, 78 calls` (its tests call its own API); `Called by: react-web (22 calls)` and **not** the other backends, whose tests call the same paths but serve them too |
 | `card express-api` | `Called by: react-web` and **not** eshop. Both serve or call `/`, which says nothing about which service is meant |
-| `card eshop` | `Seams: 77 routes, 57 calls (+2 with run-time URLs)`: the APIs, health checks, Identity's MVC routes and Blazor pages, and the clients calling them |
+| `card eshop` | `Seams:` about 75–85 routes and 55–105 calls (the call count is call sites, and varies with how many test calls a run lists): the APIs, health checks, Identity's MVC routes and Blazor pages, and the clients calling them |
 | `card citation-harness-library` | Its seams (likely none: it serves no HTTP) and its wiki |
 | `consumers "GET /api/articles/:slug"` | Four servers (C#, TypeScript, Python, PHP) at their declaring lines, `react-web · src/agent.js:61-62` as the caller, then Laravel's own tests marked `same repo` |
 | `consumers "GET /api/profiles/:username" --detailed` | `path built with …` on each: aspnet's `Program.cs` prefix convention, Express's `routes.ts` mount, Laravel's `RouteServiceProvider` group |
 | `consumers "DELETE /api/profiles/{username}/follow"` | A method filter: four servers; react-web's call (written `requests.del(…)`) among the callers |
 | `impact aspnet-api --path src/Conduit/Features/Articles/ArticlesController.cs` | 6 routes and 9 callers, all in `react-web · src/agent.js` |
 | `impact eshop --route "GET /api/catalog/items/{id}"` | The minimal API route in `CatalogApi.cs`, with the three client `CatalogService.cs` files and the functional tests as `same repo` callers |
+| `consumers "event OrderStartedIntegrationEvent"` | Published by `src/Ordering.API/Application/Commands/CreateOrderCommandHandler.cs`; handled by Basket.API's subscription in `src/Basket.API/Extensions/Extensions.cs`, marked `same repo` (eShop is one repo with many services) |
+| `consumers "event OrderStarted"` | No match (names match exactly), and a line naming `OrderStartedIntegrationEvent` as a known event |
+| `consumers "grpc Basket/GetBasket"` | Served in `src/Basket.API/Proto/basket.proto` (or `Grpc/BasketService.cs`), called from `src/WebApp/Services/BasketService.cs` and usually `src/ClientApp/Services/Basket/BasketService.cs` (a run can miss the second), `same repo` |
+| `impact eshop --path src/Ordering.API/Application/Commands/CreateOrderCommandHandler.cs` | `1 event published` with Basket.API's handler as a `same repo` caller |
+| `card eshop` | The seams line also counts `events: … published, … handled` and `gRPC: … served, … called` |
+| `card react-web`, `card aspnet-api` | No events, gRPC or packages, and no new neighbours: the RealWorld repos only meet over HTTP |
 | `search "how do I run the tests"` | `build-run-test` sections from several repos at the top, e.g. the harness's `Test` and eshop's `End-to-end tests (Playwright)` |
 | `search "where are orders cancelled"` | eshop's Ordering sections first, and `PUT /api/orders/cancel` as a route in `src/Ordering.API/Apis/OrdersApi.cs` |
 | `search "kafka"` | `No wiki sections or endpoints match "kafka" in 7 repos.` |
@@ -380,6 +388,7 @@ changes to the server's instructions. Ask in plain words, without naming tools:
 | *What talks to express-api?* | call `brain_repo_card` and name react-web |
 | *If I change GET /articles/:slug in express-api, what else breaks?* | call `brain_find_consumers` or `brain_impact` and point at `react-web · src/agent.js` |
 | *What would break if I removed the DELETE endpoint in aspnet-api's ArticlesController?* | call `brain_impact` |
+| *Who handles OrderStartedIntegrationEvent in eshop, and what happens if I rename it?* | call `brain_find_consumers` with `event OrderStartedIntegrationEvent` and name the Basket.API handler |
 | *Where do we validate JWTs?* (no repo named) | call `brain_search`, then `brain_get` on the best section's page |
 | *What can users do in RealWorld, and what rules apply to profiles?* | call `brain_get` with `system` and the `product` pages, and answer without reading code or technical pages |
 | *Which repos would "add discount codes to the basket" touch?* | call `brain_impact` with `work` and name eshop's Basket |

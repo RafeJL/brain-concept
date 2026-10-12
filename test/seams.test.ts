@@ -160,7 +160,7 @@ describe("mapping and updating a repo's routes and calls", () => {
     const result = await updateSeams(store, update.runner, "api");
 
     expect(result).toMatchObject({ mode: "update", redone: ["src/articles.ts", "src/tags.ts"] });
-    expect(update.requests[0]!.prompt).toContain("Only list routes and calls declared in these files");
+    expect(update.requests[0]!.prompt).toContain("Only list entries declared in these files");
     expect(update.requests[0]!.prompt).toContain("- src/tags.ts");
     expect(store.seams({ repos: ["api"] }).map((s) => `${s.method} ${s.key}`)).toEqual(["PUT /articles/{}", "GET /tags"]);
 
@@ -196,21 +196,46 @@ describe("mapping and updating a repo's routes and calls", () => {
     await enrolRepo(store, { path: makeRepo({ "CatalogService.cs": service }), name: "web" });
     await syncRepo(store, "web");
     const call = (...lines: number[]) => ({ kind: "call", method: "GET", path: "/api/catalog/items", runtime: false, cites: lines.map((l) => ({ file: "CatalogService.cs", start: l, end: l })) });
-    const answers = [{ seams: [call(7)] }, { seams: [call(7, 1)] }];
+    // The HTTP run and its retry; the run for other links, alongside, finds none.
     const prompts: string[] = [];
     const runner = {
       async run<T>(request: { prompt: string }) {
         prompts.push(request.prompt);
-        return { output: answers[prompts.length - 1] as T, costUsd: 0.05, durationMs: 1000, model: "claude-sonnet-5" };
+        const answer = request.prompt.includes("mapped separately") ? [] : request.prompt.includes("An earlier pass") ? [call(7, 1)] : [call(7)];
+        return { output: { seams: answer } as T, costUsd: 0.05, durationMs: 1000, model: "claude-sonnet-5" };
       },
     };
 
     const result = await updateSeams(store, runner as never, "web");
 
-    expect(prompts).toHaveLength(2);
-    expect(prompts[1]).toContain('call GET /api/catalog/items (CatalogService.cs:7): "api" isn\'t in the cited lines');
-    expect(result).toMatchObject({ retried: 1, dropped: [], costUsd: 0.1 });
+    expect(prompts).toHaveLength(3);
+    expect(prompts.find((p) => p.includes("An earlier pass"))).toContain('call GET /api/catalog/items (CatalogService.cs:7): "api" isn\'t in the cited lines');
+    expect(result).toMatchObject({ retried: 1, dropped: [] });
+    expect(result.costUsd).toBeCloseTo(0.15);
     expect(store.seams({ repos: ["web"] }).map((s) => [s.key, s.startLine, s.cites])).toEqual([["/api/catalog/items", 7, [{ path: "CatalogService.cs", start: 1, end: 1 }]]]);
+  });
+
+  it("maps HTTP and other links in separate runs, and skips the HTTP run when only a manifest changed", async () => {
+    const store = new SqliteStore(":memory:");
+    const dir = makeRepo({ "Orders.cs": '[HttpGet("orders")]\nbus.Publish("OrderStarted");\n', "requirements.txt": "requests\n" });
+    await enrolRepo(store, { path: dir, name: "orders" });
+    await syncRepo(store, "orders");
+    const event = { kind: "event-publish", name: "OrderStarted", runtime: false, cites: [{ file: "Orders.cs", start: 2, end: 2 }] };
+    // Both runs give the same answer; each keeps only its own kinds, so nothing is stored twice.
+    const full = recordedRunner({ seams: [route("GET", "/orders", ["Orders.cs", 1, 1]), event] });
+
+    await updateSeams(store, full.runner, "orders");
+
+    expect(full.requests.map((r) => r.prompt.includes("HTTP routes and calls are mapped separately"))).toEqual([false, true]);
+    expect(store.seams({ repos: ["orders"] }).map((s) => `${s.kind} ${s.key}`)).toEqual(["http-route /orders", "event-publish orderstarted"]);
+
+    commit(dir, { "requirements.txt": "requests\n@citation/ui\n" });
+    await syncRepo(store, "orders");
+    const update = recordedRunner({ seams: [] });
+    await updateSeams(store, update.runner, "orders");
+
+    expect(update.requests).toHaveLength(1);
+    expect(update.requests[0]!.prompt).toContain("HTTP routes and calls are mapped separately");
   });
 
   it("runs no AI when only Markdown changed", async () => {

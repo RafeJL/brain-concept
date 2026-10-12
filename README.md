@@ -3,8 +3,9 @@
 **Add a repo, get a wiki.** The brain gives coding agents (Claude Code, through MCP) context about
 every repository you add. Claude Code reads each repo, in any language, and writes wiki pages
 in which every sentence cites the lines it is based on. It also maps the HTTP routes each repo
-serves and calls, so an agent can see which repos depend on each other. A product page in each
-wiki, and systems that group the repos making up one product, let a product owner's agent answer
+serves and calls, the events it publishes and handles, its gRPC services and its shared
+packages, so an agent can see which repos depend on each other. A product page in each wiki,
+and systems that group the repos making up one product, let a product owner's agent answer
 "what does it do, who uses it, what are the rules, and what would this work touch?" without
 reading code. Everything is checked against the code before an agent sees it.
 
@@ -53,7 +54,7 @@ Here is what that does:
 2. It has Claude Code map the repo's routes and calls and write about five wiki pages: overview,
    build and test, API, its most important module, and a product page (what it does for its
    users, written for a product owner). Before starting, it prints a rough cost:
-   about $0.50–2 for a small repo, up to about $3–8 for a large one, from your Claude Code
+   about $0.50–2 for a small repo, up to about $4–10 for a large one, from your Claude Code
    allowance. It takes 3–20 minutes.
 3. It installs a git hook, so the repo updates itself whenever its branch moves (a pull or a
    fetch). Updates cost cents, and nothing when nothing relevant changed.
@@ -84,11 +85,11 @@ The MCP server tells Claude Code when to use it. These are its five tools, all r
 
 | Tool | Answers | From |
 |---|---|---|
-| `brain_repo_card` | What is this repo for, which system is it part of, which repos does it call and which call it, is there a wiki? | The index, the product page, systems and the route map |
+| `brain_repo_card` | What is this repo for, which system is it part of, which repos does it call and which call it, is there a wiki? | The index, the product page, systems and the link map |
 | `brain_get` | What it is, who uses it and its business rules, how to build and test it, what API it serves, how its key modules work; or an overview of a whole system | The repo's wiki pages; for a system, its repos' product pages and the links between them |
-| `brain_search` | Where is this handled? (when you don't know which repo or page) | Every repo's wiki sections and endpoints, and system names |
-| `brain_find_consumers` | Who serves this endpoint, and who calls it? | Routes and calls across every repo |
-| `brain_impact` | What breaks if I change this repo, file or endpoint? Or: which systems, repos and endpoints would this piece of work touch? | Its routes and every caller of each; for work, the wiki and route map |
+| `brain_search` | Where is this handled? (when you don't know which repo or page) | Every repo's wiki sections, endpoints and other links, and system names |
+| `brain_find_consumers` | Who serves this endpoint, and who calls it? Who publishes this event and who handles it? The same for a gRPC method or a shared package | Routes, calls, events, gRPC and packages across every repo |
+| `brain_impact` | What breaks if I change this repo, file or endpoint? Or: which systems, repos and endpoints would this piece of work touch? | What it serves or publishes, and everyone who uses each; for work, the wiki and route map |
 
 For example, `npm run brain -- consumers "GET /api/articles/:slug"` gives:
 
@@ -108,6 +109,12 @@ Called by
 
 These are C#, TypeScript, Python and PHP servers side by side, each with its full path. No
 language needs any setup.
+
+Links that aren't HTTP work the same way: `consumers "event OrderStartedIntegrationEvent"` lists
+who publishes an event and who handles it, `consumers "grpc Basket/GetBasket"` a gRPC method's
+server and callers, and `consumers "package @citation/ui"` the repo that publishes a package and
+the repos that depend on it. Names match exactly, ignoring case and package versions. Shared
+databases aren't linked: table names like `users` repeat across unrelated databases.
 
 ### For product owners
 
@@ -159,7 +166,7 @@ the calling agent does the reasoning.
   - Each sentence in a wiki page must cite lines that exist, at most 80 of them, and the names it
     mentions must appear there.
   - Each route or call must have its HTTP method and every fixed part of its path in the lines it
-    cites.
+    cites. Each event, gRPC method or package must have its name, or each part of it, there.
   - Anything that fails is removed, and `brain sync` says what and why. On the trial repos about
     80% of wiki claims were kept, and the removals were real problems.
 - **Every answer says when it's from:** the commit it describes, and how far behind the tracked
@@ -172,8 +179,8 @@ the calling agent does the reasoning.
   claim names, not that the claim reads them correctly. So agents are told to confirm at the
   citation before relying on it.
 - **Answers give file and line pointers, never pasted code.**
-- **Gaps are stated, not hidden.** For example, calls whose URL is only known at run time are
-  counted and located.
+- **Gaps are stated, not hidden.** For example, calls whose URL (or events whose name) is only
+  known at run time are counted and located.
 - **Your code stays on your machine.** It is read only by your own Claude Code, in a temporary
   read-only copy at the indexed commit. That run has no other tools or MCP servers.
 
@@ -187,7 +194,7 @@ gets.
 |---|---|
 | `doctor` | Checks Node, git, Claude Code, the store, the MCP registration and each repo's hook, and says how to fix anything missing. |
 | `add <path> [--name n] [--no-hook] [--no-ai]` | Adds a repo: indexes it, has Claude Code map it and write its wiki, and installs its hook. `--no-ai` indexes only. |
-| `sync [<name>] [--full] [--no-ai] [--model m]` | Brings repos up to their tracked branch, redoing only what changed. All repos if no name is given. `--full` redoes everything. This is what the hook runs. |
+| `sync [<name>] [--full] [--only links\|wiki] [--no-ai] [--model m]` | Brings repos up to their tracked branch, redoing only what changed. All repos if no name is given. `--full` redoes everything. `--only links` maps only the routes, calls, events, gRPC and packages, leaving the wiki alone; `--only wiki` the reverse. This is what the hook runs. |
 | `hooks install\|remove\|status [<name>]` | Turns automatic updates on or off, or shows which repos have them. |
 | `repo list` | Lists repos and how up to date each is. |
 | `repo add <path> [--name n] [--ref r]` | Enrols a repo only, with no AI, for when you want to sync later. |
@@ -196,8 +203,8 @@ gets.
 | `search "<query>" [--repo n]... [--detailed]` | `brain_search`. |
 | `card <name> [--detailed]` | `brain_repo_card`. Given a system's name, it shows that system's overview. |
 | `page <name> [<page>]` | `brain_get`: the page list, or one page (`product` for the product page). |
-| `consumers "<METHOD /path>" [--detailed]` | `brain_find_consumers`. Takes `:id` and `{id}` style paths, or full URLs. |
-| `impact <repo> [--path file] [--route "<METHOD /path>"]` | `brain_impact`. |
+| `consumers "<METHOD /path>" [--detailed]` | `brain_find_consumers`. Takes `:id` and `{id}` style paths, or full URLs; or `"event <name>"`, `"grpc <Service/Method>"`, `"package <name>"`. |
+| `impact <repo> [--path file] [--route "<METHOD /path>"]` | `brain_impact`. `--route` also takes an event, gRPC method or package. |
 | `impact --work "<description>"` | `brain_impact` with `work`: which systems, repos and endpoints a piece of work would most likely touch. |
 | `systems` | Lists systems, whether each is suggested or confirmed, and repos in none. |
 | `systems suggest [--model m]` | Has Claude Code suggest systems from the repos' cards, product pages and links. Costs cents. Confirmed systems are left alone. |
@@ -224,7 +231,8 @@ merged, and a fetch is enough to update it. The store is `%USERPROFILE%\.brain\b
   PowerShell). A repo that uses husky or its own `reference-transaction` hook can't take the
   brain's hook. Run `brain sync <name>` from your own hook instead.
 - **A wiki page says "kept from @…":** its rewrite failed the check twice, so the last good
-  version is shown. `brain sync <name> --full` rewrites everything.
+  version is shown. `brain sync <name> --full --only wiki` rewrites the wiki without
+  re-mapping the links.
 - **Group policy blocks `node_modules\.bin`:** that's why every command here runs through `node`.
   Use the npm scripts or the shortcut, not `npx`.
 

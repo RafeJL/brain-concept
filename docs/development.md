@@ -31,10 +31,10 @@ untouched.
 bin/            launchers that run the TypeScript from any folder (tsx, no build step)
 src/cli.ts      the brain CLI; prints exactly what agents get
 src/doctor.ts   brain doctor's checks
-src/core/       types, git access, languages, HTTP path matching, citations, page sections, the per-repo run queue
+src/core/       types, git access, languages, HTTP path and link-name matching, citations, page sections, the per-repo run queue
 src/store/      Store interface, SQLite implementation, migrations, the search index
 src/ingest/     registry, sync (the git index), hooks
-src/ai/         Claude Code runner, prompts (Markdown), wiki pages, routes and calls, system suggestions, the checks on all three
+src/ai/         Claude Code runner, prompts (Markdown), wiki pages, seams (routes, calls and other links), system suggestions, the checks on all three
 src/serve/      access policy, freshness, neighbours, systems, tools, MCP server (the read side)
 test/           vitest; fixtures are real files in their own languages
 docs/           architecture, decisions, research, manual testing

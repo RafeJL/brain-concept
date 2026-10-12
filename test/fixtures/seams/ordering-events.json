@@ -1,0 +1,7 @@
+{
+  "seams": [
+    { "kind": "event-publish", "name": "OrderStartedIntegrationEvent", "runtime": false, "cites": [{ "file": "src/OrderingService.cs", "start": 5, "end": 5 }] },
+    { "kind": "event-publish", "name": "OrderStatusChangedIntegrationEvent", "runtime": false, "cites": [{ "file": "src/OrderingService.cs", "start": 10, "end": 10 }] },
+    { "kind": "event-subscribe", "name": "OrderStatusChangedIntegrationEvent", "runtime": false, "cites": [{ "file": "src/OrderStatusChangedHandler.cs", "start": 1, "end": 3 }] }
+  ]
+}

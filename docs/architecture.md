@@ -45,7 +45,7 @@ Every fact records how it was made, and every answer carries that label.
 |---|---|---|---|
 | **index** | git only: the committed tree at the tracked ref. No LLM. | File inventory, languages, freshness | Rely on it |
 | **human-reviewed** | People, or an agent draft merged through a PR by an owner | Glossary, customers, features, ADRs, repo purposes | Treat as the team's stated intent |
-| **llm-generated** | Claude Code (headless, isolated, read-only) from the code at the indexed commit, with a citation on every claim | Wiki pages (W1), including a product page (B2a); routes and calls in any language (W4), from which the seam graph and cross-repo links are built; suggested systems (B2a) | Every citation is checked automatically (W2, W4); use as a map, and confirm at the citation before relying on a claim |
+| **llm-generated** | Claude Code (headless, isolated, read-only) from the code at the indexed commit, with a citation on every claim | Wiki pages (W1), including a product page (B2a); routes and calls in any language (W4), and events, gRPC methods and shared packages (B2b), from which the seam graph and cross-repo links are built; suggested systems (B2a) | Every citation is checked automatically (W2, W4); use as a map, and confirm at the citation before relying on a claim |
 
 Why: generated context files lowered agent success in a controlled study, and public
 DeepWiki pages were often wrong, while code-derived structure helped (see `research.md`). The
@@ -72,8 +72,9 @@ Two halves share only the store:
 
 1. A merge to main queues a job for that repo: commit a → b.
 2. `git diff a..b` gives the changed files.
-3. Claude Code maps routes and calls again in the changed files, and in files whose seams cite a
-   changed file (a moved prefix). Each is verified against its cited lines before it replaces the
+3. Claude Code maps routes and calls, and in a second run alongside it the other links (events,
+   gRPC, packages), again in the changed files, and in files whose seams cite a changed file (a moved
+   prefix). Each is verified against its cited lines before it replaces the
    old ones; Markdown and other files that can't declare an endpoint cost no run. Cross-repo
    links are worked out at query time, so nothing else is re-linked.
 4. Wiki pages that cite a changed file, or a folder a file was added to, are rewritten in one
@@ -93,10 +94,10 @@ paginated lists, pointers rather than pasted code. No free-text "ask" tool.
 
 | Tool | Answers | Harness stage | Status |
 |---|---|---|---|
-| `brain_find_consumers` | Who produces or consumes an endpoint, event or package, across repos | Contract review, technical planning | Built for HTTP endpoints |
-| `brain_impact` | What depends on a route, symbol or file, in the repo and across repos; or, given a description of work, which systems, repos and endpoints it would most likely touch | Product brief, technical planning, scope drift, maintainability review | Built for routes, files and work descriptions; symbols in phase 3b |
+| `brain_find_consumers` | Who produces or consumes an endpoint, event, gRPC method or package, across repos | Contract review, technical planning | Built |
+| `brain_impact` | What depends on a route, published event, gRPC method, package, symbol or file, in the repo and across repos; or, given a description of work, which systems, repos and endpoints it would most likely touch | Product brief, technical planning, scope drift, maintainability review | Built for everything a repo or file provides, and work descriptions; symbols in phase 3b |
 | `brain_repo_card` | What a repo is: what it is for (product line), its system, freshness, languages, neighbours, seam counts, where its wiki is | Product brief, technical planning | Built |
-| `brain_search` | Systems, then ranked wiki sections and endpoints for keywords, across every readable repo | Any, when you don't know which repo holds the answer | Built over systems, wiki sections and endpoints; curated context in phase 4 |
+| `brain_search` | Systems, then ranked wiki sections and endpoints for keywords, across every readable repo | Any, when you don't know which repo holds the answer | Built over systems, wiki sections, endpoints and other links; curated context in phase 4 |
 | `brain_get` | One item in full (page, system overview, glossary entry, ADR, symbol map) with citations | Product brief, feature planning, development | Built for wiki pages and system overviews |
 
 A hit looks like: `orders-web · src/api/orders.ts:42-58 · @9f3c1e2 · 2 commits behind · llm-generated`.
@@ -104,7 +105,7 @@ A hit looks like: `orders-web · src/api/orders.ts:42-58 · @9f3c1e2 · 2 commit
 ### Search
 
 One SQLite FTS5 index with a row per wiki section (pages split at `##`/`###` headings) and per
-route or call. Sections are searched on their repo, page title, heading, text (citations taken
+seam (route, call, event, gRPC method or package). Sections are searched on their repo, page title, heading, text (citations taken
 out) and the files they cite, with camelCase file names also written apart. Endpoints are
 searched on their method and path only. A query's words are OR'd and ranked by bm25 with Porter
 stemming, headings weighted most. Rows are added where pages and seams are written and removed
@@ -143,6 +144,25 @@ systems a piece of work touches, without reading code or technical pages.
   at all, groups them by system, and adds the repos that call the matching routes. Repos under
   half the best score are only named as weaker matches. No AI
   runs at query time; the calling agent does the reasoning. It keeps the tool set at five.
+
+## Seams
+
+Every link is a pair: something a repo provides, and something that uses it. All kinds live in the
+one `seams` table, each in its existing columns. HTTP is mapped in one Claude Code run
+(`prompts/list-seams.md`) and the rest in another (`prompts/list-links.md`): asked for in one run,
+HTTP coverage fell (decisions, 2026-10-12).
+
+| Family | Provides (kind) | Uses (kind) | `method` | `raw_path` | `route_key` (what must match) |
+|---|---|---|---|---|---|
+| HTTP | `http-route` | `http-call` | GET, POST, … or `*` | the full path | normalised path; exact, or suffix at a segment boundary |
+| Events and queues | `event-publish` | `event-subscribe` | `event` | the topic, queue or event name | the name, lower-cased |
+| gRPC | `grpc-serve` | `grpc-call` | `grpc` | `Service/Method` | `service/method`, lower-cased, without the proto package |
+| Shared packages | `package-publish` | `package-use` | `package` | the package name | the name, lower-cased, without a version |
+
+A name only known at run time is stored with no key, like a run-time URL: counted and located,
+never matched. The same rules apply to every family: a use its own repo provides (tests calling
+their own API, a service handling its own event) links only within that repo and is marked
+"same repo". Shared databases are not linked (`decisions.md`, 2026-10-08).
 
 ## Local POC vs hosted
 
