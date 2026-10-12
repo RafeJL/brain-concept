@@ -493,6 +493,17 @@ was retried on every sync (eShop's would have cost about $3.60 each time), a fai
 `--full`. Work descriptions also drop words almost every one uses ("let", "users", "people"),
 which had ranked repos by their user routes for "let users save articles to read later".
 
+**The first PO-style question went unanswered by the brain.** A fresh Claude Code session asked
+"What can users do in RealWorld, and what rules apply to profiles?" answered from memory of the
+public RealWorld spec and called no brain tool. Its brain server was still `main` (no product
+pages or systems), but the deeper gap was that nothing told the agent "RealWorld" is a name the
+brain holds, and the name matches a famous public project. The server's instructions now end
+with a catalogue built when it starts: the systems and repos the caller can read (up to 40
+repos, then a pointer to `brain_repo_card`), each with its product sentence, and a line saying
+these names are the organisation's own even where one matches a public project. About 850
+tokens for the seven trial repos. Product names at Citation ("Atlas", "Lucy") will need the
+same, since they mean nothing to a model on their own.
+
 **What would change it:** re-tune the weights when every repo has a product page. Repos that make
 up one product but don't call each other over HTTP are left out of suggestions until B2b's
 event, gRPC and package links count too; a person can add them with `brain systems set`.

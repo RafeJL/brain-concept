@@ -216,7 +216,9 @@ merged, and a fetch is enough to update it. The store is `%USERPROFILE%\.brain\b
 - **Claude Code didn't use the brain:**
   - Start a *new* session; sessions pick up MCP servers when they start.
   - Check `/mcp` shows `citation-brain` as connected.
-  - Ask about the repo by name.
+  - Ask about the repo or system by name. The brain tells each new session which systems and
+    repos it holds, so a name that matches a public project (like RealWorld) still goes to the
+    brain. A repo added after the session started is only listed in the next one.
 - **A repo isn't updating:** `npm run brain -- hooks status`. Background syncs log to
   `%USERPROFILE%\.brain\hooks.log` (read it with `Get-Content -Encoding utf8` in Windows
   PowerShell). A repo that uses husky or its own `reference-transaction` hook can't take the

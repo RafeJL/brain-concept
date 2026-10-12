@@ -3,8 +3,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { enrolRepo } from "../src/ingest/registry.js";
 import { syncRepo } from "../src/ingest/sync.js";
-import { LOCAL_CALLER, LocalAccessPolicy } from "../src/serve/access.js";
-import { createServer } from "../src/serve/mcp.js";
+import { LOCAL_CALLER, LocalAccessPolicy, type AccessPolicy } from "../src/serve/access.js";
+import { createServer, INSTRUCTIONS, serverInstructions } from "../src/serve/mcp.js";
 import { SqliteStore } from "../src/store/sqlite.js";
 import { makeRepo } from "./helpers.js";
 
@@ -53,5 +53,44 @@ describe("MCP server", () => {
 
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toContain("No repos are enrolled yet.");
+  });
+});
+
+describe("server instructions", () => {
+  /** Repos and a product page straight into the store: the catalogue reads only rows, no git. */
+  function store(): SqliteStore {
+    const s = new SqliteStore(":memory:");
+    for (const name of ["aspnet-api", "react-web", "payroll"]) {
+      s.addRepo({ name, path: `/repos/${name}`, ref: "main", remote: null, enrolledAt: "2026-10-12T00:00:00Z" });
+    }
+    s.replacePages("aspnet-api", [
+      { repo: "aspnet-api", slug: "product", title: "Product", markdown: "# Product\n\nLets people write and read articles [a.cs:1].", commit: "c", claims: 1, removed: 0, model: "m", costUsd: 0, generatedAt: "now" },
+    ]);
+    s.setSystem("RealWorld", ["aspnet-api", "react-web"], "A blogging platform.");
+    return s;
+  }
+  const deps = (s: SqliteStore, access: AccessPolicy = new LocalAccessPolicy()) => ({ store: s, access, caller: LOCAL_CALLER });
+
+  it("name the systems and repos the brain holds, with their product summaries, as the organisation's own", async () => {
+    const text = await serverInstructions(deps(store()));
+
+    expect(text.startsWith(INSTRUCTIONS)).toBe(true);
+    expect(text).toContain("even where one matches a public or open-source project");
+    expect(text).toContain("- RealWorld: aspnet-api, react-web. A blogging platform.");
+    expect(text).toContain("- aspnet-api: Lets people write and read articles.");
+    // A repo without a product page is still named, just without a summary.
+    expect(text).toMatch(/^- react-web$/m);
+  });
+
+  it("leave out repos the caller can't read, and add nothing when there are none", async () => {
+    const onlyPayroll: AccessPolicy = { readableRepos: async () => new Set(["payroll"]) };
+
+    const hidden = await serverInstructions(deps(store(), onlyPayroll));
+    const empty = await serverInstructions(deps(new SqliteStore(":memory:")));
+
+    expect(hidden).not.toContain("RealWorld");
+    expect(hidden).not.toContain("aspnet-api");
+    expect(hidden).toContain("- payroll");
+    expect(empty).toBe(INSTRUCTIONS);
   });
 });
