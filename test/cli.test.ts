@@ -39,3 +39,18 @@ describe("brain add", () => {
     expect(existsSync(join(dir, ".git", "hooks", "reference-transaction"))).toBe(false);
   }, 30_000);
 });
+
+describe("brain systems", () => {
+  it("creates, lists and shows a system a person names", () => {
+    const dbPath = join(tempDir(), "brain.db");
+    brain(dbPath, "add", repoFromFixture("articles-api"), "--name", "api", "--no-ai", "--no-hook");
+
+    const set = brain(dbPath, "systems", "set", "Conduit", "api", "--summary", "A blogging platform.");
+    const list = brain(dbPath, "systems");
+    const show = brain(dbPath, "systems", "show", "conduit");
+
+    expect(set).toContain("Created Conduit (confirmed): api");
+    expect(list).toContain("Conduit (confirmed) · 1 repo: api\n  A blogging platform.");
+    expect(show).toContain("Conduit (confirmed) · 1 repo\n\nA blogging platform.");
+  }, 30_000);
+});

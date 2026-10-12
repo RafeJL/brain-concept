@@ -359,6 +359,13 @@ $10–15 in all, most of it eshop (about $3.70 and 11 minutes for its routes alo
 | `search "kafka"` | `No wiki sections or endpoints match "kafka" in 7 repos.` |
 | `card nope` | `No readable repo named "nope"`, listing only the repos you enrolled |
 | `doctor` | ✓ on every line, including a `Hook:` line per repo saying it syncs automatically |
+| `page aspnet-api product` | A product page with no code names in its text: who uses it, what they can do, business rules such as "an email address can belong to only one account" cited to `src/Conduit/Features/Users/Create.cs:48-64`, terms, what it depends on |
+| `card react-web` | A `Product:` line under the header (the product page's first sentence), and a `System:` line once systems exist |
+| `systems suggest`, then `systems` | Three suggestions, each with a reason: RealWorld (the four APIs and react-web), eShop alone, the harness alone. About $0.10–0.20 |
+| `systems show RealWorld` | Its summary, a line per repo from its product page, `react-web → aspnet-api, express-api, flask-api, laravel-api (19 endpoints each)`, and "Not yet confirmed" until `systems confirm --all` |
+| `search "blogging platform"` | RealWorld listed under `Systems:` before the wiki sections |
+| `impact --work "notify buyers when an order ships"` | eShop's Ordering sections and `PUT /api/orders/ship`; the harness at most as a weaker match |
+| `impact --work "save articles to read later"` | RealWorld repos, with `+ react-web calls … of these routes` under each API listed |
 | `sync` (run it twice) | The second run says `+0 ~0 -0`, `no code changed (no AI run)` and `wiki up to date`: nothing is redone and nothing is spent |
 
 ## Part C: Claude Code uses the brain on its own
@@ -374,6 +381,8 @@ changes to the server's instructions. Ask in plain words, without naming tools:
 | *If I change GET /articles/:slug in express-api, what else breaks?* | call `brain_find_consumers` or `brain_impact` and point at `react-web · src/agent.js` |
 | *What would break if I removed the DELETE endpoint in aspnet-api's ArticlesController?* | call `brain_impact` |
 | *Where do we validate JWTs?* (no repo named) | call `brain_search`, then `brain_get` on the best section's page |
+| *What can users do in RealWorld, and what rules apply to profiles?* | call `brain_get` with `system` and the `product` pages, and answer without reading code or technical pages |
+| *Which repos would "add discount codes to the basket" touch?* | call `brain_impact` with `work` and name eshop's Basket |
 
 If it searches the web, greps folders or clones instead, note the exact wording. That is how the
 server instructions in `src/serve/mcp.ts` get improved.

@@ -34,8 +34,8 @@ src/doctor.ts   brain doctor's checks
 src/core/       types, git access, languages, HTTP path matching, citations, page sections, the per-repo run queue
 src/store/      Store interface, SQLite implementation, migrations, the search index
 src/ingest/     registry, sync (the git index), hooks
-src/ai/         Claude Code runner, prompts (Markdown), wiki pages, routes and calls, the checks on both
-src/serve/      access policy, freshness, neighbours, tools, MCP server (the read side)
+src/ai/         Claude Code runner, prompts (Markdown), wiki pages, routes and calls, system suggestions, the checks on all three
+src/serve/      access policy, freshness, neighbours, systems, tools, MCP server (the read side)
 test/           vitest; fixtures are real files in their own languages
 docs/           architecture, decisions, research, manual testing
 ```
@@ -58,6 +58,13 @@ Rules for changing it (and for agents working here) are in [CLAUDE.md](../CLAUDE
    - A page with under half its claims kept is written once more. If it fails again, the last
      good version is kept.
    - Pages that cite nothing changed are re-checked and carried forward with no AI.
+   - A page every wiki should have but this one lacks (`src/ai/prompts/pages.md`; the product
+     page, for wikis written before it existed) is written in a run of its own, leaving the
+     others alone.
+
+`brain systems suggest` is the one AI run outside a sync. It reads no code: Claude Code gets a
+small file with each repo's card facts, the opening of its product page and its links, and the
+suggestions are checked (`src/ai/systems.ts`) before they are stored as `suggested`.
 
 Claude Code runs headless (`src/ai/runner.ts`), in a temporary git worktree at the indexed
 commit, with `--safe-mode --strict-mcp-config` and only Read, Grep and Glob. It loads no MCP

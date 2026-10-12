@@ -1,6 +1,6 @@
 import { hasLiteralSegment, matchEndpoints, type Endpoint, type MatchQuality } from "../../core/http.js";
 import type { Seam } from "../../core/seams.js";
-import type { Freshness, RepoRecord, RepoState } from "../../core/types.js";
+import type { Freshness, RepoRecord, RepoState, WikiPage } from "../../core/types.js";
 import type { Store } from "../../store/store.js";
 import type { AccessPolicy, Caller } from "../access.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
@@ -102,6 +102,28 @@ export async function freshnessByRepo(deps: ToolDeps, repos: Iterable<string>): 
     if (repo && state) result.set(name, await freshnessOf(repo, { ...state, commit: state.seamsCommit ?? state.commit }));
   }
   return result;
+}
+
+/**
+ * The commit a wiki describes: the indexed one if any page is at it. Pages at an older commit
+ * than that were kept because their rewrite failed the citation check.
+ */
+export function wikiCommit(pages: readonly WikiPage[], indexed: string): string {
+  return pages.some((p) => p.commit === indexed) ? indexed : pages[0]!.commit;
+}
+
+/** Each repo's freshness: the commit its wiki describes, or its seams when it has no wiki. */
+export async function indexedAt(deps: ToolDeps, repos: readonly string[]): Promise<string[]> {
+  const lines: string[] = [];
+  for (const name of repos) {
+    const repo = deps.store.getRepo(name);
+    const state = deps.store.getState(name);
+    if (!repo || !state) continue;
+    const pages = deps.store.pages(name);
+    const commit = pages.length ? wikiCommit(pages, state.commit) : (state.seamsCommit ?? state.commit);
+    lines.push(`${name} ${describeFreshness(await freshnessOf(repo, { ...state, commit }), repo.ref)}`);
+  }
+  return lines;
 }
 
 /** The other lines a seam's path was assembled from (a prefix, a base URL), for detailed answers. */

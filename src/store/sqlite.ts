@@ -2,7 +2,8 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Seam, SeamCoverage } from "../core/seams.js";
-import type { FileRecord, LanguageShare, RepoRecord, RepoState, WikiPage } from "../core/types.js";
+import type { SystemRecord } from "../core/systems.js";
+import { BrainError, type FileRecord, type LanguageShare, type RepoRecord, type RepoState, type WikiPage } from "../core/types.js";
 import { MIGRATIONS } from "./migrations.js";
 import { indexPage, indexSeam, SEARCH_WEIGHTS } from "./search-index.js";
 import type { SearchFilter, SearchPage, SeamFilter, SeamUpdate, SectionHit, Store, SyncUpdate } from "./store.js";
@@ -77,6 +78,7 @@ export class SqliteStore implements Store {
         syncedAt: String(row.synced_at),
         fileCount: Number(row.file_count),
         seamsCommit: row.seams_commit === null ? null : String(row.seams_commit),
+        pagesFailedAt: row.pages_failed_at === null ? null : String(row.pages_failed_at),
       }
     );
   }
@@ -178,6 +180,10 @@ export class SqliteStore implements Store {
     return rows.map((row) => ({ language: String(row.language), files: Number(row.files), bytes: Number(row.bytes) }));
   }
 
+  setPagesFailedAt(repo: string, commit: string | null): void {
+    this.db.prepare("UPDATE repo_state SET pages_failed_at = ? WHERE repo = ?").run(commit, repo);
+  }
+
   replacePages(repo: string, pages: readonly WikiPage[]): void {
     const insert = this.db.prepare(
       `INSERT INTO pages (repo, slug, position, title, markdown, commit_sha, claims, removed, model, cost_usd, generated_at)
@@ -216,7 +222,8 @@ export class SqliteStore implements Store {
     const rows = this.db
       .prepare(
         `SELECT sections.repo, sections.slug, sections.heading, sections.paths, pages.title,
-                snippet(search, 3, '', '', '…', ${Math.max(1, Math.min(64, words))}) AS snippet
+                snippet(search, 3, '', '', '…', ${Math.max(1, Math.min(64, words))}) AS snippet,
+                -bm25(search, ${SEARCH_WEIGHTS}) AS score
          FROM search
          JOIN sections ON sections.id = search.rowid / 2
          JOIN pages ON pages.repo = sections.repo AND pages.slug = sections.slug
@@ -235,6 +242,7 @@ export class SqliteStore implements Store {
         heading: String(row.heading),
         snippet: String(row.snippet),
         paths: String(row.paths).split(" ").filter(Boolean),
+        score: Number(row.score),
       })),
     };
   }
@@ -259,6 +267,92 @@ export class SqliteStore implements Store {
   private searchCounts(where: string, params: string[]): { total: number; repos: string[] } {
     const rows = this.db.prepare(`SELECT repo, COUNT(*) AS n FROM search WHERE ${where} GROUP BY repo ORDER BY repo`).all(...params) as Row[];
     return { total: rows.reduce((sum, row) => sum + Number(row.n), 0), repos: rows.map((row) => String(row.repo)) };
+  }
+
+  systems(): SystemRecord[] {
+    const members = new Map<number, string[]>();
+    for (const row of this.db.prepare("SELECT system, repo FROM system_repos ORDER BY repo").all() as Row[]) {
+      members.set(Number(row.system), [...(members.get(Number(row.system)) ?? []), String(row.repo)]);
+    }
+    const rows = this.db.prepare("SELECT * FROM systems ORDER BY name").all() as Row[];
+    return rows.map((row) => ({
+      name: String(row.name),
+      summary: String(row.summary),
+      reason: String(row.reason),
+      status: String(row.status) as SystemRecord["status"],
+      suggestedAt: row.suggested_at === null ? null : String(row.suggested_at),
+      confirmedAt: row.confirmed_at === null ? null : String(row.confirmed_at),
+      repos: members.get(Number(row.id)) ?? [],
+    }));
+  }
+
+  replaceSuggestedSystems(systems: readonly Pick<SystemRecord, "name" | "summary" | "reason" | "repos">[]): void {
+    const insert = this.db.prepare("INSERT INTO systems (name, summary, reason, status, suggested_at) VALUES (?, ?, ?, 'suggested', ?)");
+    const member = this.db.prepare("INSERT INTO system_repos (repo, system) VALUES (?, ?)");
+    const now = new Date().toISOString();
+    this.transaction(() => {
+      // Deleting a system deletes its members and its search row.
+      this.db.exec("DELETE FROM systems WHERE status = 'suggested'");
+      for (const system of systems) {
+        const { lastInsertRowid } = insert.run(system.name, system.summary, system.reason, now);
+        for (const repo of system.repos) member.run(repo, Number(lastInsertRowid));
+      }
+    });
+  }
+
+  confirmSystems(names: readonly string[] | null): string[] {
+    const confirm = this.db.prepare("UPDATE systems SET status = 'confirmed', confirmed_at = ? WHERE id = ? AND status = 'suggested'");
+    const candidates = this.systemRows().filter((row) => row.status === "suggested" && (!names || names.some((n) => n.toLowerCase() === String(row.name).toLowerCase())));
+    const now = new Date().toISOString();
+    this.transaction(() => {
+      for (const row of candidates) confirm.run(now, Number(row.id));
+    });
+    return candidates.map((row) => String(row.name));
+  }
+
+  setSystem(name: string, repos: readonly string[], summary?: string): void {
+    const member = this.db.prepare("INSERT INTO system_repos (repo, system) VALUES (?, ?) ON CONFLICT (repo) DO UPDATE SET system = excluded.system");
+    const now = new Date().toISOString();
+    this.transaction(() => {
+      let id = this.systemId(name);
+      if (id === undefined) {
+        id = Number(this.db.prepare("INSERT INTO systems (name, summary, reason, status, confirmed_at) VALUES (?, ?, '', 'confirmed', ?)").run(name, summary ?? "", now).lastInsertRowid);
+      } else {
+        this.db
+          .prepare("UPDATE systems SET summary = COALESCE(?, summary), status = 'confirmed', confirmed_at = COALESCE(confirmed_at, ?) WHERE id = ?")
+          .run(summary ?? null, now, id);
+      }
+      for (const repo of repos) member.run(repo, id);
+    });
+  }
+
+  renameSystem(name: string, to: string): boolean {
+    const id = this.systemId(name);
+    if (id === undefined) return false;
+    const taken = this.systemId(to);
+    if (taken !== undefined && taken !== id) throw new BrainError(`There is already a system named "${to}".`);
+    this.db.prepare("UPDATE systems SET name = ? WHERE id = ?").run(to, id);
+    return true;
+  }
+
+  removeSystem(name: string): boolean {
+    return Number(this.db.prepare("DELETE FROM systems WHERE name = ?").run(name).changes) > 0;
+  }
+
+  searchSystems(match: string): string[] {
+    const rows = this.db
+      .prepare("SELECT systems.name FROM system_search JOIN systems ON systems.id = system_search.rowid WHERE system_search MATCH ? ORDER BY bm25(system_search), systems.name")
+      .all(match) as Row[];
+    return rows.map((row) => String(row.name));
+  }
+
+  private systemRows(): Row[] {
+    return this.db.prepare("SELECT * FROM systems ORDER BY name").all() as Row[];
+  }
+
+  private systemId(name: string): number | undefined {
+    const row = this.db.prepare("SELECT id FROM systems WHERE name = ?").get(name) as Row | undefined;
+    return row && Number(row.id);
   }
 
   close(): void {

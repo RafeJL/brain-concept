@@ -1,7 +1,8 @@
 import type { Freshness, WikiPage } from "../../core/types.js";
 import type { Caller } from "../access.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
-import { requireSyncedRepo, TIER, type ToolDeps, type ToolResult } from "./common.js";
+import { requireSyncedRepo, TIER, wikiCommit, type ToolDeps, type ToolResult } from "./common.js";
+import { systemOverview } from "./system-overview.js";
 
 export interface PageInput {
   repo: string;
@@ -22,14 +23,6 @@ function checkedNote(page: WikiPage): string {
   if (page.claims === 0) return "citations not checked";
   const kept = page.claims - page.removed;
   return `citations checked: ${kept} of ${page.claims} claims kept${page.removed ? ` (${page.removed} removed)` : ""}`;
-}
-
-/**
- * The commit a wiki describes: the indexed one if any page is at it. Pages at an older commit
- * than that were kept because their rewrite failed the citation check.
- */
-export function wikiCommit(pages: readonly WikiPage[], indexed: string): string {
-  return pages.some((p) => p.commit === indexed) ? indexed : pages[0]!.commit;
 }
 
 const CAUTION =
@@ -75,4 +68,15 @@ export async function getPage(deps: ToolDeps, caller: Caller, input: PageInput):
     CAUTION,
   ].join("\n");
   return { ok: true, data: { repo: repo.name, pages, page, freshness }, text };
+}
+
+/**
+ * `brain_get`: a system's overview when `system` is given, otherwise a repo's wiki (`getPage`).
+ * Exactly one of `repo` and `system` is needed.
+ */
+export async function getRequest(deps: ToolDeps, caller: Caller, input: { repo?: string; page?: string; system?: string }): Promise<ToolResult<unknown>> {
+  if (input.system && (input.repo || input.page)) return { ok: false, text: "Give either a system, or a repo (with an optional page), not both." };
+  if (input.system) return systemOverview(deps, caller, input.system);
+  if (!input.repo) return { ok: false, text: "Give a repo (with an optional page), or a system to see its overview." };
+  return getPage(deps, caller, { repo: input.repo, page: input.page });
 }

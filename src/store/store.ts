@@ -1,4 +1,5 @@
 import type { Seam, SeamCoverage, SeamKind } from "../core/seams.js";
+import type { SystemRecord } from "../core/systems.js";
 import type { FileRecord, LanguageShare, RepoRecord, RepoState, WikiPage } from "../core/types.js";
 
 /** Everything one sync changes, applied atomically. Removing a file removes its seams. */
@@ -46,6 +47,8 @@ export interface SectionHit {
   snippet: string;
   /** Files the section cites. */
   paths: string[];
+  /** How well it matched (bm25, higher is better), for comparing hits of one search. */
+  score: number;
 }
 
 export interface SearchPage<T> {
@@ -79,6 +82,8 @@ export interface Store {
   /** Swaps in Claude Code's seams and records the commit they describe, in one step. */
   replaceSeams(repo: string, update: SeamUpdate): void;
 
+  /** Records the commit at which a missing required page failed the check (null to clear it). */
+  setPagesFailedAt(repo: string, commit: string | null): void;
   /** Replaces a repo's whole wiki in one step, keeping the pages' order. */
   replacePages(repo: string, pages: readonly WikiPage[]): void;
   /** A repo's wiki pages in the order they were written. */
@@ -88,6 +93,23 @@ export interface Store {
   searchSections(filter: SearchFilter): SearchPage<SectionHit>;
   /** Routes and calls matching a search, best first. Kept in step with seams by `replaceSeams`. */
   searchSeams(filter: SearchFilter): SearchPage<Seam>;
+
+  /** Every system with its member repos, by name. Callers filter members to the readable set. */
+  systems(): SystemRecord[];
+  /** Swaps every suggested system for these, in one step. Confirmed systems are untouched. */
+  replaceSuggestedSystems(systems: readonly Pick<SystemRecord, "name" | "summary" | "reason" | "repos">[]): void;
+  /** Confirms the named systems, or every suggested one when null. Returns the names confirmed. */
+  confirmSystems(names: readonly string[] | null): string[];
+  /**
+   * Adds repos to a system, moving them out of any other, and changes its summary when given.
+   * The system is confirmed afterwards, whether new or suggested: a person has decided it.
+   */
+  setSystem(name: string, repos: readonly string[], summary?: string): void;
+  /** False when there is no such system; throws when another system already has the new name. */
+  renameSystem(name: string, to: string): boolean;
+  removeSystem(name: string): boolean;
+  /** Names of the systems whose name or summary match an FTS5 expression, best first. */
+  searchSystems(match: string): string[];
 
   close(): void;
 }

@@ -33,6 +33,24 @@ describe("parseCitations", () => {
     ]);
   });
 
+  it("reads files separated by commas, and ranges written with an en or em dash", () => {
+    expect(parseCitations("[src/A.API/Api.cs:30-45, src/B.cs:12, 14-16]")).toEqual([
+      { path: "src/A.API/Api.cs", start: 30, end: 45 },
+      { path: "src/B.cs", start: 12, end: 12 },
+      { path: "src/B.cs", start: 14, end: 16 },
+    ]);
+    expect(parseCitations("[a.cs:30–45][b.cs:1—2]")).toEqual([
+      { path: "a.cs", start: 30, end: 45 },
+      { path: "b.cs", start: 1, end: 2 },
+    ]);
+  });
+
+  it("names a citation it can't read when that is why a claim has none", () => {
+    const checked = checkPage("# T\n\nShoppers can return goods within a month [src/Returns.cs lines 4 to 9:x].\n", repo());
+
+    expect(checked.removed).toEqual([{ text: "Shoppers can return goods within a month [src/Returns.cs lines 4 to 9:x].", reason: "no citation it can read: [src/Returns.cs lines 4 to 9:x]" }]);
+  });
+
   it("ignores links, code in brackets and bracketed prose", () => {
     expect(parseCitations("[Express](https://expressjs.com) `[Authorize]` [see below] [1]")).toEqual([]);
   });

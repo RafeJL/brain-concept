@@ -105,4 +105,40 @@ export const MIGRATIONS: (string | ((db: DatabaseSync) => void))[] = [
   `
   ALTER TABLE seams DROP COLUMN plugin;
   `,
+  // B2a: systems, the groups of repos that make up a product. Claude Code suggests them and a
+  // person confirms them. A repo belongs to at most one. system_search indexes their names and
+  // summaries; triggers keep it in step, so nothing else writes to it.
+  `
+  CREATE TABLE systems (
+    id           INTEGER PRIMARY KEY,
+    name         TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    summary      TEXT NOT NULL,
+    reason       TEXT NOT NULL,
+    status       TEXT NOT NULL CHECK (status IN ('suggested', 'confirmed')),
+    suggested_at TEXT,
+    confirmed_at TEXT
+  );
+  CREATE TABLE system_repos (
+    repo   TEXT PRIMARY KEY REFERENCES repos(name) ON DELETE CASCADE,
+    system INTEGER NOT NULL REFERENCES systems(id) ON DELETE CASCADE
+  );
+  CREATE INDEX system_repos_by_system ON system_repos(system);
+
+  CREATE VIRTUAL TABLE system_search USING fts5(name, summary, content = 'systems', content_rowid = 'id', tokenize = 'porter unicode61');
+  CREATE TRIGGER systems_index AFTER INSERT ON systems BEGIN
+    INSERT INTO system_search (rowid, name, summary) VALUES (new.id, new.name, new.summary);
+  END;
+  CREATE TRIGGER systems_unindex AFTER DELETE ON systems BEGIN
+    INSERT INTO system_search (system_search, rowid, name, summary) VALUES ('delete', old.id, old.name, old.summary);
+  END;
+  CREATE TRIGGER systems_reindex AFTER UPDATE ON systems BEGIN
+    INSERT INTO system_search (system_search, rowid, name, summary) VALUES ('delete', old.id, old.name, old.summary);
+    INSERT INTO system_search (rowid, name, summary) VALUES (new.id, new.name, new.summary);
+  END;
+  `,
+  // The commit at which a page every wiki should have failed the check, so it isn't written
+  // again (at a cost) on every sync until the code changes.
+  `
+  ALTER TABLE repo_state ADD COLUMN pages_failed_at TEXT;
+  `,
 ];

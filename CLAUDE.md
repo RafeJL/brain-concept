@@ -40,16 +40,22 @@ calls it; nothing is ever moved out of the harness into here.
   and every fixed path segment appear in the cited lines); it shares its rules with `check.ts`.
 - **Prompts** are Markdown in `src/ai/prompts/`, loaded by `prompt()` in `src/ai/prompts.ts`
   (`{{rules}}` pulls in `rules.md`). Not skills: runs load none. If you change what the checker
-  enforces, update `rules.md` to match.
+  enforces, update `rules.md` to match. The pages every wiki has are listed in `pages.md`; an
+  update writes any that a wiki lacks. The product page (`product-page.md`) is for a PO: its text
+  names no code, only its citations do.
 - **Updates** (without `--full`) redo only what a change affects: wiki pages citing changed files
   (`src/ai/affected.ts`, retried once, last passing version kept) and seams declared in changed
   files or built from them (`updateSeams`). `brain sync` indexes then runs both; hooks run it
   through `runQueued` (`src/core/queue.ts`), one run per repo at a time. `syncRepo` itself never
   calls the AI.
-- Neighbours are never stored; they come from the seam graph at query time.
+- Neighbours and system overviews are never stored; they come from the seam graph, product pages
+  and the `systems` table at query time.
+- **Systems** are suggested by Claude Code (`src/ai/systems.ts`, verified before storing, like
+  pages and seams) and confirmed by a person. Agents see unconfirmed ones labelled "suggested".
 - **The search index** (`src/store/search-index.ts`, FTS5) has a row per wiki section and per
   seam. Rows are added only in `replacePages` and `replaceSeams` and removed by triggers, so it
-  can't drift from what it indexes; don't write to it anywhere else. Ranking weights were tuned
+  can't drift from what it indexes; don't write to it anywhere else. System names and summaries
+  have their own index (`system_search`), written only by triggers on `systems`. Ranking weights were tuned
   on real questions (decisions, 2026-10-07): re-run them if you change the weights.
 - **Recorded AI answers are fixtures**: `test/fixtures/seams/<repo>.json` is what Claude Code
   would answer for `test/fixtures/repos/<repo>`, so the tools are tested against real
