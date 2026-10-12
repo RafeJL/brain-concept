@@ -1,7 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { Caller } from "./access.js";
-import type { ToolDeps, ToolResult } from "./tools/common.js";
+import { firstSentence } from "../core/sections.js";
+import { visibleSystems } from "./systems.js";
+import { readableRepos, type ToolDeps, type ToolResult } from "./tools/common.js";
 import { findConsumers } from "./tools/find-consumers.js";
 import { repoCard } from "./tools/repo-card.js";
 import { search } from "./tools/search.js";
@@ -45,12 +47,48 @@ export const INSTRUCTIONS =
   "brain_impact with work for which systems a piece of work touches. Don't read technical pages or " +
   "code unless asked. Systems labelled suggested haven't been confirmed by a person yet.";
 
+/** Repos listed by name in the instructions; past this, agents are pointed at brain_repo_card. */
+const CATALOGUE_REPOS = 40;
+const SUMMARY_CHARS = 140;
+
+/**
+ * The instructions plus what the brain holds: the systems and repos the caller can read, each
+ * with its one-line product summary. Without the names, an agent asked about "RealWorld" or
+ * "Atlas" can't tell the question is about the organisation's code, and answers from memory when
+ * the name matches a public project. Built when the server starts, so a new session picks up
+ * newly added repos.
+ */
+export async function serverInstructions(deps: ServerDeps): Promise<string> {
+  const readable = await readableRepos(deps, deps.caller);
+  if (readable.length === 0) return INSTRUCTIONS;
+  const clip = (text: string) => (text.length <= SUMMARY_CHARS ? text : `${text.slice(0, SUMMARY_CHARS - 1).trimEnd()}…`);
+  const summary = (repo: string) => {
+    const page = deps.store.pages(repo).find((p) => p.slug === "product");
+    const sentence = page && firstSentence(page.markdown);
+    return sentence ? `: ${clip(sentence)}` : "";
+  };
+  const systems = visibleSystems(deps.store, readable).map(
+    (s) => `- ${s.name}${s.status === "suggested" ? " (suggested)" : ""}: ${s.repos.join(", ")}${s.summary ? `. ${clip(s.summary)}` : ""}`,
+  );
+  const more = readable.length > CATALOGUE_REPOS ? [`- and ${readable.length - CATALOGUE_REPOS} more: call brain_repo_card with any name to check.`] : [];
+  return [
+    INSTRUCTIONS,
+    "",
+    "What the brain holds. These names refer to the organisation's own code, even where one matches a " +
+      "public or open-source project, so ask the brain about them rather than answering from memory.",
+    ...(systems.length ? ["Systems (products made of several repos; brain_get with system for an overview):", ...systems] : []),
+    "Repos:",
+    ...readable.slice(0, CATALOGUE_REPOS).map((repo) => `- ${repo}${summary(repo)}`),
+    ...more,
+  ].join("\n");
+}
+
 /**
  * The brain's only door for agents. Every tool is read-only and returns facts with the commit
  * they describe, how far behind the tracked ref that is, and how the fact was made (tier).
  */
-export function createServer(deps: ServerDeps): McpServer {
-  const server = new McpServer({ name: "citation-brain", version: "0.1.0" }, { instructions: INSTRUCTIONS });
+export function createServer(deps: ServerDeps, instructions = INSTRUCTIONS): McpServer {
+  const server = new McpServer({ name: "citation-brain", version: "0.1.0" }, { instructions });
 
   server.registerTool(
     "brain_repo_card",

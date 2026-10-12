@@ -64,7 +64,9 @@ Two halves share only the store:
   Every row belongs to one repo at one commit. The repo is the unit of work, of permission and
   of deletion.
 - **Serve (reads):** MCP server → query engine → access filter (inside the query) → response
-  shaper (pointers, commit, commits behind, tier).
+  shaper (pointers, commit, commits behind, tier). When a session connects, the server's
+  instructions name the systems and repos the caller can read, each with its one-line product
+  summary, so an agent knows which names are the organisation's own.
 
 ## Freshness on merge
 
