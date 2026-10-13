@@ -28,9 +28,25 @@ export function factLine(fact: FactRecord): string {
     ...(fact.ticket ? [`ticket ${fact.ticket}`] : []),
     ...(fact.anchors.length ? [`enforced at ${fact.anchors.map((a) => `${a.path}:${a.start === a.end ? a.start : `${a.start}-${a.end}`}`).join(", ")}`] : []),
     ...(fact.staleSince ? [`stale: that code changed at @${fact.staleSince.slice(0, 7)}, so re-confirm before relying on it`] : []),
+    ...(fact.replaces ? [`${fact.status === "proposed" ? "would replace" : "replaces"} fact #${fact.replaces}`] : []),
     `fact #${fact.id}`,
   ];
   return `${fact.text} (${parts.join(" · ")})`;
+}
+
+/**
+ * Marks a fact confirmed by `by` (a proposed one, or a stale one re-confirmed), with its anchors
+ * now checked at `commit`, and retires the fact it replaces, if any.
+ */
+export function confirmFact(store: Store, fact: FactRecord, by: string, at: string, commit: string | null): void {
+  store.updateFact(fact.id, {
+    status: "confirmed",
+    confirmedBy: by,
+    confirmedAt: at,
+    staleSince: null,
+    ...(fact.anchors.length && commit ? { anchorCommit: commit } : {}),
+  });
+  if (fact.replaces) store.updateFact(fact.replaces, { status: "retired" });
 }
 
 /** "2 confirmed by people, 1 proposed, 1 stale", or null when there are none. */

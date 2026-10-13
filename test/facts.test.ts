@@ -7,6 +7,7 @@ import { enrolRepo } from "../src/ingest/registry.js";
 import { syncRepo } from "../src/ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy } from "../src/serve/access.js";
 import { createServer } from "../src/serve/mcp.js";
+import { confirmFact } from "../src/serve/facts.js";
 import { getPage } from "../src/serve/tools/get-page.js";
 import { recordFact, type Confirm } from "../src/serve/tools/record-fact.js";
 import { repoCard } from "../src/serve/tools/repo-card.js";
@@ -82,6 +83,44 @@ describe("recording a fact a person stated", () => {
     expect(systemAnchors.text).toContain("record the fact on that repo");
     expect([outside, missing, unknown, both, systemAnchors].every((r) => !r.ok)).toBe(true);
     expect(store.facts({ repos: ["web"], systems: ["Blog"] })).toEqual([]);
+  });
+
+  it("replaces an earlier fact once the person confirms the new one, so the two never both stand", async () => {
+    const { store, deps } = await brain();
+    await recordFact(deps, LOCAL_CALLER, rule, { confirm: accept(), person: "Rafe" });
+    let shown = "";
+    const confirm: Confirm = async (request) => {
+      shown = request.message;
+      return { action: "accept", text: request.text, statedBy: "Rafe" };
+    };
+
+    const raised = await recordFact(deps, LOCAL_CALLER, { ...rule, text: "Users can follow at most 1000 authors.", replaces: 1 }, { confirm, person: "Rafe" });
+    const page = await getPage(deps, LOCAL_CALLER, { repo: "web", page: "product" });
+
+    expect(shown).toContain('It replaces fact #1, which is retired once you accept: "Users can follow at most 500 authors."');
+    expect(raised.text).toContain("Fact #1, which it replaces, is retired.");
+    expect(store.getFact(1)?.status).toBe("retired");
+    expect(page.text).toContain("Users can follow at most 1000 authors. (rule · human-reviewed · Rafe");
+    expect(page.text).toContain("replaces fact #1 · fact #2)");
+    expect(page.text).not.toContain("500 authors");
+  });
+
+  it("keeps the earlier fact until a proposed replacement is confirmed, and won't replace one that's gone", async () => {
+    const { store, deps } = await brain();
+    await recordFact(deps, LOCAL_CALLER, rule, { confirm: accept(), person: "Rafe" });
+
+    const proposed = await recordFact(deps, LOCAL_CALLER, { ...rule, text: "Users can follow at most 1000 authors.", replaces: 1, propose: true }, { confirm: accept(), person: "Rafe" });
+    expect(proposed.text).toContain("fact #1 stands until it is");
+    expect(store.getFact(1)?.status).toBe("confirmed");
+
+    confirmFact(store, store.getFact(2)!, "Rafe", "2026-10-13T09:00:00Z", null);
+    expect(store.getFact(1)?.status).toBe("retired");
+    expect(store.getFact(2)).toMatchObject({ status: "confirmed", confirmedBy: "Rafe", replaces: 1 });
+
+    const again = await recordFact(deps, LOCAL_CALLER, { ...rule, replaces: 1 }, { confirm: accept(), person: "Rafe" });
+    const unknown = await recordFact(deps, LOCAL_CALLER, { ...rule, replaces: 99 }, { confirm: accept(), person: "Rafe" });
+    expect(again.text).toContain("No live fact #1 to replace.");
+    expect(unknown.ok).toBe(false);
   });
 });
 

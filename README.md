@@ -182,6 +182,9 @@ first: at the top of the product page, on the card, in search and in system over
 - **Where no dialog is possible** (a headless `claude -p` run, an older client, and Claude Code's
   desktop app, which declines the dialog without showing it), the fact is stored as *proposed*,
   and agents see it labelled so until someone runs `brain facts confirm`.
+- **A changed rule replaces the old one.** If the person changes something already recorded
+  ("the cap is now 1000"), the agent offers to replace that fact. The old one is retired when the
+  new one is confirmed, so the two never both stand.
 - **Anchored facts go stale.** A fact can point at the lines that enforce it. When those lines
   change, the next sync marks it stale ("re-confirm before relying on it"); lines moving around
   it don't.

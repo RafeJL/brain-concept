@@ -428,9 +428,14 @@ None of this runs Claude Code in the background, so it costs nothing beyond the 
    `aspnet-api`. `facts aspnet-api` shows the anchor moved to line 40. Then change line 40 itself
    and push again: the sync prints `code under 1 fact from people changed`, and the fact shows
    `stale`. `facts confirm <id>` clears it.
-6. **Gaps.** Search for something no repo covers (`search "refund policy"`), then run `gaps`. It
+6. **Replacing a fact.** In a new session, state a change in passing: *"I'm planning a change to
+   RealWorld: users should be capped at 1000 authors. What would this touch?"* The agent should
+   point out the recorded 500 rule and offer to replace it. Say yes: the dialog (or, in the
+   desktop app, a proposal) says it replaces fact #1. After confirming, `facts` lists only the
+   1000 rule, and `facts --all` shows the 500 one as retired.
+7. **Gaps.** Search for something no repo covers (`search "refund policy"`), then run `gaps`. It
    should list the search with a count.
-7. **The desktop app.** In the Code tab of the desktop app (tried 2026-10-12), the permission
+8. **The desktop app.** In the Code tab of the desktop app (tried 2026-10-12), the permission
    prompt appears but the confirm dialog doesn't: it comes back declined at once. The agent
    should say the dialog was most likely never shown, and offer to save it as proposed. Say yes;
    `facts` lists it as proposed, and `facts confirm <id>` confirms it.

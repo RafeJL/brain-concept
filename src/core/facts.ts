@@ -36,6 +36,8 @@ export interface FactRecord {
   confirmedAt: string | null;
   /** The commit at which an anchored line changed, making the fact stale. */
   staleSince: string | null;
+  /** The earlier fact this one replaces, retired once this one is confirmed. */
+  replaces: number | null;
 }
 
 export type NewFact = Omit<FactRecord, "id" | "staleSince">;

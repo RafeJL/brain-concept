@@ -185,4 +185,9 @@ export const MIGRATIONS: (string | ((db: DatabaseSync) => void))[] = [
     asked_at TEXT NOT NULL
   );
   `,
+  // A fact can replace an earlier one ("the cap is now 1000, not 500"). The earlier fact is
+  // retired when the new one is confirmed, so the two never both stand.
+  `
+  ALTER TABLE facts ADD COLUMN replaces INTEGER REFERENCES facts(id) ON DELETE SET NULL;
+  `,
 ];

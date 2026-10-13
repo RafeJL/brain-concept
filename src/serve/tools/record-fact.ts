@@ -21,6 +21,8 @@ export interface RecordInput {
   anchors?: string[];
   /** Store it as proposed without asking: for when the person asked to save it but can't get the dialog. */
   propose?: boolean;
+  /** An earlier fact this one replaces, retired once this one is confirmed. */
+  replaces?: number;
 }
 
 /**
@@ -70,6 +72,10 @@ export async function recordFact(
   const target = await resolveTarget(deps, caller, input);
   if (!target.ok) return target;
   const { repo, system, members, anchors, anchorCommit, label } = target;
+  const replaced = input.replaces === undefined ? null : deps.store.getFact(input.replaces);
+  if (input.replaces !== undefined && !(replaced && replaced.status !== "retired" && canSee(deps, replaced, target.readable))) {
+    return { ok: false, text: `No live fact #${input.replaces} to replace. Facts are numbered in brain_get, brain_search and the card.` };
+  }
 
   const match = matchExpression(text);
   const nearby = match ? deps.store.searchSections({ repos: members, match, limit: NEARBY, snippetWords: 24 }).hits : [];
@@ -83,6 +89,7 @@ export async function recordFact(
     `${input.kind} · from ${statedBy}${input.ticket ? ` · ticket ${input.ticket}` : ""}`,
     `Their words: "${quote}"`,
     ...(anchors.length ? [`Enforced at: ${input.anchors!.join(", ")}`] : []),
+    ...(replaced ? ["", `It replaces fact #${replaced.id}, which is retired once you accept: "${replaced.text}"`] : []),
     ...(nearby.length || related.length ? ["", "What the brain already says nearby (check it doesn't contradict this):"] : []),
     ...related.map((f) => `  - ${factLine(f)}`),
     ...nearby.map((hit) => `  - ${hit.repo} · ${hit.slug} › ${hit.heading || hit.pageTitle}: ${hit.snippet}`),
@@ -117,13 +124,21 @@ export async function recordFact(
     recordedAt: now,
     confirmedBy: confirmed ? by : null,
     confirmedAt: confirmed ? now : null,
+    replaces: replaced?.id ?? null,
   });
+  if (confirmed && replaced) deps.store.updateFact(replaced.id, { status: "retired" });
   const fact = deps.store.getFact(id)!;
   const summary = confirmed
-    ? `Recorded fact #${id} on ${label}, confirmed by ${by} (${HUMAN_TIER}). Later answers about ${label} include it.\n- ${factLine(fact)}`
+    ? `Recorded fact #${id} on ${label}, confirmed by ${by} (${HUMAN_TIER}). Later answers about ${label} include it.` +
+      `${replaced ? ` Fact #${replaced.id}, which it replaces, is retired.` : ""}\n- ${factLine(fact)}`
     : `Stored as proposed fact #${id} on ${label}: the person couldn't be asked here, so it isn't confirmed. ` +
-      `Agents see it labelled "proposed". Confirm it with: brain facts confirm ${id}\n- ${factLine(fact)}`;
+      `Agents see it labelled "proposed"${replaced ? `, and fact #${replaced.id} stands until it is` : ""}. Confirm it with: brain facts confirm ${id}\n- ${factLine(fact)}`;
   return { ok: true, data: { outcome: confirmed ? "confirmed" : "proposed", fact, nearby, related }, text: summary };
+}
+
+/** Whether the caller can see a fact: it is on a repo they can read, or a system with such a repo. */
+function canSee(deps: ToolDeps, fact: FactRecord, readable: readonly string[]): boolean {
+  return fact.repo ? readable.includes(fact.repo) : findSystem(deps.store, fact.system!, readable) !== undefined;
 }
 
 type Target = {

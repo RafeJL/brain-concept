@@ -362,8 +362,8 @@ export class SqliteStore implements Store {
     }
     const { lastInsertRowid } = this.db
       .prepare(
-        `INSERT INTO facts (repo, system, kind, text, quote, stated_by, ticket, anchors, anchor_commit, status, recorded_at, confirmed_by, confirmed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO facts (repo, system, kind, text, quote, stated_by, ticket, anchors, anchor_commit, status, recorded_at, confirmed_by, confirmed_at, replaces)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         fact.repo,
@@ -379,6 +379,7 @@ export class SqliteStore implements Store {
         fact.recordedAt,
         fact.confirmedBy,
         fact.confirmedAt,
+        fact.replaces,
       );
     return Number(lastInsertRowid);
   }
@@ -478,6 +479,7 @@ function toFact(row: Row): FactRecord {
     confirmedBy: optional(row.confirmed_by),
     confirmedAt: optional(row.confirmed_at),
     staleSince: optional(row.stale_since),
+    replaces: row.replaces === null ? null : Number(row.replaces),
   };
 }
 

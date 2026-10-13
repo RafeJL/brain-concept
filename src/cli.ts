@@ -4,7 +4,7 @@ import { parseArgs } from "node:util";
 import { localPerson, resolveDbPath } from "./config.js";
 import type { FactKind, FactRecord } from "./core/facts.js";
 import { anchorProblems, parseAnchor } from "./ingest/facts.js";
-import { factLine, visibleFacts } from "./serve/facts.js";
+import { confirmFact, factLine, visibleFacts } from "./serve/facts.js";
 import { findSystem } from "./serve/systems.js";
 import { recordFact } from "./serve/tools/record-fact.js";
 import { runQueued } from "./core/queue.js";
@@ -517,15 +517,9 @@ async function facts(
         console.log(`Fact #${fact.id} is already confirmed.`);
         return;
       }
-      const commit = fact.repo ? store.getState(fact.repo)?.commit ?? null : null;
-      store.updateFact(fact.id, {
-        status: "confirmed",
-        confirmedBy: await localPerson(),
-        confirmedAt: now(),
-        staleSince: null,
-        ...(fact.anchors.length && commit ? { anchorCommit: commit } : {}),
-      });
+      confirmFact(store, fact, await localPerson(), now(), fact.repo ? store.getState(fact.repo)?.commit ?? null : null);
       console.log(`- ${factLine(store.getFact(fact.id)!)}`);
+      if (fact.replaces) console.log(`Retired fact #${fact.replaces}, which it replaces.`);
       if (fact.staleSince && fact.anchors.length) console.log("Its code changed: if the anchors no longer point at it, fix them with: brain facts edit " + fact.id + " --anchor <file:lines>");
       return;
     }

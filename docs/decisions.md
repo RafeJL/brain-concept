@@ -655,6 +655,15 @@ the brain couldn't answer are logged locally.
 - **The CLI** adds `brain facts` (list, add, confirm, edit, retire, export). `facts add` counts
   as the person confirming, since they typed it.
 
+**Found in the unprompted test.** Stating "users should be capped at 1000 authors" in a plan,
+without mentioning the brain, the agent found the recorded 500 fact, pointed out the conflict and
+that no API enforces either, and offered to update the rule, but it could only have added a
+second fact beside the first. `brain_record_fact` now takes `replaces: <fact number>`: the dialog
+shows the fact being replaced, and it is retired when the new one is confirmed (a proposed
+replacement leaves it standing until then; `brain facts confirm` retires it). Migration 13 adds
+the link. The same test showed the agent listing folders before loading the brain's tools in the
+desktop app, so the instructions now say to load them first.
+
 **Not in B3a:** an AI check of a fact against the code it's about (B3b), suggestions from gaps,
 and the harness's PO brief skill using the tool (H1).
 
