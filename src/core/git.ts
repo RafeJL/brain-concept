@@ -114,6 +114,45 @@ export async function changedFiles(repoPath: string, from: string, to: string): 
   return files;
 }
 
+/** A file's lines at a commit, or null when it isn't a file there. */
+export async function fileAtCommit(repoPath: string, commit: string, path: string): Promise<string[] | null> {
+  const out = await tryGit(repoPath, ["show", `${commit}:${path}`]);
+  return out === null ? null : out.split(/\r?\n/);
+}
+
+/** One changed run of lines: `oldLines` lines from `oldStart` became `newLines` lines (0 means none). */
+export interface Hunk {
+  oldStart: number;
+  oldLines: number;
+  newLines: number;
+}
+
+/**
+ * How each of `paths` changed between two commits, line by line: its hunks, or "deleted". A path
+ * that didn't change is absent. Null if either commit is unknown here.
+ */
+export async function changedLines(repoPath: string, from: string, to: string, paths: readonly string[]): Promise<Map<string, Hunk[] | "deleted"> | null> {
+  const out = await tryGit(repoPath, ["diff", "--unified=0", "--no-renames", "--no-color", from, to, "--", ...paths]);
+  if (out === null) return null;
+  const changes = new Map<string, Hunk[] | "deleted">();
+  let file: string | null = null;
+  for (const line of out.split("\n")) {
+    const header = /^--- (?:a\/(.+)|\/dev\/null)$/.exec(line);
+    if (header) {
+      file = header[1] ?? null;
+      continue;
+    }
+    if (line === "+++ /dev/null" && file) changes.set(file, "deleted");
+    const hunk = /^@@ -(\d+)(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(line);
+    if (hunk && file && changes.get(file) !== "deleted") {
+      const hunks = (changes.get(file) as Hunk[] | undefined) ?? [];
+      hunks.push({ oldStart: Number(hunk[1]), oldLines: Number(hunk[2] ?? 1), newLines: Number(hunk[3] ?? 1) });
+      changes.set(file, hunks);
+    }
+  }
+  return changes;
+}
+
 export async function remoteUrl(repoPath: string): Promise<string | null> {
   const url = await tryGit(repoPath, ["config", "--get", "remote.origin.url"]);
   return url ? stripCredentials(url) : null;

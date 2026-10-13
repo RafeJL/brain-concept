@@ -1,12 +1,13 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { FactRecord, Gap, GapSummary, NewFact } from "../core/facts.js";
 import type { Seam, SeamCoverage, SeamKind } from "../core/seams.js";
 import type { SystemRecord } from "../core/systems.js";
 import { BrainError, type FileRecord, type LanguageShare, type RepoRecord, type RepoState, type WikiPage } from "../core/types.js";
 import { MIGRATIONS } from "./migrations.js";
 import { indexPage, indexSeam, SEARCH_WEIGHTS } from "./search-index.js";
-import type { SearchFilter, SearchPage, SeamFilter, SeamUpdate, SectionHit, Store, SyncUpdate } from "./store.js";
+import type { FactChange, FactFilter, SearchFilter, SearchPage, SeamFilter, SeamUpdate, SectionHit, Store, SyncUpdate } from "./store.js";
 
 type Row = Record<string, unknown>;
 
@@ -353,6 +354,86 @@ export class SqliteStore implements Store {
     return rows.map((row) => String(row.name));
   }
 
+  addFact(fact: NewFact): number {
+    let system: number | null = null;
+    if (fact.system !== null) {
+      system = this.systemId(fact.system) ?? null;
+      if (system === null) throw new BrainError(`There is no system named "${fact.system}".`);
+    }
+    const { lastInsertRowid } = this.db
+      .prepare(
+        `INSERT INTO facts (repo, system, kind, text, quote, stated_by, ticket, anchors, anchor_commit, status, recorded_at, confirmed_by, confirmed_at, replaces)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        fact.repo,
+        system,
+        fact.kind,
+        fact.text,
+        fact.quote,
+        fact.statedBy,
+        fact.ticket,
+        JSON.stringify(fact.anchors),
+        fact.anchorCommit,
+        fact.status,
+        fact.recordedAt,
+        fact.confirmedBy,
+        fact.confirmedAt,
+        fact.replaces,
+      );
+    return Number(lastInsertRowid);
+  }
+
+  getFact(id: number): FactRecord | undefined {
+    const row = this.db.prepare(`${FACT_SELECT} WHERE facts.id = ?`).get(id) as Row | undefined;
+    return row && toFact(row);
+  }
+
+  facts(filter: FactFilter): FactRecord[] {
+    const { where, params } = factWhere(filter);
+    return (this.db.prepare(`${FACT_SELECT} WHERE ${where} ORDER BY facts.recorded_at DESC, facts.id DESC`).all(...params) as Row[]).map(toFact);
+  }
+
+  updateFact(id: number, change: FactChange): boolean {
+    const columns: Record<keyof FactChange, string> = {
+      text: "text",
+      status: "status",
+      confirmedBy: "confirmed_by",
+      confirmedAt: "confirmed_at",
+      staleSince: "stale_since",
+      anchors: "anchors",
+      anchorCommit: "anchor_commit",
+    };
+    const keys = (Object.keys(change) as (keyof FactChange)[]).filter((key) => change[key] !== undefined);
+    if (keys.length === 0) return this.getFact(id) !== undefined;
+    const values = keys.map((key) => (key === "anchors" ? JSON.stringify(change.anchors) : (change[key] as string | null)));
+    const set = keys.map((key) => `${columns[key]} = ?`).join(", ");
+    return Number(this.db.prepare(`UPDATE facts SET ${set} WHERE id = ?`).run(...values, id).changes) > 0;
+  }
+
+  searchFacts(filter: FactFilter & { match: string; limit: number }): FactRecord[] {
+    const { where, params } = factWhere(filter);
+    return (
+      this.db
+        .prepare(`${FACT_SELECT} JOIN fact_search ON fact_search.rowid = facts.id WHERE fact_search MATCH ? AND ${where} ORDER BY facts.status <> 'confirmed', facts.stale_since IS NOT NULL, bm25(fact_search) LIMIT ?`)
+        .all(filter.match, ...params, filter.limit) as Row[]
+    ).map(toFact);
+  }
+
+  logGap(gap: Gap): void {
+    this.db.prepare("INSERT INTO gaps (tool, query, repos, asked_at) VALUES (?, ?, ?, ?)").run(gap.tool, gap.query, gap.repos.join(" "), gap.askedAt);
+  }
+
+  gaps(limit: number): GapSummary[] {
+    const rows = this.db
+      .prepare(
+        `SELECT MIN(query) AS query, GROUP_CONCAT(DISTINCT tool) AS tools, COUNT(*) AS times, MAX(asked_at) AS last_asked
+         FROM gaps GROUP BY LOWER(TRIM(query)) ORDER BY times DESC, last_asked DESC LIMIT ?`,
+      )
+      .all(limit) as Row[];
+    return rows.map((row) => ({ query: String(row.query), tools: String(row.tools).split(","), times: Number(row.times), lastAsked: String(row.last_asked) }));
+  }
+
   private systemRows(): Row[] {
     return this.db.prepare("SELECT * FROM systems ORDER BY name").all() as Row[];
   }
@@ -365,6 +446,41 @@ export class SqliteStore implements Store {
   close(): void {
     this.db.close();
   }
+}
+
+const FACT_SELECT = "SELECT facts.*, systems.name AS system_name FROM facts LEFT JOIN systems ON systems.id = facts.system";
+
+/** Facts on the filter's repos or systems, leaving out retired ones unless asked. */
+function factWhere(filter: FactFilter): { where: string; params: string[] } {
+  const marks = (items: readonly string[]) => items.map(() => "?").join(", ");
+  const targets = [
+    ...(filter.repos.length ? [`facts.repo IN (${marks(filter.repos)})`] : []),
+    ...(filter.systems.length ? [`systems.name IN (${marks(filter.systems)})`] : []),
+  ];
+  const where = targets.length ? `(${targets.join(" OR ")})` : "0";
+  return { where: filter.retired ? where : `${where} AND facts.status <> 'retired'`, params: [...filter.repos, ...filter.systems] };
+}
+
+function toFact(row: Row): FactRecord {
+  const optional = (value: unknown) => (value === null ? null : String(value));
+  return {
+    id: Number(row.id),
+    repo: optional(row.repo),
+    system: optional(row.system_name),
+    kind: String(row.kind) as FactRecord["kind"],
+    text: String(row.text),
+    quote: String(row.quote),
+    statedBy: String(row.stated_by),
+    ticket: optional(row.ticket),
+    anchors: JSON.parse(String(row.anchors)) as FactRecord["anchors"],
+    anchorCommit: optional(row.anchor_commit),
+    status: String(row.status) as FactRecord["status"],
+    recordedAt: String(row.recorded_at),
+    confirmedBy: optional(row.confirmed_by),
+    confirmedAt: optional(row.confirmed_at),
+    staleSince: optional(row.stale_since),
+    replaces: row.replaces === null ? null : Number(row.replaces),
+  };
 }
 
 /** Rows of one kind (0 sections, 1 seams) matching the search in the given repos. */

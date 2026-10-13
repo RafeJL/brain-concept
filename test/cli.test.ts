@@ -54,3 +54,23 @@ describe("brain systems", () => {
     expect(show).toContain("Conduit (confirmed) · 1 repo\n\nA blogging platform.");
   }, 30_000);
 });
+
+describe("brain facts and brain gaps", () => {
+  it("records a fact as the person at the keyboard, lists it, retires it, and lists what searches missed", () => {
+    const dbPath = join(tempDir(), "brain.db");
+    brain(dbPath, "add", repoFromFixture("articles-api"), "--name", "api", "--no-ai", "--no-hook");
+
+    const added = brain(dbPath, "facts", "add", "api", "--kind", "rule", "--text", "Only an article's author can delete it.", "--ticket", "CONDUIT-7");
+    const listed = brain(dbPath, "facts");
+    const retired = brain(dbPath, "facts", "retire", "1");
+    const after = brain(dbPath, "facts", "api");
+    brain(dbPath, "search", "refund policy");
+    const gaps = brain(dbPath, "gaps");
+
+    expect(added).toContain("Recorded fact #1 on api, confirmed by");
+    expect(listed).toMatch(/^api\s+Only an article's author can delete it\. \(rule · human-reviewed · .+ · ticket CONDUIT-7 · fact #1\)/);
+    expect(retired).toContain("Retired fact #1.");
+    expect(after).toBe("No facts on api yet.\n");
+    expect(gaps).toContain('1×  "refund policy"  (brain_search, last');
+  }, 30_000);
+});

@@ -2,6 +2,7 @@ import { listTree, resolveCommit } from "../core/git.js";
 import { detectLanguage } from "../core/languages.js";
 import type { FileRecord } from "../core/types.js";
 import type { Store } from "../store/store.js";
+import { refreshFacts } from "./facts.js";
 import { requireRepo } from "./registry.js";
 
 export interface SyncResult {
@@ -12,6 +13,8 @@ export interface SyncResult {
   changed: number;
   removed: number;
   unchanged: number;
+  /** Facts whose anchored code changed in this sync, so they need re-confirming. */
+  staleFacts: number;
 }
 
 /**
@@ -48,6 +51,7 @@ export async function syncRepo(store: Store, name: string): Promise<SyncResult> 
   const remove = [...known.keys()];
 
   store.applySync(name, { commit, fileCount: tree.length, upsert, remove });
+  const stale = previous?.commit === commit ? [] : await refreshFacts(store, name, repo.path, commit);
   return {
     repo: name,
     commit,
@@ -56,5 +60,6 @@ export async function syncRepo(store: Store, name: string): Promise<SyncResult> 
     changed,
     removed: remove.length,
     unchanged: tree.length - added - changed,
+    staleFacts: stale.length,
   };
 }

@@ -1,6 +1,8 @@
+import type { FactRecord } from "../../core/facts.js";
 import { firstSentence } from "../../core/sections.js";
 import type { SystemRecord } from "../../core/systems.js";
 import type { Caller } from "../access.js";
+import { factLine } from "../facts.js";
 import { linkSummary, neighbours, type Neighbour, type Neighbours } from "../neighbours.js";
 import { findSystem, quoted, visibleSystems } from "../systems.js";
 import { count, indexedAt, readableRepos, type ToolDeps, type ToolResult } from "./common.js";
@@ -27,6 +29,8 @@ export interface SystemOverview {
   /** Calls from members to readable repos outside the system, and from those into it. */
   outgoing: SystemLink[];
   incoming: SystemLink[];
+  /** What people stated about the system and its readable repos. */
+  facts: FactRecord[];
 }
 
 /** How long a member's product sentence may run in the overview's table. */
@@ -71,14 +75,20 @@ export async function systemOverview(deps: ToolDeps, caller: Caller, name: strin
     within,
     outgoing,
     incoming: [...incoming].sort(([a], [b]) => a.localeCompare(b)).map(([from, to]) => ({ from, to })),
+    facts: deps.store.facts({ repos: system.repos, systems: [system.name] }),
   };
   return { ok: true, data, text: await render(deps, data) };
 }
 
-async function render(deps: ToolDeps, { system, members, within, outgoing, incoming }: SystemOverview): Promise<string> {
+async function render(deps: ToolDeps, { system, members, within, outgoing, incoming, facts }: SystemOverview): Promise<string> {
   const width = Math.max(...members.map((m) => m.repo.length)) + 2;
   const out = [`${system.name} (${system.status}) · ${count(members.length, "repo")}`, ""];
   out.push(system.summary || `(no summary yet: add one with brain systems set ${quoted(system.name)} --summary "<one line>")`, "");
+  if (facts.length) {
+    out.push("From people (stated by a person, not written by Claude Code; each says whether it was confirmed)");
+    for (const fact of facts) out.push(`  ${fact.repo ?? "system"}: ${factLine(fact)}`);
+    out.push("");
+  }
   out.push("Repos");
   for (const m of members) {
     const product = m.product ? clip(m.product, PRODUCT_WIDTH) : "(no product page yet)";

@@ -1,3 +1,4 @@
+import type { FactRecord, Gap, GapSummary, NewFact } from "../core/facts.js";
 import type { Seam, SeamCoverage, SeamKind } from "../core/seams.js";
 import type { SystemRecord } from "../core/systems.js";
 import type { FileRecord, LanguageShare, RepoRecord, RepoState, WikiPage } from "../core/types.js";
@@ -50,6 +51,19 @@ export interface SectionHit {
   /** How well it matched (bm25, higher is better), for comparing hits of one search. */
   score: number;
 }
+
+/** Which facts to read: those on these repos and these systems (by name). */
+export interface FactFilter {
+  /** Always the caller's readable set. */
+  repos: readonly string[];
+  /** Systems the caller can see. */
+  systems: readonly string[];
+  /** Include retired facts. Default false. */
+  retired?: boolean;
+}
+
+/** What `updateFact` may change. Anchors change together with the commit they were checked at. */
+export type FactChange = Partial<Pick<FactRecord, "text" | "status" | "confirmedBy" | "confirmedAt" | "staleSince" | "anchors" | "anchorCommit">>;
 
 export interface SearchPage<T> {
   /** How many rows match in all, for paging. */
@@ -110,6 +124,20 @@ export interface Store {
   removeSystem(name: string): boolean;
   /** Names of the systems whose name or summary match an FTS5 expression, best first. */
   searchSystems(match: string): string[];
+
+  /** Stores a fact on a repo or a system (by name) and returns its id. */
+  addFact(fact: NewFact): number;
+  getFact(id: number): FactRecord | undefined;
+  /** Facts on the given repos and systems, newest first. */
+  facts(filter: FactFilter): FactRecord[];
+  /** False when there is no such fact. */
+  updateFact(id: number, change: FactChange): boolean;
+  /** Facts matching an FTS5 expression: confirmed and current ones first, then best match. */
+  searchFacts(filter: FactFilter & { match: string; limit: number }): FactRecord[];
+
+  logGap(gap: Gap): void;
+  /** Logged gaps grouped by question (ignoring case), most asked first. */
+  gaps(limit: number): GapSummary[];
 
   close(): void;
 }

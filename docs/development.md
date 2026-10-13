@@ -101,5 +101,5 @@ The hook isn't installed if the repo already has its own `reference-transaction`
 | 0, 1, 3a | Index, seam graph, `brain_find_consumers`, `brain_impact`, repo cards, auto-sync | ✅ |
 | W0–W5 | The switch to AI-written wikis: Claude Code writes wikis and maps routes and calls in any language, every citation checked; the parsers removed; `brain_search` | ✅ |
 | 2 | Harness evals | Waiting on how the harness integrates |
-| 4 | Curated context: people correct and confirm facts (`human-reviewed`) | Planned |
+| 4 (B3) | Facts from people (`human-reviewed`): `brain_record_fact` with a confirm dialog, staleness, gaps | B3a built; B3b (conflict check against code) planned |
 | 6 | Hosting: Azure, cloud containers for the runs, GitHub permissions | Planned |

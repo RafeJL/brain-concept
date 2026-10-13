@@ -157,6 +157,7 @@ async function render(deps: ToolDeps, { work, groups, weaker }: WorkImpact, read
   const noWiki = readable.filter((name) => deps.store.pages(name).length === 0);
   const noWikiNote = noWiki.length ? `No wiki yet, so only their routes were searched: ${noWiki.join(", ")} (brain sync <repo> writes one).` : "";
   if (groups.length === 0) {
+    deps.store.logGap({ tool: "brain_impact", query: work, repos: [], askedAt: new Date().toISOString() });
     return [`Nothing in the wikis or route map of ${count(readable.length, "repo")} matches "${work}". Try the words the product uses.`, noWikiNote].filter(Boolean).join("\n");
   }
 

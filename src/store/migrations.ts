@@ -141,4 +141,53 @@ export const MIGRATIONS: (string | ((db: DatabaseSync) => void))[] = [
   `
   ALTER TABLE repo_state ADD COLUMN pages_failed_at TEXT;
   `,
+  // B3: facts people state in a conversation, about a repo or a system, and the searches the
+  // brain couldn't answer. fact_search indexes the facts' text; triggers keep it in step.
+  `
+  CREATE TABLE facts (
+    id            INTEGER PRIMARY KEY,
+    repo          TEXT REFERENCES repos(name) ON DELETE CASCADE,
+    system        INTEGER REFERENCES systems(id) ON DELETE CASCADE,
+    kind          TEXT NOT NULL CHECK (kind IN ('rule', 'term', 'purpose', 'decision', 'answer')),
+    text          TEXT NOT NULL,
+    quote         TEXT NOT NULL,
+    stated_by     TEXT NOT NULL,
+    ticket        TEXT,
+    anchors       TEXT NOT NULL DEFAULT '[]',
+    anchor_commit TEXT,
+    status        TEXT NOT NULL CHECK (status IN ('proposed', 'confirmed', 'retired')),
+    recorded_at   TEXT NOT NULL,
+    confirmed_by  TEXT,
+    confirmed_at  TEXT,
+    stale_since   TEXT,
+    CHECK ((repo IS NULL) <> (system IS NULL))
+  );
+  CREATE INDEX facts_by_repo ON facts(repo);
+  CREATE INDEX facts_by_system ON facts(system);
+
+  CREATE VIRTUAL TABLE fact_search USING fts5(text, quote, content = 'facts', content_rowid = 'id', tokenize = 'porter unicode61');
+  CREATE TRIGGER facts_index AFTER INSERT ON facts BEGIN
+    INSERT INTO fact_search (rowid, text, quote) VALUES (new.id, new.text, new.quote);
+  END;
+  CREATE TRIGGER facts_unindex AFTER DELETE ON facts BEGIN
+    INSERT INTO fact_search (fact_search, rowid, text, quote) VALUES ('delete', old.id, old.text, old.quote);
+  END;
+  CREATE TRIGGER facts_reindex AFTER UPDATE OF text, quote ON facts BEGIN
+    INSERT INTO fact_search (fact_search, rowid, text, quote) VALUES ('delete', old.id, old.text, old.quote);
+    INSERT INTO fact_search (rowid, text, quote) VALUES (new.id, new.text, new.quote);
+  END;
+
+  CREATE TABLE gaps (
+    id       INTEGER PRIMARY KEY,
+    tool     TEXT NOT NULL,
+    query    TEXT NOT NULL,
+    repos    TEXT NOT NULL,
+    asked_at TEXT NOT NULL
+  );
+  `,
+  // A fact can replace an earlier one ("the cap is now 1000, not 500"). The earlier fact is
+  // retired when the new one is confirmed, so the two never both stand.
+  `
+  ALTER TABLE facts ADD COLUMN replaces INTEGER REFERENCES facts(id) ON DELETE SET NULL;
+  `,
 ];

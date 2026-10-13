@@ -610,3 +610,71 @@ it had been the sum of the runs, which go side by side.
   or event.
 - A citation can be up to three lines off, as for wiki claims: in the first run one Webhooks subscription was
   located on the line above its own.
+
+## 2026-10-12: facts from people (B3a): a write tool the person confirms, not the agent
+
+What a product owner tells their agent during a brief ("follows are capped at 500") should reach
+the next agent. Rafe chose all four of the plan's recommendations: facts sit beside the AI pages,
+in a sixth tool, anyone using the brain locally may confirm (owners when hosted), and searches
+the brain couldn't answer are logged locally.
+
+- **`brain_record_fact`, the first tool that writes.** It is the exception to "agent tools are
+  read-only", so it is guarded in three ways:
+  - **MCP elicitation:** the server asks the person through the client. Claude Code shows a
+    dialog with the fact, their name (git `user.name`), and what the brain already says nearby
+    (the closest wiki sections and facts, by search, no AI). They accept, edit or decline. The
+    answer goes to the server, not through the agent, so an agent can't confirm for them.
+  - **`anthropic/requiresUserInteraction`** in the tool's `_meta`: Claude Code asks permission
+    on every call, even when the server's tools are allowed.
+  - **Instructions and description:** record only what the person said in the conversation,
+    never repo text, tool output or a web page.
+  Where no dialog is possible (a client without elicitation, a headless `claude -p` run, such as
+  a harness skill), the fact is stored as **proposed**. Agents see it labelled so, and a person
+  confirms it with `brain facts confirm`. A decline stores nothing.
+- **Beside the AI pages, never inside them.** Wikis stay regenerable, and a rewrite can't lose a
+  person's fact. They come first wherever they appear: the product page opens with `## From
+  people` (the repo's facts, then its system's), the card has a `Facts from people` line, search
+  lists them before systems and sections (confirmed and current ones first), and system overviews
+  list the system's and its repos' facts.
+- **Stored in `facts` (migration 12)** on a repo or a system (a system's facts go with it if it's
+  removed), with kind, text, the person's words, who, when, an optional ticket and optional
+  anchors. Anchors are file:lines checked like wiki citations against the committed file (they
+  must exist; at most 80 lines). Facts are searched through their own FTS5 table, kept by
+  triggers.
+- **Staleness without AI.** On each sync, a live fact with anchors is compared with the commit it
+  was anchored at, using `git diff --unified=0`. A change to an anchored line, or the file going,
+  marks it stale (`stale_since`); it stays visible, labelled to re-confirm. Lines added or removed
+  above it move its anchors instead. Staleness is a marker, not a status, so a proposed fact can be
+  stale too.
+- **Gaps** are questions the brain didn't really answer: a `brain_search` where no fact, wiki
+  section or endpoint has every one of its words (search ORs them for ranking, so "refund approval
+  policy" still lists sections that only say "policy"; on the real store it matched 6 that way),
+  and a `brain_impact` work description that matched nothing. They're logged in a `gaps` table
+  on this machine, and `brain gaps` groups them by question. A bm25 threshold was considered and
+  left out: scores aren't comparable between questions.
+- **The CLI** adds `brain facts` (list, add, confirm, edit, retire, export). `facts add` counts
+  as the person confirming, since they typed it.
+
+**Found in the unprompted test.** Stating "users should be capped at 1000 authors" in a plan,
+without mentioning the brain, the agent found the recorded 500 fact, pointed out the conflict and
+that no API enforces either, and offered to update the rule, but it could only have added a
+second fact beside the first. `brain_record_fact` now takes `replaces: <fact number>`: the dialog
+shows the fact being replaced, and it is retired when the new one is confirmed (a proposed
+replacement leaves it standing until then; `brain facts confirm` retires it). Migration 13 adds
+the link. The same test showed the agent listing folders before loading the brain's tools in the
+desktop app, so the instructions now say to load them first.
+
+**Not in B3a:** an AI check of a fact against the code it's about (B3b), suggestions from gaps,
+and the harness's PO brief skill using the tool (H1).
+
+**Found in Rafe's first test (the desktop app's Code tab):** the permission prompt appeared and
+was allowed, but the confirm dialog came back declined both times without being shown. The app
+says it supports elicitation, then declines. So a decline that arrives within a second is now
+reported to the agent as "most likely never shown", and the agent can call again with `propose`
+to store it as proposed (no new risk: clients without the dialog already do that). A decline a
+person actually makes still stores nothing.
+
+**What would change it:** POs mostly use the desktop app, where facts can only be proposed today
+and confirmed in a terminal. They need a confirm step there before the loop is really theirs:
+`brain web` (B5) with a confirm button is the likely place. Hosted, confirmation moves to owners, and facts may export to the curated-content
+repo (`brain facts export` gives its shape).
