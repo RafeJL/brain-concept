@@ -137,8 +137,9 @@ describe("brain wiki", () => {
 
     const wiki = await generateWiki(store, fakeRunner(next).runner, "api", { full: true });
 
-    expect(wiki.reports.map((r) => [r.slug, r.published])).toEqual([["overview", false], ["api", true]]);
-    expect(store.pages("api").map((p) => p.slug)).toEqual(["overview", "api"]);
+    // The pages the run left out are asked for again; when that fails too, their old versions stay.
+    expect(wiki.reports.map((r) => [r.slug, r.published])).toEqual([["overview", false], ["api", true], ["build-run-test", false], ["product", false]]);
+    expect(store.pages("api").map((p) => p.slug)).toEqual(["overview", "api", "build-run-test", "product"]);
     expect(store.pages("api")[0]).toEqual(firstOverview);
     expect(store.pages("api")[1]!.markdown).toBe("# API\n\n- `GET /articles/:slug` is public [src/articles.ts:3].");
     expect(wiki.reports[1]!.removed).toEqual([
@@ -182,7 +183,9 @@ describe("updating the wiki", () => {
     await syncRepo(store, "api");
     return { store, dir, sha, next, deps };
   }
-  const editedArticles = () => readFileSync(fileURLToPath(new URL("./fixtures/repos/articles-api/src/articles.ts", import.meta.url)), "utf8") + "// audited\n";
+  const articles = () => readFileSync(fileURLToPath(new URL("./fixtures/repos/articles-api/src/articles.ts", import.meta.url)), "utf8");
+  /** A change to cited lines: every page citing them is rewritten. */
+  const editedArticles = () => articles().replace("auth.required, remove", "auth.required, audited, remove");
 
   it("rewrites only the pages whose cited files changed, and carries the rest forward", async () => {
     const { store, next } = await changed({ "src/articles.ts": editedArticles() });
@@ -227,6 +230,24 @@ describe("updating the wiki", () => {
     expect(store.pages("api").every((p) => p.commit === next)).toBe(true);
   });
 
+  it("moves citations past lines added around them with no AI run, but rewrites a page whose cited file grew a lot", async () => {
+    const { store, dir, next } = await changed({ "src/articles.ts": `// header\n${articles()}// audited\n` });
+
+    const wiki = await generateWiki(store, never, "api");
+
+    expect(wiki).toMatchObject({ reports: [], carried: ["overview", "build-run-test", "api", "product"] });
+    expect(store.pages("api").every((p) => p.commit === next)).toBe(true);
+    expect(store.pages("api").find((p) => p.slug === "overview")!.markdown).toContain("[README.md:1; src/articles.ts:2-6]");
+    expect(store.pages("api").find((p) => p.slug === "api")!.markdown).toContain("[src/articles.ts:4]");
+
+    commit(dir, { "src/articles.ts": `${articles()}${"// more\n".repeat(12)}` });
+    await syncRepo(store, "api");
+    const { runner, seen } = fakeRunner(recorded([overview, goodApi]));
+    await generateWiki(store, runner, "api");
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.request.prompt).toContain('<page slug="api">');
+  });
+
   it("writes a failing page once more, telling the AI what the check removed", async () => {
     const { store } = await changed({ "src/articles.ts": editedArticles() });
     const { runner, seen } = fakeRunner(recorded([overview, badApi]), recorded([goodApi]));
@@ -259,7 +280,7 @@ describe("updating the wiki", () => {
     expect(store.pages("api").map((p) => p.commit)).toEqual([next, next, sha, next]);
     expect(store.pages("api")[2]).toEqual(before);
     const kept = `kept from @${sha.slice(0, 7)}: its rewrite at @${next.slice(0, 7)} failed the citation check`;
-    expect(list.text).toContain(`API (${kept})`);
+    expect(list.text.split("\n").find((line) => /^\s+api\s/.test(line))).toContain(`(${kept})`);
     expect(page.text).toContain(`Note: ${kept}, so this older version is shown.`);
     expect(card.text).not.toContain("older than the index");
   });
@@ -323,7 +344,7 @@ describe("brain_get", () => {
     await generateWiki(store, fakeRunner().runner, "api");
     const after = await repoCard(deps, LOCAL_CALLER, "api", "concise");
 
-    expect(before.text).toContain("Wiki: not generated yet (brain sync api)");
+    expect(before.text).toContain("Wiki: not written yet (brain sync api writes it");
     expect(after.text).toContain("Wiki: 4 pages (overview, build-run-test, api, product) · read with brain_get");
   });
 });

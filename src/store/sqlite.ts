@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { FactCheck, FactRecord, Gap, GapSummary, NewFact } from "../core/facts.js";
 import type { Seam, SeamCoverage, SeamKind } from "../core/seams.js";
 import type { SystemRecord } from "../core/systems.js";
-import { BrainError, type FileRecord, type LanguageShare, type RepoRecord, type RepoState, type WikiPage } from "../core/types.js";
+import { BrainError, type FileRecord, type LanguageShare, type PageKind, type PlannedPage, type RepoNote, type RepoRecord, type RepoState, type WikiPage } from "../core/types.js";
 import { MIGRATIONS } from "./migrations.js";
 import { indexPage, indexSeam, SEARCH_WEIGHTS } from "./search-index.js";
 import type { FactChange, FactFilter, SearchFilter, SearchPage, SeamFilter, SeamUpdate, SectionHit, Store, SyncUpdate } from "./store.js";
@@ -49,8 +49,8 @@ export class SqliteStore implements Store {
 
   addRepo(repo: RepoRecord): void {
     this.db
-      .prepare("INSERT INTO repos (name, path, ref, remote, enrolled_at) VALUES (?, ?, ?, ?, ?)")
-      .run(repo.name, repo.path, repo.ref, repo.remote, repo.enrolledAt);
+      .prepare("INSERT INTO repos (name, path, ref, remote, enrolled_at, note, proposed_note) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(repo.name, repo.path, repo.ref, repo.remote, repo.enrolledAt, repo.note && JSON.stringify(repo.note), repo.proposedNote && JSON.stringify(repo.proposedNote));
   }
 
   getRepo(name: string): RepoRecord | undefined {
@@ -64,6 +64,14 @@ export class SqliteStore implements Store {
 
   setRepoRef(name: string, ref: string): boolean {
     return Number(this.db.prepare("UPDATE repos SET ref = ? WHERE name = ?").run(ref, name).changes) > 0;
+  }
+
+  setRepoNote(name: string, note: RepoNote | null): void {
+    this.db.prepare("UPDATE repos SET note = ? WHERE name = ?").run(note && JSON.stringify(note), name);
+  }
+
+  setProposedNote(name: string, note: RepoNote | null): void {
+    this.db.prepare("UPDATE repos SET proposed_note = ? WHERE name = ?").run(note && JSON.stringify(note), name);
   }
 
   removeRepo(name: string): boolean {
@@ -80,6 +88,8 @@ export class SqliteStore implements Store {
         fileCount: Number(row.file_count),
         seamsCommit: row.seams_commit === null ? null : String(row.seams_commit),
         pagesFailedAt: row.pages_failed_at === null ? null : String(row.pages_failed_at),
+        planCommit: row.plan_commit === null ? null : String(row.plan_commit),
+        planNote: row.plan_note === null ? null : String(row.plan_note),
       }
     );
   }
@@ -194,14 +204,14 @@ export class SqliteStore implements Store {
 
   replacePages(repo: string, pages: readonly WikiPage[]): void {
     const insert = this.db.prepare(
-      `INSERT INTO pages (repo, slug, position, title, markdown, commit_sha, claims, removed, model, cost_usd, generated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO pages (repo, slug, position, title, kind, markdown, commit_sha, claims, removed, model, cost_usd, generated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     this.transaction(() => {
       this.db.prepare("DELETE FROM pages WHERE repo = ?").run(repo);
       // Deleting the pages deletes their sections and search rows.
       pages.forEach((p, i) => {
-        insert.run(repo, p.slug, i, p.title, p.markdown, p.commit, p.claims, p.removed, p.model, p.costUsd, p.generatedAt);
+        insert.run(repo, p.slug, i, p.title, p.kind, p.markdown, p.commit, p.claims, p.removed, p.model, p.costUsd, p.generatedAt);
         indexPage(this.db, repo, p.slug, p.title, p.markdown);
       });
     });
@@ -213,6 +223,7 @@ export class SqliteStore implements Store {
       repo: String(row.repo),
       slug: String(row.slug),
       title: String(row.title),
+      kind: String(row.kind) as PageKind,
       markdown: String(row.markdown),
       commit: String(row.commit_sha),
       claims: Number(row.claims),
@@ -221,6 +232,27 @@ export class SqliteStore implements Store {
       costUsd: Number(row.cost_usd),
       generatedAt: String(row.generated_at),
     }));
+  }
+
+  wikiPlan(repo: string): PlannedPage[] {
+    const rows = this.db.prepare("SELECT * FROM wiki_plans WHERE repo = ? ORDER BY position").all(repo) as Row[];
+    return rows.map((row) => ({
+      slug: String(row.slug),
+      title: String(row.title),
+      kind: String(row.kind) as PageKind,
+      brief: String(row.brief),
+      covers: JSON.parse(String(row.covers)) as string[],
+      keyFiles: JSON.parse(String(row.key_files)) as string[],
+    }));
+  }
+
+  replaceWikiPlan(repo: string, plan: readonly PlannedPage[], madeWith: { commit: string | null; note: string | null }): void {
+    const insert = this.db.prepare("INSERT INTO wiki_plans (repo, slug, position, title, kind, brief, covers, key_files) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM wiki_plans WHERE repo = ?").run(repo);
+      plan.forEach((p, i) => insert.run(repo, p.slug, i, p.title, p.kind, p.brief, JSON.stringify(p.covers), JSON.stringify(p.keyFiles)));
+      this.db.prepare("UPDATE repo_state SET plan_commit = ?, plan_note = ? WHERE repo = ?").run(madeWith.commit, madeWith.note, repo);
+    });
   }
 
   searchSections(filter: SearchFilter): SearchPage<SectionHit> {
@@ -552,5 +584,7 @@ function toRepo(row: Row): RepoRecord {
     ref: String(row.ref),
     remote: row.remote === null ? null : String(row.remote),
     enrolledAt: String(row.enrolled_at),
+    note: row.note === null ? null : (JSON.parse(String(row.note)) as RepoNote),
+    proposedNote: row.proposed_note === null ? null : (JSON.parse(String(row.proposed_note)) as RepoNote),
   };
 }

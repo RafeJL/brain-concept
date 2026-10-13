@@ -18,14 +18,14 @@ async function connect(store: SqliteStore): Promise<Client> {
 }
 
 describe("MCP server", () => {
-  it("lists the read-only tools, then the one that records a fact a person stated", async () => {
+  it("lists the read-only tools, then the two that write: a fact a person stated, and a note steering a wiki", async () => {
     const client = await connect(new SqliteStore(":memory:"));
 
     const { tools } = await client.listTools();
 
-    expect(tools.map((t) => t.name)).toEqual(["brain_repo_card", "brain_find_consumers", "brain_impact", "brain_get", "brain_search", "brain_record_fact"]);
+    expect(tools.map((t) => t.name)).toEqual(["brain_repo_card", "brain_find_consumers", "brain_impact", "brain_get", "brain_search", "brain_record_fact", "brain_set_note"]);
     expect(tools.slice(0, 5).every((t) => t.annotations?.readOnlyHint === true)).toBe(true);
-    expect(tools[5]?.annotations?.readOnlyHint).toBe(false);
+    expect(tools.slice(5).every((t) => t.annotations?.readOnlyHint === false)).toBe(true);
   });
 
   it("tells the client when to use the brain", async () => {
@@ -61,10 +61,10 @@ describe("server instructions", () => {
   function store(): SqliteStore {
     const s = new SqliteStore(":memory:");
     for (const name of ["aspnet-api", "react-web", "payroll"]) {
-      s.addRepo({ name, path: `/repos/${name}`, ref: "main", remote: null, enrolledAt: "2026-10-12T00:00:00Z" });
+      s.addRepo({ name, path: `/repos/${name}`, ref: "main", remote: null, enrolledAt: "2026-10-12T00:00:00Z", note: null, proposedNote: null });
     }
     s.replacePages("aspnet-api", [
-      { repo: "aspnet-api", slug: "product", title: "Product", markdown: "# Product\n\nLets people write and read articles [a.cs:1].", commit: "c", claims: 1, removed: 0, model: "m", costUsd: 0, generatedAt: "now" },
+      { repo: "aspnet-api", slug: "product", title: "Product", kind: "core", markdown: "# Product\n\nLets people write and read articles [a.cs:1].", commit: "c", claims: 1, removed: 0, model: "m", costUsd: 0, generatedAt: "now" },
     ]);
     s.setSystem("RealWorld", ["aspnet-api", "react-web"], "A blogging platform.");
     return s;

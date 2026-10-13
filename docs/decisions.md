@@ -715,3 +715,82 @@ the first pass, about 10s a repo):
   now says code that simply lacks a rule is absent, and contradicts means the code actively does
   otherwise. Re-checked, flask-api says absent and the comment rule still contradicts.
 - A second `facts check` with nothing changed ran no AI.
+
+## 2026-10-13: wikis that fit the repo, and syncs side by side (B4a)
+
+A technical plan needs the architecture, the key flows, the data model and the integrations
+without grepping. Five fixed pages hold that for a small service but not for eShop, whose
+ordering page was a few lines for a whole service. Rafe asked that it line up with DeepWiki and
+Google Code Wiki without bloat, and without making syncs slower.
+
+- **From DeepWiki:** pages are planned from the code's structure first (DeepWiki clusters files),
+  with a cap (theirs is 30, ours 20) and steering by notes. **Not copied:** DeepWiki reads its
+  steering from `.devin/wiki.json` in the repo. Ours is set by a person (`brain note`, or
+  `brain_set_note` with a confirm dialog), because repo text is untrusted. **Kept, which neither
+  of them has:** every claim and diagram box is checked, and updates are incremental.
+- **Small or large, without AI:** 200+ source files outside tests, or 4+ projects. On the samples
+  that is only eShop (573 files, 20 projects); laravel-api, the largest of the rest, has 96 in
+  one. Small repos keep a single run, so they get no slower, and gain data-model and
+  integrations pages where they apply.
+- **Large repos:**
+  - Planned from a free inventory, so the planning run doesn't list folders itself.
+  - Written 4 pages to a run, the runs side by side, each starting from its pages' key files.
+  - Planned again only for a new project, enough new code outside every page, or a changed note.
+    Even then, only new pages are written; a note shapes existing pages as they're next rewritten.
+- **Updates do less:** citations move through the diff when only the lines around them changed,
+  using the same code as fact anchors. A page is rewritten only when its cited lines change, its
+  cited file grows by ten lines or more, or a file is added beside one it cites.
+- **Diagrams** are on the overview and flow pages only. A `%% [path:lines]` comment cites each
+  element, and each is checked like a sentence. Agents get pages without them by default: the
+  text says the same, and it saves tokens.
+- **Speed:** a sync's links, wiki and fact checks share one worktree and run at once. `add` and
+  `sync` do three repos at a time, under one cap of four Claude Code runs per command.
+
+**Gate** (a snapshot of the real store):
+- **eShop, as its next sync will run it** (it has five pages and no plan):
+  - Planned 18 pages around the five: 10 areas matching its real services and apps, place-order
+    and sign-in flows, data model and integrations.
+  - Wrote the 13 new pages in 273s for $2.78. The plan was the first run, then the batches side by
+    side. All were published, keeping 73–96% of their claims.
+  - The five old pages were kept, not rewritten.
+  - The place-order flow has 15 numbered, cited steps from checkout to stock removal, and a
+    sequence diagram that passed the check. Five spot-checked citations were all right.
+- **laravel-api, small** (`--only wiki --full`): one run with no planning, 90s for $0.45. Seven
+  pages: the five plus data-model and integrations. Its overview flowchart has six cited boxes,
+  all kept.
+- **Updates, in a scratch clone of eShop:**
+  - A comment line added above cited lines: no AI run; 18 pages carried, with their citations
+    one line lower.
+  - A new `Loyalty.API` project (csproj and three files): planned again ("a new project at
+    src/Loyalty.API"), one page written for $0.29 in 81s, and the other 18 carried.
+  - A steering note: planned again, with no pages added or dropped.
+- **Technical-plan questions** from headless Claude Code sessions, with the brain and file tools,
+  working in the eShop clone:
+  - "plan a delivery date on orders": brain_impact with work, then overview, data-model,
+    ordering and webapp;
+  - "how does checkout work end to end": the place-order-flow page;
+  - "plan 'save for later' in laravel-api": overview, data-model, brain_impact.
+
+  None read or grepped any code. Each cost $0.07–0.11, and the plans named the right services,
+  files and migrations.
+
+**Found and fixed at the gate:** pages pointed to each other in sentences of their own ("See
+the api page"), which the check removes as uncited. Page runs now put the pointer inside a cited
+sentence. And sync said "no AI run" after a planning run; it now gives the planning cost.
+
+**After the gate, the paths that hadn't run for real:**
+- **A full sync of laravel-api, all three steps at once** in one shared worktree: 100s wall
+  (fact checks 12s, links 32s, wiki 96s) against 140s in turn, and the worktree was cleaned up.
+- **`brain add` of flask-api and react-web together** into an empty store: both in 91s.
+- **A bad run, recovered:** in that add, react-web's single page run came back with only two
+  pages (one slugged `x`, one citing a made-up path alongside a real one). Until now a full run
+  took whatever it returned and marked the missing required pages as failed until the code
+  changed. A full run now asks again, on its own, for any required page it left out, as updates
+  already did. Re-run, react-web wrote six good pages ($0.22, 57s), correctly with no data-model
+  page for a frontend.
+
+**Still open:**
+- **Core pages and new projects:** when a new project arrives, the core pages (api, overview)
+  are rewritten only when their own cited lines change. So the API page doesn't list a new
+  service's routes, though `brain_find_consumers` and the new area page do.
+- **Flows across repos:** B4b.

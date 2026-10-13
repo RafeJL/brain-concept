@@ -51,11 +51,13 @@ npm run brain -- add C:\path\to\some-repo
 
 Here is what that does:
 1. It indexes the committed code on the repo's main branch. Your uncommitted work is never read.
-2. It has Claude Code map the repo's routes and calls and write about five wiki pages: overview,
-   build and test, API, its most important module, and a product page (what it does for its
-   users, written for a product owner). Before starting, it prints a rough cost:
-   about $0.50–2 for a small repo, up to about $4–10 for a large one, from your Claude Code
-   allowance. It takes 3–20 minutes.
+2. It has Claude Code map the repo's routes and calls and write its wiki. A small repo gets
+   about five to seven pages: overview, build and test, API, its most important module, a
+   product page (what it does for its users, written for a product owner), and data-model and
+   integrations pages where they apply. A large repo gets up to 20, a page per area (see "For
+   technical plans"). Before starting, it prints a rough cost from your Claude Code allowance:
+   about $0.50–2 for a small repo, up to about $8–12 for one as large as eShop. It takes 2–25
+   minutes. Add several at once (`add <path> <path> …`) and they go three at a time.
 3. It installs a git hook, so the repo updates itself whenever its branch moves (a pull or a
    fetch). Updates cost cents, and nothing when nothing relevant changed.
 
@@ -83,8 +85,8 @@ MCP server with `claude mcp remove citation-brain -s user`.
 
 ## What agents can ask
 
-The MCP server tells Claude Code when to use it. These are its six tools. Five only read; the
-sixth records what a person tells it, and only once that person confirms:
+The MCP server tells Claude Code when to use it. These are its seven tools. Five only read; the
+other two record what a person tells them, and only once that person confirms:
 
 | Tool | Answers | From |
 |---|---|---|
@@ -94,6 +96,7 @@ sixth records what a person tells it, and only once that person confirms:
 | `brain_find_consumers` | Who serves this endpoint, and who calls it? Who publishes this event and who handles it? The same for a gRPC method or a shared package | Routes, calls, events, gRPC and packages across every repo |
 | `brain_impact` | What breaks if I change this repo, file or endpoint? Or: which systems, repos and endpoints would this piece of work touch? | What it serves or publishes, and everyone who uses each; for work, the wiki and route map |
 | `brain_record_fact` | Records a rule, term, purpose, decision or answer a person has just stated, on a repo or a system | The person, who confirms it in a dialog |
+| `brain_set_note` | Sets what a repo's wiki should focus on, when a person says so | The person, who confirms it in a dialog |
 
 For example, `npm run brain -- consumers "GET /api/articles/:slug"` gives:
 
@@ -163,6 +166,37 @@ Weaker matches: citation-harness-library
 
 It also names the repos that call the matching endpoints. No AI runs, so it is instant and free;
 the calling agent does the reasoning.
+
+### For technical plans
+
+A **small repo** (most services and libraries) gets the fixed pages above in one run, plus a
+data-model page and an integrations page when it has them.
+
+A **large repo** gets a wiki that fits it. A large repo has 200 or more source files outside
+tests, or four or more projects, such as eShop's twenty. First, a free count of its folders,
+projects and entry points (no AI) is handed to a planning run, which picks its pages:
+- the core pages: overview, build and test, API, and product;
+- a page per area a developer would work in on its own, such as Basket, Ordering or Identity;
+- up to three **flow** pages, a journey such as checkout as numbered, cited steps;
+- a **data-model** page and an **integrations** page.
+
+There are at most 20 pages. They're written four to a run, side by side, each run starting from
+its pages' key files. `brain wiki plan <repo>` shows the plan.
+
+The overview and each flow page carry a Mermaid diagram. A comment above each box and message
+cites the code, and every element is checked like a sentence. Agents get the text without the
+diagrams unless they ask, since the text says the same.
+
+The wiki follows the code:
+- **Lines shift:** when a commit only shifts the lines a page cites, the citations move with
+  them and no AI runs.
+- **A new project or area:** it's planned again, adding pages only for what's new.
+- **A steering note:** you set one with `brain note <repo> "Ordering matters most"`, or an agent
+  sets it with `brain_set_note` once you confirm it in a dialog. It re-plans the wiki at the next
+  sync, and each page follows it when it's next rewritten (`sync <repo> --only wiki --full`
+  rewrites them all now). It can't switch off a check.
+
+`brain_impact` with `work` names the area and flow pages to read for a piece of work.
 
 ### Facts from people
 
@@ -237,8 +271,10 @@ gets.
 | Command | Does |
 |---|---|
 | `doctor` | Checks Node, git, Claude Code, the store, the MCP registration and each repo's hook, and says how to fix anything missing. |
-| `add <path> [--name n] [--no-hook] [--no-ai]` | Adds a repo: indexes it, has Claude Code map it and write its wiki, and installs its hook. `--no-ai` indexes only. |
-| `sync [<name>] [--full] [--only links\|wiki\|facts] [--no-ai] [--model m]` | Brings repos up to their tracked branch, redoing only what changed: links, wiki, then facts from people checked against the code. All repos if no name is given. `--full` redoes everything. `--only` runs one of those steps. This is what the hook runs. |
+| `add <path> [<path>...] [--name n] [--note "<focus>"] [--no-hook] [--no-ai]` | Adds repos: indexes them, has Claude Code map them and write their wikis (three repos at a time), and installs their hooks. Each answers questions as soon as it's indexed. `--no-ai` indexes only. |
+| `sync [<name>] [--full] [--only links\|wiki\|facts] [--no-ai] [--model m]` | Brings repos up to their tracked branch, redoing only what changed: the links, the wiki, and facts from people checked against the code, side by side. All repos if no name is given, three at a time. `--full` redoes everything. `--only` runs one of those steps. This is what the hook runs. |
+| `note <name> ["<focus>" \| --clear \| --confirm]` | Shows or sets the note steering a repo's wiki; `--confirm` applies one an agent proposed. |
+| `wiki plan <name>` | A large repo's page plan: each page's kind, what it covers, and when it was written. |
 | `hooks install\|remove\|status [<name>]` | Turns automatic updates on or off, or shows which repos have them. |
 | `repo list` | Lists repos and how up to date each is. |
 | `repo add <path> [--name n] [--ref r]` | Enrols a repo only, with no AI, for when you want to sync later. |
@@ -290,8 +326,8 @@ merged, and a fetch is enough to update it. The store is `%USERPROFILE%\.brain\b
 
 - **Search by meaning:** `brain_search` matches words, not synonyms. Search "auth" rather than
   "login security".
-- **Re-planning a wiki:** updates keep the same pages. After a big restructure, run
-  `brain sync <name> --full`.
+- **Flows across repos:** a flow page covers one repo, and names the link where a step crosses
+  into another. Pages that follow a journey through several repos are planned (B4b).
 - **Hosting:** today it runs on your machine. A hosted version with GitHub permissions is phase 6.
 
 ## Working on the brain

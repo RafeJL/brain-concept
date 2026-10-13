@@ -208,4 +208,25 @@ export const MIGRATIONS: (string | ((db: DatabaseSync) => void))[] = [
   );
   ALTER TABLE facts ADD COLUMN anchors_found INTEGER NOT NULL DEFAULT 0;
   `,
+  // B4a: what each page is about; the page plan of a large repo, and the note and commit it was
+  // made with; a person's steering note on a repo, and one an agent proposed.
+  `
+  ALTER TABLE pages ADD COLUMN kind TEXT NOT NULL DEFAULT 'core';
+  UPDATE pages SET kind = 'area' WHERE slug NOT IN ('overview', 'build-run-test', 'api', 'product');
+  CREATE TABLE wiki_plans (
+    repo      TEXT NOT NULL REFERENCES repos(name) ON DELETE CASCADE,
+    slug      TEXT NOT NULL,
+    position  INTEGER NOT NULL,
+    title     TEXT NOT NULL,
+    kind      TEXT NOT NULL,
+    brief     TEXT NOT NULL,
+    covers    TEXT NOT NULL,
+    key_files TEXT NOT NULL,
+    PRIMARY KEY (repo, slug)
+  );
+  ALTER TABLE repo_state ADD COLUMN plan_commit TEXT;
+  ALTER TABLE repo_state ADD COLUMN plan_note TEXT;
+  ALTER TABLE repos ADD COLUMN note TEXT;
+  ALTER TABLE repos ADD COLUMN proposed_note TEXT;
+  `,
 ];

@@ -5,7 +5,7 @@ import type { SectionHit } from "../../store/store.js";
 import type { Caller } from "../access.js";
 import { factLine, readableChecks, visibleFacts } from "../facts.js";
 import { findSystem } from "../systems.js";
-import { readableRepos, requireSyncedRepo, type Failure, type ToolDeps, type ToolResult } from "./common.js";
+import { brainCommand, readableRepos, requireSyncedRepo, type Failure, type ToolDeps, type ToolResult } from "./common.js";
 import { matchExpression } from "./search.js";
 
 export interface RecordInput {
@@ -36,7 +36,7 @@ export type ConfirmAnswer =
   | { action: "unavailable" };
 
 /** Asks the person, not the agent, whether to record the fact. Over MCP this is elicitation. */
-export type Confirm = (request: { message: string; text: string; statedBy: string }) => Promise<ConfirmAnswer>;
+export type Confirm = (request: { message: string; text: string; statedBy: string; label?: string }) => Promise<ConfirmAnswer>;
 
 export interface Recorded {
   outcome: "confirmed" | "proposed" | "declined";
@@ -103,7 +103,7 @@ export async function recordFact(
     const why = answer.automatic
       ? "The dialog was declined within a second, so it was most likely never shown: some apps, such as Claude Code's desktop app, decline it without asking. "
       : "If the person says they never saw a dialog, the app declined it for them. ";
-    const text = `Not recorded: the dialog came back declined. ${why}If they want it saved, call brain_record_fact again with propose set to true: it is stored as proposed, and they confirm it with brain facts confirm <id> in a terminal.`;
+    const text = `Not recorded: the dialog came back declined. ${why}If they want it saved, call brain_record_fact again with propose set to true: it is stored as proposed, and they confirm it in a terminal with ${brainCommand("facts confirm <id>")}.`;
     return { ok: true, data: { outcome: "declined", fact: null, nearby, related }, text };
   }
 
@@ -132,7 +132,7 @@ export async function recordFact(
     ? `Recorded fact #${id} on ${label}, confirmed by ${by} (${HUMAN_TIER}). Later answers about ${label} include it.` +
       `${replaced ? ` Fact #${replaced.id}, which it replaces, is retired.` : ""}\n- ${factLine(fact)}`
     : `Stored as proposed fact #${id} on ${label}: the person couldn't be asked here, so it isn't confirmed. ` +
-      `Agents see it labelled "proposed"${replaced ? `, and fact #${replaced.id} stands until it is` : ""}. Confirm it with: brain facts confirm ${id}\n- ${factLine(fact)}`;
+      `Agents see it labelled "proposed"${replaced ? `, and fact #${replaced.id} stands until it is` : ""}. Confirm it with: ${brainCommand(`facts confirm ${id}`)}\n- ${factLine(fact)}`;
   return { ok: true, data: { outcome: confirmed ? "confirmed" : "proposed", fact, nearby, related }, text: summary };
 }
 

@@ -9,12 +9,12 @@ import { checkFacts, type FactChecksResult } from "./ai/fact-checks.js";
 import { findSystem } from "./serve/systems.js";
 import { recordFact } from "./serve/tools/record-fact.js";
 import { runQueued } from "./core/queue.js";
-import { listTree, resolveCommit } from "./core/git.js";
+import { listTree, resolveCommit, withWorktree } from "./core/git.js";
 import { familyOf } from "./core/seams.js";
-import { BrainError, type RepoRecord } from "./core/types.js";
+import { BrainError, type RepoNote, type RepoRecord } from "./core/types.js";
 import { doctor, execProgram, formatChecks } from "./doctor.js";
 import { hookStatus, installHook, removeHook, type HookCommand } from "./ingest/hooks.js";
-import { enrolRepo, removeRepo, setRepoRef } from "./ingest/registry.js";
+import { confirmProposedNote, enrolRepo, removeRepo, requireRepo, setRepoNote, setRepoRef } from "./ingest/registry.js";
 import { syncRepo, type SyncResult } from "./ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy } from "./serve/access.js";
 import { describeFreshness, freshnessOf } from "./serve/freshness.js";
@@ -27,9 +27,10 @@ import { systemOverview } from "./serve/tools/system-overview.js";
 import { impactRequest } from "./serve/tools/work-impact.js";
 import { joinHint } from "./serve/systems.js";
 import { suggestSystems, type SuggestResult } from "./ai/systems.js";
+import { inventory } from "./ai/inventory.js";
 import { SqliteStore } from "./store/sqlite.js";
-import { DEFAULT_MODEL, generateWiki, type WikiResult } from "./ai/generate.js";
-import { claudeRunner } from "./ai/runner.js";
+import { DEFAULT_MODEL, generateWiki, type PlanReport, type WikiResult } from "./ai/generate.js";
+import { claudeRunner, limitRunner } from "./ai/runner.js";
 import { updateSeams, type SeamsResult } from "./ai/seams.js";
 import type { Store } from "./store/store.js";
 
@@ -37,8 +38,9 @@ const HELP = `brain: organisation-wide context for coding agents
 
 Get started:
   brain doctor                                             check Node, git, Claude Code and the MCP registration
-  brain add <path> [--name <name>] [--no-hook] [--no-ai]   add a repo: index it, have Claude Code write its wiki and
-                                                           map its routes and calls, and keep it up to date
+  brain add <path> [<path>...] [--name <name>] [--note "<focus>"] [--no-hook] [--no-ai]
+                                                           add repos: index them, have Claude Code write their wikis
+                                                           and map their links (3 at a time), and keep them up to date
 
 Keep repos up to date:
   brain sync [<name>] [--full] [--only links|wiki|facts] [--no-ai] [--model <m>]
@@ -47,6 +49,9 @@ Keep repos up to date:
                                                            just that step, --no-ai indexes only
   brain hooks install|remove|status [<name>]               re-sync automatically whenever the tracked branch moves
   brain repo list                                          repos and how up to date each is
+  brain note <name> ["<focus>" | --clear | --confirm]      what a repo's wiki should focus on, e.g. "Ordering matters
+                                                           most"; --confirm applies one an agent proposed
+  brain wiki plan <name>                                   a large repo's page plan: its areas, flows and what's written
   brain repo add <path> [--name <name>] [--ref <branch>]   enrol only (no AI); then brain sync <name>
   brain repo set-ref <name> <ref>                          track a different branch, e.g. origin/release
   brain repo remove <name>                                 remove a repo, everything held about it, and its hook
@@ -108,6 +113,9 @@ async function main(argv: string[]): Promise<void> {
       full: { type: "boolean", default: false },
       only: { type: "string" },
       kind: { type: "string" },
+      note: { type: "string" },
+      clear: { type: "boolean", default: false },
+      confirm: { type: "boolean", default: false },
       text: { type: "string" },
       quote: { type: "string" },
       ticket: { type: "string" },
@@ -153,17 +161,28 @@ async function main(argv: string[]): Promise<void> {
       case "sync": {
         const names = sub ? [sub] : store.listRepos().map((repo) => repo.name);
         if (names.length === 0) throw new BrainError("No repos enrolled. Add one with: brain add <path>");
-        for (const name of names) {
+        const only = onlyStep(values.only);
+        await eachAtOnce(names, MAX_REPOS, (name) => name, async (name) => {
           if (values["no-ai"]) printSync(await syncRepo(store, name));
-          else await syncAndRefresh(store, name, { model: values.model, full: values.full, only: onlyStep(values.only) });
-        }
+          else await syncAndRefresh(store, name, { model: values.model, full: values.full, only });
+        });
         break;
       }
       case "add": {
-        if (!sub) throw new BrainError("Usage: brain add <path to a git repo> [--name <name>] [--no-hook] [--no-ai]");
-        await addRepo(store, sub, { name: values.name, ref: values.ref, model: values.model, ai: !values["no-ai"], hook: !values["no-hook"] });
+        const paths = positionals.slice(1);
+        if (paths.length === 0) throw new BrainError('Usage: brain add <path> [<path>...] [--name <name>] [--note "<focus>"] [--no-hook] [--no-ai]');
+        if (paths.length > 1 && (values.name || values.note)) throw new BrainError("--name and --note apply to one repo; add it on its own.");
+        const note = values.note ? { text: values.note, by: await localPerson(), at: new Date().toISOString() } : undefined;
+        await addRepos(store, paths, { name: values.name, ref: values.ref, note, model: values.model, ai: !values["no-ai"], hook: !values["no-hook"] });
         break;
       }
+      case "note":
+        await repoNote(store, sub, arg, values);
+        break;
+      case "wiki":
+        if (sub !== "plan" || !arg) throw new BrainError("Usage: brain wiki plan <name>");
+        printPlan(store, arg);
+        break;
       case "doctor": {
         const checks = await doctor({
           store,
@@ -230,27 +249,56 @@ function onlyStep(value: string | undefined): Step | undefined {
 }
 
 /**
- * Syncs a repo, then has Claude Code bring its routes and calls and its wiki up to the new
- * commit. One run per repo at a time: a hook firing mid-run is folded into one more pass when
- * this one finishes. A failed AI step is reported and the next one still runs.
+ * Claude Code runs at once across everything one command does: steps and repos go side by side
+ * up to this, and the rest queue, to stay under the account's rate limits.
+ */
+const MAX_RUNS = 4;
+/** Repos `brain add` and `brain sync` work on at once. */
+const MAX_REPOS = 3;
+const runner = limitRunner(claudeRunner, MAX_RUNS);
+
+/**
+ * Syncs a repo, then has Claude Code bring its links, its wiki and its fact checks up to the new
+ * commit. The three read the same commit and don't depend on each other, so they go side by side
+ * in one worktree, and the sync takes as long as the slowest. One sync per repo at a time: a hook
+ * firing mid-run is folded into one more pass when this one finishes. A failed step is reported
+ * and the others still finish.
  */
 async function syncAndRefresh(store: Store, name: string, options: { model?: string; full?: boolean; only?: Step }): Promise<void> {
   let full = options.full;
   const outcome = await runQueued(join(dirname(resolveDbPath()), "locks"), name, async () => {
-    printSync(await syncRepo(store, name));
-    const runs = (step: Step) => !options.only || options.only === step;
-    if (runs("links")) {
-      await reported(name, "routes and calls", async () => printSeams(await updateSeams(store, claudeRunner, name, { model: options.model, full })));
-    }
-    if (runs("wiki")) {
-      await reported(name, "wiki", async () => printWiki(await generateWiki(store, claudeRunner, name, { model: options.model, full })));
-    }
-    if (runs("facts")) {
-      await reported(name, "fact checks", async () => printChecks(await checkFacts(store, claudeRunner, name, { model: options.model, full })));
-    }
+    const synced = await syncRepo(store, name);
+    printSync(synced);
+    const steps: Record<Step, [string, (cwd: string) => Promise<void>]> = {
+      links: ["routes and calls", async (cwd) => printSeams(await updateSeams(store, runner, name, { model: options.model, full, cwd }))],
+      wiki: ["wiki", async (cwd) => printWiki(await generateWiki(store, runner, name, { model: options.model, full, cwd }))],
+      facts: ["fact checks", async (cwd) => printChecks(await checkFacts(store, runner, name, { model: options.model, full, cwd }))],
+    };
+    const chosen = (Object.keys(steps) as Step[]).filter((step) => !options.only || options.only === step);
+    await withWorktree(requireRepo(store, name).path, synced.commit, (cwd) =>
+      Promise.all(chosen.map((step) => reported(name, steps[step][0], () => steps[step][1](cwd)))),
+    );
     full = false;
   });
   if (outcome === "queued") console.log(`${name}: already being synced; that run will go again to pick this up.`);
+}
+
+/** Runs `work` on each item, at most `max` at once. One item's BrainError is reported and the rest carry on. */
+async function eachAtOnce<T>(items: readonly T[], max: number, label: (item: T) => string, work: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const item = items[next++]!;
+      try {
+        await work(item);
+      } catch (error) {
+        if (!(error instanceof BrainError)) throw error;
+        console.error(`${label(item)}: ${error.message}`);
+        process.exitCode = 1;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(max, items.length) }, worker));
 }
 
 async function reported(name: string, step: string, work: () => Promise<void>): Promise<void> {
@@ -289,9 +337,11 @@ function printSeams(result: SeamsResult): void {
 
 function printWiki(wiki: WikiResult): void {
   const at = `@${wiki.commit.slice(0, 7)}`;
+  if (wiki.plan) console.log(`${wiki.repo}: ${planText(wiki.plan)}`);
   if (wiki.reports.length === 0) {
     const carried = wiki.carried.length ? `; ${wiki.carried.length} pages re-checked and moved to ${at}` : "";
-    console.log(`${wiki.repo}: wiki up to date at ${at}, nothing its pages cite changed (no AI run${carried})`);
+    const ran = wiki.costUsd ? `only the planning run, $${wiki.costUsd.toFixed(2)}` : "no AI run";
+    console.log(`${wiki.repo}: wiki up to date at ${at}, no page needed rewriting (${ran}${carried})`);
     if (wiki.waiting.length) console.log(`  ${wiki.waiting.join(", ")} failed the check at ${at}; it's tried again after the next change, or with --full`);
     return;
   }
@@ -307,6 +357,16 @@ function printWiki(wiki: WikiResult): void {
   }
   if (wiki.carried.length) console.log(`  unchanged, moved to ${at}: ${wiki.carried.join(", ")}`);
   console.log(`Read them with: brain page ${wiki.repo}`);
+}
+
+/** "planned again (a new project at src/Payments.API): +1 page (payments)", or why no plan passed. */
+function planText(plan: PlanReport): string {
+  if (plan.problems.length) return `wiki not planned again (${plan.reason}): the plan failed the check (${plan.problems.slice(0, 3).join("; ")}), so it kept its pages`;
+  const changes = [
+    plan.added.length ? `+${count(plan.added.length, "page")} (${plan.added.join(", ")})` : "",
+    plan.retired.length ? `−${count(plan.retired.length, "page")} (${plan.retired.join(", ")})` : "",
+  ].filter(Boolean);
+  return `wiki planned (${plan.reason}): ${changes.join(", ") || "no pages added or dropped"}`;
 }
 
 /** How the hook should run this CLI: absolute paths, since hooks get no predictable PATH. */
@@ -354,24 +414,42 @@ async function listRepos(store: Store): Promise<void> {
 }
 
 /**
- * Everything a person trying the brain needs for one repo: enrol it, index it, have Claude Code
- * write its wiki and map its routes and calls, and install the hook that keeps it current. Says
- * roughly what the AI step costs before it starts.
+ * Everything a person trying the brain needs for some repos: enrol them, index them, have Claude
+ * Code write their wikis and map their links, and install the hooks that keep them current. Says
+ * roughly what the AI step costs before it starts. Repos go side by side, and each is answerable
+ * (its card, its files) as soon as it's indexed, before its wiki is written.
  */
-async function addRepo(
+async function addRepos(
   store: Store,
-  path: string,
-  options: { name?: string; ref?: string; model?: string; ai: boolean; hook: boolean },
+  paths: readonly string[],
+  options: { name?: string; ref?: string; note?: RepoNote; model?: string; ai: boolean; hook: boolean },
 ): Promise<void> {
-  const repo = await enrolRepo(store, { path, name: options.name, ref: options.ref });
-  console.log(`Added ${repo.name}, tracking ${repo.ref}, from ${repo.path}`);
-  if (options.ai) {
-    console.log(await estimate(repo));
-    await syncAndRefresh(store, repo.name, { model: options.model });
-  } else {
-    printSync(await syncRepo(store, repo.name));
+  const repos: RepoRecord[] = [];
+  for (const path of paths) {
+    try {
+      const repo = await enrolRepo(store, { path, name: options.name, ref: options.ref, note: options.note });
+      console.log(`Added ${repo.name}, tracking ${repo.ref}, from ${repo.path}`);
+      repos.push(repo);
+    } catch (error) {
+      if (!(error instanceof BrainError) || paths.length === 1) throw error;
+      console.error(`${path}: not added: ${error.message}`);
+      process.exitCode = 1;
+    }
   }
-  if (options.hook) {
+  if (options.ai) {
+    const estimates = await Promise.all(repos.map(estimate));
+    for (const e of estimates) console.log(`${e.repo}: ${e.files} files, roughly $${e.cost[0]}–${e.cost[1]} and ${e.minutes[0]}–${e.minutes[1]} minutes`);
+    const most = Math.max(...estimates.map((e) => e.minutes[1]));
+    const total = (i: 0 | 1) => estimates.reduce((sum, e) => sum + e.cost[i], 0);
+    console.log(
+      `Claude Code will now read ${repos.length === 1 ? "it" : `them, ${Math.min(MAX_REPOS, repos.length)} at a time`} to map links and write wikis: ` +
+        `roughly $${total(0)}–${total(1)} of your Claude Code allowance${repos.length > 1 ? `, finishing in about ${most}+ minutes` : ""}. Later updates cost cents.`,
+    );
+  }
+  await eachAtOnce(repos, MAX_REPOS, (repo) => repo.name, async (repo) => {
+    if (options.ai) await syncAndRefresh(store, repo.name, { model: options.model });
+    else printSync(await syncRepo(store, repo.name));
+    if (!options.hook) return;
     try {
       await installHook(store, repo.name, hookCommand());
       console.log(`${repo.name}: will re-sync in the background whenever ${repo.ref} moves (log: ${hookCommand().logPath})`);
@@ -379,21 +457,67 @@ async function addRepo(
       if (!(error instanceof BrainError)) throw error;
       console.log(`${repo.name}: no hook installed (${error.message}). Run brain sync ${repo.name} after pulling.`);
     }
+  });
+  for (const repo of repos) {
+    const hint = joinHint(store, repo.name);
+    if (hint) console.log(hint);
   }
-  const hint = joinHint(store, repo.name);
-  if (hint) console.log(hint);
+  if (repos.length === 0) return;
+  const first = repos[0]!.name;
   console.log("");
-  console.log(options.ai ? `Next: ask Claude Code "what does ${repo.name} do?", or run: brain card ${repo.name}` : `Next: brain sync ${repo.name} to have Claude Code write its wiki`);
+  const later = repos.length === 1 ? `Next: brain sync ${first} to have Claude Code write its wiki` : "Next: brain sync to have Claude Code write their wikis";
+  console.log(options.ai ? `Next: ask Claude Code "what does ${first} do?", or run: brain card ${first}` : later);
 }
 
-/** Rough first-sync cost and time from the repo's size, measured on the trial repos. */
-async function estimate(repo: RepoRecord): Promise<string> {
+/** Rough first-sync cost and time from a repo's size, measured on the trial repos. */
+async function estimate(repo: RepoRecord): Promise<{ repo: string; files: number; cost: [number, number]; minutes: [number, number] }> {
   const files = (await listTree(repo.path, await resolveCommit(repo.path, repo.ref))).length;
-  const [cost, time] = files <= 300 ? ["$0.50–2", "3–6 minutes"] : files <= 1000 ? ["$1–3", "5–10 minutes"] : ["$4–10", "10–20 minutes"];
-  return (
-    `${repo.name} has ${files} files. Claude Code will now read it to map its routes and calls and write its wiki: ` +
-    `roughly ${cost} of your Claude Code allowance and ${time}. Later updates cost cents.`
-  );
+  const [cost, minutes]: [[number, number], [number, number]] =
+    files <= 300 ? [[0.5, 2], [2, 5]] : files <= 1000 ? [[1, 4], [5, 10]] : [[8, 12], [15, 25]];
+  return { repo: repo.name, files, cost, minutes };
+}
+
+/** `brain note <repo> ["<text>" | --clear | --confirm]`: the note that steers a repo's wiki. */
+async function repoNote(store: Store, name: string | undefined, text: string | undefined, values: { clear: boolean; confirm: boolean }): Promise<void> {
+  if (!name) throw new BrainError('Usage: brain note <repo> ["<what the wiki should focus on>" | --clear | --confirm]');
+  const repo = requireRepo(store, name);
+  if (values.confirm) {
+    const note = confirmProposedNote(store, name, await localPerson());
+    console.log(`${name}: note confirmed: "${note.text}". The next sync plans its wiki with it.`);
+  } else if (values.clear) {
+    setRepoNote(store, name, null);
+    console.log(`${name}: note cleared.`);
+  } else if (text) {
+    setRepoNote(store, name, { text, by: await localPerson(), at: new Date().toISOString() });
+    console.log(`${name}: note set. The next sync plans its wiki with it, and each page follows it when next rewritten (sync ${name} --only wiki --full rewrites them all now).`);
+  } else {
+    console.log(repo.note ? `${name}: "${repo.note.text}" (${repo.note.by}, ${repo.note.at.slice(0, 10)})` : `${name}: no note`);
+    if (repo.proposedNote) console.log(`  proposed by ${repo.proposedNote.by}: "${repo.proposedNote.text}". Confirm with: brain note ${name} --confirm`);
+  }
+}
+
+/** `brain wiki plan <repo>`: a large repo's page plan, and which pages are written. */
+function printPlan(store: Store, name: string): void {
+  requireRepo(store, name);
+  const plan = store.wikiPlan(name);
+  const pages = new Map(store.pages(name).map((p) => [p.slug, p]));
+  if (plan.length === 0) {
+    const map = inventory(store.getFiles(name));
+    console.log(
+      map.large
+        ? `${name} has no page plan yet: it's large (${map.sourceFiles} source files, ${count(map.projects.length, "project")}), so its next sync plans a page per area.`
+        : `${name} has no page plan: it's small enough for the fixed pages (${[...pages.keys()].join(", ") || "none written yet"}).`,
+    );
+    return;
+  }
+  const state = store.getState(name);
+  console.log(`${name}: ${count(plan.length, "page")} planned at @${state?.planCommit?.slice(0, 7) ?? "?"}${state?.planNote ? ", with its note" : ""}`);
+  for (const page of plan) {
+    const written = pages.get(page.slug);
+    console.log(`  ${page.slug.padEnd(24)} ${page.kind.padEnd(12)} ${written ? `written @${written.commit.slice(0, 7)}` : "not written yet"}`);
+    if (page.brief) console.log(`    ${page.brief}`);
+    if (page.covers.length) console.log(`    covers ${page.covers.join(", ")}`);
+  }
 }
 
 /** `brain systems`: list, suggest, show, confirm, set, rename, remove. */
@@ -425,7 +549,7 @@ async function systems(
       return;
     }
     case "suggest":
-      printSuggestion(await suggestSystems(store, claudeRunner, { model: options.model }));
+      printSuggestion(await suggestSystems(store, runner, { model: options.model }));
       return;
     case "show":
       if (!name) throw new BrainError("Usage: brain systems show <system>");
@@ -561,7 +685,7 @@ async function facts(
           : findSystem(store, arg, readable)?.repos ?? fail(`No repo or system named "${arg}". See: brain repo list, brain systems`)
         : readable.filter((repo) => factsAbout(store, repo, readable).length > 0);
       if (repos.length === 0) console.log("No facts to check yet.");
-      for (const repo of repos) printChecks(await checkFacts(store, claudeRunner, repo, { model: options.model, full: options.full }), true);
+      for (const repo of repos) printChecks(await checkFacts(store, runner, repo, { model: options.model, full: options.full }), true);
       return;
     }
     case "export": {

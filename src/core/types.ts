@@ -8,6 +8,17 @@ export interface RepoRecord {
   /** origin URL with any credentials stripped, or null when there is no origin. */
   remote: string | null;
   enrolledAt: string;
+  /** What a person wants the wiki to focus on; steers which pages are written and what they stress. */
+  note: RepoNote | null;
+  /** A note an agent proposed where the person couldn't be asked; it steers nothing until confirmed. */
+  proposedNote: RepoNote | null;
+}
+
+/** A steering note on a repo's wiki, and who set it. */
+export interface RepoNote {
+  text: string;
+  by: string;
+  at: string;
 }
 
 /** The commit a repo's facts currently describe. */
@@ -24,6 +35,10 @@ export interface RepoState {
    * change, not once per sync.
    */
   pagesFailedAt: string | null;
+  /** The commit the wiki's page plan was made at; null for a repo without one (a small repo). */
+  planCommit: string | null;
+  /** The steering note the plan was made with, so a changed note plans again. */
+  planNote: string | null;
 }
 
 /** One file in a repo's committed tree. */
@@ -44,6 +59,7 @@ export interface WikiPage {
   /** Stable id within the repo, e.g. "overview", "build-run-test". */
   slug: string;
   title: string;
+  kind: PageKind;
   /** Markdown in which every claim cites `[path:start-end]`. */
   markdown: string;
   commit: string;
@@ -53,6 +69,26 @@ export interface WikiPage {
   model: string;
   costUsd: number;
   generatedAt: string;
+}
+
+/**
+ * What a page is about: one of the pages every wiki has, a part of the repo, a journey through
+ * several parts, the data model, or the outside systems it talks to.
+ */
+export type PageKind = "core" | "area" | "flow" | "data-model" | "integrations";
+export const PAGE_KINDS: readonly PageKind[] = ["core", "area", "flow", "data-model", "integrations"];
+
+/** One page of a large repo's plan: what to write, and where to start reading. */
+export interface PlannedPage {
+  slug: string;
+  title: string;
+  kind: PageKind;
+  /** One line on what the page covers. */
+  brief: string;
+  /** Folders the page covers; a new project or area outside all of them plans again. */
+  covers: string[];
+  /** The files to start reading from. */
+  keyFiles: string[];
 }
 
 export interface LanguageShare {

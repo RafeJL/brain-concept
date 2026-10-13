@@ -443,3 +443,32 @@ None of this runs Claude Code in the background, so it costs nothing beyond the 
    prompt appears but the confirm dialog doesn't: it comes back declined at once. The agent
    should say the dialog was most likely never shown, and offer to save it as proposed. Say yes;
    `facts` lists it as proposed, and `facts confirm <id>` confirms it.
+
+## Part E: wikis that fit the repo (B4a)
+
+Use a copy of your store (`$env:BRAIN_DB` pointing at it) so a bad plan doesn't replace a good
+wiki. These steps run Claude Code: about $4–6 for eShop, under $1 for a small repo.
+
+1. **A large repo is planned.** `wiki plan eshop` says it's large and not planned yet. Run
+   `sync eshop --only wiki`. The output opens with `wiki planned (no plan yet): +N pages (…)`,
+   then a line per new page. The five pages it had are kept, not rewritten. `wiki plan eshop`
+   lists the plan: core pages, a page per service, a few flows, data model and integrations,
+   each with what it covers.
+2. **Read it as an agent would.** `page eshop` groups the pages by kind with one line each;
+   `card eshop` counts them by kind. `page eshop <a flow page>` gives numbered, cited steps and
+   says its diagrams are left out. Check a few citations by opening the files.
+3. **A small repo isn't.** `wiki plan laravel-api` says it's small. `sync laravel-api --only wiki
+   --full` makes one run, with no planning, and adds at most a data-model and an integrations page.
+4. **Lines that only move cost nothing.** In a clone you can commit to, add a comment line at the
+   top of a file a page cites, commit, and sync. The wiki line says nothing needed rewriting, and
+   the page's citations point one line lower.
+5. **New code is planned for.** Add a folder holding a new project (a `package.json` or `.csproj`
+   and a source file), commit and sync. The output says `wiki planned (a new project at …)`, and
+   only the new page is written.
+6. **Steering.** `note eshop "Ordering and Basket matter most"`, then sync: it plans again
+   (`the steering note changed`). In a Claude Code session, ask it to make the wiki focus on
+   something: it calls `brain_set_note`, and the note is set once you confirm (proposed in the
+   desktop app, then `note eshop --confirm`).
+7. **Technical-plan questions.** In a new session ask *"Plan adding a delivery date to eShop
+   orders, shown to the buyer"*. The answer should come from the overview, the ordering area page,
+   a flow page and the data model, with citations and at most a couple of code reads to confirm.

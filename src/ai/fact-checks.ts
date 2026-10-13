@@ -1,6 +1,6 @@
 import { cleanPath } from "../core/citations.js";
 import type { FactCheck, FactRecord, Verdict } from "../core/facts.js";
-import { changedFiles, withWorktree } from "../core/git.js";
+import { changedFiles, inWorktree } from "../core/git.js";
 import { BrainError } from "../core/types.js";
 import { requireRepo } from "../ingest/registry.js";
 import type { Store } from "../store/store.js";
@@ -66,7 +66,7 @@ export interface FactChecksResult {
  * Lines that agree become the anchors of a repo fact nobody anchored by hand. Never changes what a
  * fact says or whether it is confirmed.
  */
-export async function checkFacts(store: Store, runner: Runner, name: string, options: { model?: string; full?: boolean } = {}): Promise<FactChecksResult> {
+export async function checkFacts(store: Store, runner: Runner, name: string, options: { model?: string; full?: boolean; cwd?: string } = {}): Promise<FactChecksResult> {
   const repo = requireRepo(store, name);
   const state = store.getState(name);
   if (!state) throw new BrainError(`"${name}" has not been synced yet. Run: brain sync ${name}`);
@@ -97,7 +97,7 @@ export async function checkFacts(store: Store, runner: Runner, name: string, opt
   const listed = due
     .map((f) => `- Fact ${f.id} (${f.kind}, on ${f.repo ? "this repository" : `the ${f.system} system, of which this repository is one part`}): ${f.text}`)
     .join("\n");
-  const { checked, costUsd, durationMs } = await withWorktree(repo.path, state.commit, async (cwd) => {
+  const { checked, costUsd, durationMs } = await inWorktree(repo.path, state.commit, options.cwd, async (cwd) => {
     const run = await runner.run<{ checks?: unknown }>({ cwd, prompt: prompt("check-facts", { facts: listed }), schema: SCHEMA, model: options.model ?? DEFAULT_MODEL });
     if (!Array.isArray(run.output?.checks)) throw new BrainError("The AI's fact checks were malformed. Nothing was stored.");
     const answers = new Map((run.output.checks as FoundCheck[]).filter((c) => typeof c?.fact === "number").map((c) => [c.fact, c]));

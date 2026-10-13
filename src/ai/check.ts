@@ -1,6 +1,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { parseCitations, unreadableCitation, withoutCitations, type Citation } from "../core/citations.js";
+import { opensDiagram } from "../core/sections.js";
+import { checkDiagram } from "./diagrams.js";
 
 export interface RemovedClaim {
   text: string;
@@ -93,8 +95,26 @@ export function checkPage(markdown: string, root: string): CheckedPage {
 
   const out: string[] = [];
   let inCode = false;
+  let diagram: string[] | null = null;
   const lines = markdown.split(/\r?\n/);
   lines.forEach((line, i) => {
+    // A Mermaid diagram is checked element by element once its closing fence is reached.
+    if (diagram) {
+      if (!/^\s*(```|~~~)/.test(line)) {
+        diagram.push(line);
+        return;
+      }
+      const checked = checkDiagram(diagram.slice(1), (label, cites) => elementProblem(label, cites, root, linesOf));
+      claims += checked.claims;
+      removed.push(...checked.removed);
+      if (checked.lines) out.push(diagram[0]!, ...checked.lines, line);
+      diagram = null;
+      return;
+    }
+    if (!inCode && opensDiagram(line)) {
+      diagram = [line];
+      return;
+    }
     if (/^\s*(```|~~~)/.test(line)) inCode = !inCode;
     // A table's header row (the row above its |---| line) names columns; it claims nothing.
     const header = /^\s*\|/.test(line) && TABLE_RULE.test(lines[i + 1] ?? "");
@@ -161,6 +181,27 @@ export function claimProblem(text: string, cites: readonly Citation[], root: str
     if (!supported(term!.trim(), cites, root, spans)) return `\`${term}\` isn't in the cited lines`;
   }
   return null;
+}
+
+/** Words too common in diagram labels to show a box is about the cited lines. */
+const GENERIC = new Set(["service", "services", "server", "client", "request", "response", "returns", "return", "calls", "call", "sends", "send", "with", "from", "into", "data", "user", "users", "then", "when", "each", "this", "that", "application", "app"]);
+
+/**
+ * Why a diagram element's citations don't support its label, or null: the citations must be
+ * readable like a sentence's, and at least one of the label's distinctive words must be in the
+ * cited lines, or name a cited file or one beside it.
+ */
+function elementProblem(label: string, cites: readonly Citation[], root: string, linesOf: (path: string) => string[] | null): string | null {
+  const spans: string[] = [];
+  for (const cite of cites) {
+    const lines = linesOf(cite.path);
+    const problem = citationProblem(cite, lines);
+    if (problem) return problem;
+    spans.push(spanText(lines!, cite));
+  }
+  const words = (label.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []).filter((w) => w.length >= 4 && !GENERIC.has(w.toLowerCase()));
+  if (words.length === 0 || words.some((word) => supported(word, cites, root, spans))) return null;
+  return `none of "${label.trim()}" is in the cited lines`;
 }
 
 /**

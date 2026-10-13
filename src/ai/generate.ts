@@ -1,9 +1,11 @@
-import { changedFiles, withWorktree, type ChangedFile } from "../core/git.js";
-import { BrainError, type WikiPage } from "../core/types.js";
+import { changedFiles, inWorktree, type ChangedFile } from "../core/git.js";
+import { BrainError, type PageKind, type PlannedPage, type WikiPage } from "../core/types.js";
 import { requireRepo } from "../ingest/registry.js";
 import type { Store } from "../store/store.js";
-import { isAffected } from "./affected.js";
+import { carriedPage } from "./affected.js";
 import { checkPage, type CheckedPage, type RemovedClaim } from "./check.js";
+import { inventory } from "./inventory.js";
+import { CORE_PAGES, planLine, planOfPages, planPages, replanReason } from "./plan.js";
 import { prompt } from "./prompts.js";
 import type { Runner } from "./runner.js";
 
@@ -13,34 +15,18 @@ export const DEFAULT_MODEL = "sonnet";
 /** At most this many changed files are listed in an update prompt; the AI can read the rest. */
 const MAX_LISTED_CHANGES = 200;
 
-function updatePrompt(pages: readonly WikiPage[], changes: readonly ChangedFile[] | null): string {
-  const listed = (changes ?? []).slice(0, MAX_LISTED_CHANGES).map((c) => `- ${c.status} ${c.path}`);
-  if (changes && changes.length > MAX_LISTED_CHANGES) listed.push(`- … and ${changes.length - MAX_LISTED_CHANGES} more`);
-  if (changes === null) listed.push("- (the earlier commit can't be compared; check everything)");
-  return prompt("update-pages", {
-    changes: listed.join("\n"),
-    pages: pages.map((p) => pageBlock(p.slug, p.markdown)).join("\n"),
-    product: productGuide(pages.map((p) => p.slug)),
-  });
-}
-
-/** Asks for pages every wiki should have but this one lacks, such as a wiki written before the product page existed. */
-function addPrompt(slugs: readonly string[]): string {
-  const wanted = requiredPages();
-  return prompt("add-pages", { pages: slugs.map((slug) => wanted.get(slug)!).join("\n"), product: productGuide(slugs) });
-}
-
-/** The product page's own rules, for any run that writes it. */
-function productGuide(slugs: readonly string[]): string {
-  return slugs.includes(PRODUCT) ? prompt("product-page") : "";
-}
+/**
+ * Pages one run writes at most; more are split into runs that go side by side. One run writing
+ * twenty pages skims; four, starting from their key files, read closely.
+ */
+const BATCH_PAGES = 4;
 
 /** The slug of the page written in product language, for a PO or a new joiner. */
 export const PRODUCT = "product";
 
 /**
- * The pages every wiki has (prompts/pages.md), by slug, with the line asking for each. The page
- * on the most important module isn't among them: its slug is the AI's choice.
+ * The pages every small repo's wiki has (prompts/pages.md), by slug, with the line asking for
+ * each. The page on the most important module isn't among them: its slug is the AI's choice.
  */
 export function requiredPages(): Map<string, string> {
   return new Map(
@@ -53,12 +39,52 @@ export function requiredPages(): Map<string, string> {
   );
 }
 
-function retryPrompt(failed: readonly Checked[]): string {
+/** A small repo's page kinds follow from their slugs. */
+function kindOf(slug: string): PageKind {
+  if (CORE_PAGES.includes(slug)) return "core";
+  return slug === "data-model" || slug === "integrations" ? slug : "area";
+}
+
+/** What every page run is told besides its task: how each kind of page is written, the product page's rules, the steering note. */
+function guide(slugs: readonly string[], note: string | null): string {
+  return [slugs.includes(PRODUCT) ? prompt("product-page") : "", prompt("page-kinds"), note ? prompt("steering-note", { note }) : ""]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function updatePrompt(pages: readonly WikiPage[], changes: readonly ChangedFile[] | null, note: string | null): string {
+  const listed = (changes ?? []).slice(0, MAX_LISTED_CHANGES).map((c) => `- ${c.status} ${c.path}`);
+  if (changes && changes.length > MAX_LISTED_CHANGES) listed.push(`- … and ${changes.length - MAX_LISTED_CHANGES} more`);
+  if (changes === null) listed.push("- (the earlier commit can't be compared; check everything)");
+  return prompt("update-pages", {
+    changes: listed.join("\n"),
+    pages: pages.map((p) => pageBlock(p.slug, p.markdown)).join("\n"),
+    guide: guide(pages.map((p) => p.slug), note),
+  });
+}
+
+/** Asks a small repo for pages every wiki should have but this one lacks, such as a wiki written before the product page existed. */
+function addPrompt(slugs: readonly string[], note: string | null): string {
+  const wanted = requiredPages();
+  return prompt("add-pages", { pages: slugs.map((slug) => wanted.get(slug)!).join("\n"), guide: guide(slugs, note) });
+}
+
+/** Asks for some of a large repo's planned pages, with the whole plan for context. */
+function plannedPrompt(plan: readonly PlannedPage[], pages: readonly PlannedPage[], note: string | null): string {
+  const asked = pages.map(
+    (p) =>
+      `- slug "${p.slug}" (${p.kind}), title "${p.title}": ${p.brief || "as its title says"}.` +
+      `${p.covers.length ? ` Covers ${p.covers.join(", ")}.` : ""}${p.keyFiles.length ? ` Start from ${p.keyFiles.join(", ")}.` : ""}`,
+  );
+  return prompt("write-planned-pages", { plan: plan.map(planLine).join("\n"), pages: asked.join("\n"), guide: guide(pages.map((p) => p.slug), note) });
+}
+
+function retryPrompt(failed: readonly Checked[], note: string | null): string {
   const blocks = failed.map(({ draft, check }) => {
     const removed = check.removed.map((r) => `- "${r.text}": ${r.reason}`).join("\n");
     return `${pageBlock(draft.slug, draft.markdown)}\nClaims the check removed from it:\n${removed || "- (none: the page had no cited claims)"}`;
   });
-  return prompt("retry-pages", { pages: blocks.join("\n"), product: productGuide(failed.map((c) => c.draft.slug)) });
+  return prompt("retry-pages", { pages: blocks.join("\n"), guide: guide(failed.map((c) => c.draft.slug), note) });
 }
 
 function pageBlock(slug: string, markdown: string): string {
@@ -113,10 +139,22 @@ export interface PageReport {
   attempts: number;
 }
 
+/** What planning did this run, for a large repo. */
+export interface PlanReport {
+  reason: string;
+  /** Pages the new plan adds, and those it drops. Both empty when it kept the plan as it was. */
+  added: string[];
+  retired: string[];
+  /** Why no plan passed the check, so the repo kept what it had. Empty when one did. */
+  problems: string[];
+}
+
 export interface WikiOptions {
   model?: string;
   /** Rewrite every page even if the wiki exists. Without it, only pages a change affects are. */
   full?: boolean;
+  /** A worktree of the indexed commit, shared with sync's other steps; one is made if not given. */
+  cwd?: string;
 }
 
 export interface WikiResult {
@@ -128,107 +166,146 @@ export interface WikiResult {
   pages: WikiPage[];
   /** One per page the AI wrote this run. Empty when nothing needed rewriting. */
   reports: PageReport[];
-  /** Pages moved to this commit without the AI: nothing they cite changed and they still pass. */
+  /** Pages moved to this commit without the AI: nothing they cite changed, or only lines around it. */
   carried: string[];
-  /** Pages every wiki should have that failed at this commit, so weren't tried again this run. */
+  /** Pages the wiki should have that failed at this commit, so weren't tried again this run. */
   waiting: string[];
+  /** Set when a large repo's wiki was planned this run. */
+  plan: PlanReport | null;
   costUsd: number;
   durationMs: number;
 }
 
 /**
- * Brings a repo's wiki up to the commit the brain has indexed. A new wiki is written in full.
- * An existing one is updated: only pages a change affects are rewritten; the rest are re-checked
- * against the new commit and carried forward with no AI run, and any page every wiki should have
- * but this one lacks (prompts/pages.md) is written on its own. Every page the AI writes is checked
- * against that commit, and one that mostly fails is written once more; if it fails again its
- * previous version stays. All of it happens in a temporary worktree of the commit, so pages
- * never describe uncommitted work. Malformed output leaves the wiki as it was.
+ * Brings a repo's wiki up to the commit the brain has indexed.
+ *
+ * A small repo gets the fixed pages (prompts/pages.md), plus data-model and integrations pages
+ * where it has them, in one run. A large one (see `inventory`) is planned first: a page per area,
+ * a few flow pages, and those two, written in runs of a few pages each, side by side. Its plan is
+ * made again only when code arrives that no page covers, or the steering note changes.
+ *
+ * An existing wiki is updated: only pages whose cited lines changed (or whose folders gained a
+ * file) are rewritten; the rest have their citations moved with the lines around them, are
+ * re-checked and carried forward with no AI run. Every page the AI writes is checked against
+ * the commit, and one that mostly fails is written once more; if it fails again its previous
+ * version stays. All of it happens in a worktree of the commit, so pages never describe
+ * uncommitted work. Malformed output leaves the wiki as it was.
  */
 export async function generateWiki(store: Store, runner: Runner, name: string, options: WikiOptions = {}): Promise<WikiResult> {
   const repo = requireRepo(store, name);
   const state = store.getState(name);
   if (!state) throw new BrainError(`"${name}" has not been synced yet. Run: brain sync ${name}`);
+  const started = Date.now();
   const model = options.model ?? DEFAULT_MODEL;
+  const note = repo.note?.text ?? null;
   const previous = store.pages(name);
   const mode = options.full || previous.length === 0 ? "full" : "update";
-  const lacking = mode === "update" ? [...requiredPages().keys()].filter((slug) => !previous.some((p) => p.slug === slug)) : [];
-  // A missing page that already failed at this commit waits for the code to change.
-  const missing = state.pagesFailedAt === state.commit ? [] : lacking;
-
-  // What changed since each page was written. A page kept after a failed rewrite is older than the rest.
-  const changesSince = new Map<string, ChangedFile[] | null>();
-  if (mode === "update") {
-    for (const commit of new Set(previous.map((p) => p.commit))) {
-      changesSince.set(commit, commit === state.commit ? [] : await changedFiles(repo.path, commit, state.commit));
-    }
-  }
+  const map = inventory(store.getFiles(name));
 
   let costUsd = 0;
-  let durationMs = 0;
   let modelUsed = model;
-  const write = async (cwd: string, prompt: string, slugs?: string[]): Promise<DraftPage[]> => {
-    const result = await runner.run<{ pages: DraftPage[] }>({ cwd, prompt, schema: pagesSchema(slugs), model });
+  const write = async (cwd: string, ask: string, slugs?: string[]): Promise<DraftPage[]> => {
+    const result = await runner.run<{ pages: DraftPage[] }>({ cwd, prompt: ask, schema: pagesSchema(slugs), model });
     costUsd += result.costUsd;
-    durationMs += result.durationMs;
     modelUsed = result.model;
     return validPages(result.output, slugs);
   };
+  /**
+   * Runs of at most BATCH_PAGES pages, side by side. A run that fails counts its pages as failed
+   * (empty), so they're retried or keep their old versions; the other runs' pages stand.
+   */
+  const inBatches = async <T extends { slug: string }>(cwd: string, items: readonly T[], ask: (batch: readonly T[]) => string): Promise<DraftPage[]> => {
+    const batches: T[][] = [];
+    for (let i = 0; i < items.length; i += BATCH_PAGES) batches.push(items.slice(i, i + BATCH_PAGES));
+    const drafts = await Promise.all(
+      batches.map(async (batch) => {
+        const slugs = batch.map((item) => item.slug);
+        let got: DraftPage[] = [];
+        try {
+          got = await write(cwd, ask(batch), slugs);
+        } catch (error) {
+          if (!(error instanceof BrainError)) throw error;
+        }
+        return slugs.map((slug) => got.find((d) => d.slug === slug) ?? { slug, title: slug, markdown: "" });
+      }),
+    );
+    return drafts.flat();
+  };
 
-  const { checked, carried } = await withWorktree(repo.path, state.commit, async (cwd) => {
+  let plan = store.wikiPlan(name);
+  let planReport: PlanReport | null = null;
+  let replanned = false;
+
+  const { checked, carried, planned } = await inWorktree(repo.path, state.commit, options.cwd, async (cwd) => {
+    if (map.large) {
+      const added = plan.length && state.planCommit && mode === "update" ? await changedFiles(repo.path, state.planCommit, state.commit) : null;
+      const reason = mode === "full" ? "a full rewrite" : replanReason(plan, added, note !== state.planNote);
+      if (reason) {
+        // An update keeps the pages the wiki has; a wiki from before plans is its own plan to keep.
+        const before = mode === "full" ? [] : plan.length ? plan : planOfPages(previous);
+        const made = await planPages(runner, cwd, { inventory: map.text, note, current: before, model });
+        costUsd += made.costUsd;
+        if (made.plan) {
+          const was = new Set((before.length ? before : previous).map((p) => p.slug));
+          const now = new Set(made.plan.map((p) => p.slug));
+          planReport = { reason, added: [...now].filter((s) => !was.has(s)), retired: [...was].filter((s) => !now.has(s)), problems: [] };
+          plan = made.plan;
+          replanned = true;
+        } else {
+          planReport = { reason, added: [], retired: [], problems: made.problems };
+        }
+      }
+    }
+    const planned = map.large && plan.length > 0;
+
     const carried = new Map<string, WikiPage>();
     let drafts: DraftPage[] = [];
     if (mode === "full") {
-      drafts = await write(cwd, prompt("write-pages", { pages: prompt("pages"), product: prompt("product-page") }));
+      drafts = planned
+        ? await inBatches(cwd, plan, (batch) => plannedPrompt(plan, batch, note))
+        : await write(cwd, prompt("write-pages", { pages: prompt("pages"), guide: guide([PRODUCT], note) }));
+      // A run that left out pages every wiki has is asked for them on their own, as an update would.
+      const left = planned ? [] : [...requiredPages().keys()].filter((slug) => !drafts.some((d) => d.slug === slug));
+      drafts.push(...(await inBatches(cwd, left.map((slug) => ({ slug })), (batch) => addPrompt(batch.map((b) => b.slug), note))));
     } else {
       const stale: WikiPage[] = [];
+      const changesSince = new Map<string, ChangedFile[] | null>();
       for (const page of previous) {
-        if (page.commit === state.commit) continue;
-        if (isAffected(page.markdown, changesSince.get(page.commit)!)) {
-          stale.push(page);
-          continue;
-        }
-        const check = checkPage(page.markdown, cwd);
-        if (check.publishable) carried.set(page.slug, { ...page, ...counts(check), markdown: check.markdown.trim(), commit: state.commit });
+        // A page the plan dropped isn't kept; a page already at this commit needs nothing.
+        if (page.commit === state.commit || (planned && !plan.some((p) => p.slug === page.slug))) continue;
+        if (!changesSince.has(page.commit)) changesSince.set(page.commit, await changedFiles(repo.path, page.commit, state.commit));
+        const moved = await carriedPage(page.markdown, repo.path, page.commit, state.commit, changesSince.get(page.commit)!);
+        const check = moved === null ? null : checkPage(moved, cwd);
+        if (check?.publishable) carried.set(page.slug, { ...page, ...counts(check), markdown: check.markdown.trim(), commit: state.commit });
         else stale.push(page);
       }
-      if (stale.length) {
-        const changes = unionOf(stale.map((p) => changesSince.get(p.commit)!));
-        drafts = await write(cwd, updatePrompt(stale, changes), stale.map((p) => p.slug));
-        // A page the AI left out counts as failed, so it's asked for again below.
-        for (const page of stale) {
-          if (!drafts.some((d) => d.slug === page.slug)) drafts.push({ slug: page.slug, title: page.title, markdown: "" });
-        }
-      }
-      // A page every wiki should have but this one lacks (the product page, for wikis written
-      // before it existed) is written on its own, without touching the others.
-      if (missing.length) {
-        const added = await write(cwd, addPrompt(missing), missing);
-        drafts.push(...added);
-        for (const slug of missing) {
-          if (!added.some((d) => d.slug === slug)) drafts.push({ slug, title: slug, markdown: "" });
-        }
-      }
+      // A missing page that already failed at this commit waits for the code (or the plan) to change.
+      const retry = replanned || state.pagesFailedAt !== state.commit;
+      const has = (slug: string) => previous.some((p) => p.slug === slug);
+      const newPlanned = retry && planned ? plan.filter((p) => !has(p.slug)) : [];
+      const newRequired = retry && !planned ? [...requiredPages().keys()].filter((slug) => !has(slug)).map((slug) => ({ slug })) : [];
+      const written = await Promise.all([
+        inBatches(cwd, stale, (batch) => updatePrompt(batch, unionOf(batch.map((p) => changesSince.get(p.commit)!)), note)),
+        inBatches(cwd, newPlanned, (batch) => plannedPrompt(plan, batch, note)),
+        inBatches(cwd, newRequired, (batch) => addPrompt(batch.map((b) => b.slug), note)),
+      ]);
+      drafts = written.flat();
     }
 
     const checked: Checked[] = drafts.map((draft) => ({ draft, check: checkPage(draft.markdown, cwd), attempts: 1 }));
-    const failed = checked.filter((c) => !c.check.publishable);
-    if (failed.length) {
-      try {
-        for (const draft of await write(cwd, retryPrompt(failed), failed.map((c) => c.draft.slug))) {
-          const index = checked.findIndex((c) => c.draft.slug === draft.slug);
-          checked[index] = { draft, check: checkPage(draft.markdown, cwd), attempts: 2 };
-        }
-      } catch (error) {
-        // A failed retry changes nothing: the first attempt's results stand.
-        if (!(error instanceof BrainError)) throw error;
-      }
+    const failed = checked.filter((c) => !c.check.publishable).map((c) => ({ ...c, slug: c.draft.slug }));
+    for (const draft of await inBatches(cwd, failed, (batch) => retryPrompt(batch, note))) {
+      // A retry that failed leaves the first attempt's result standing.
+      if (!draft.markdown) continue;
+      const index = checked.findIndex((c) => c.draft.slug === draft.slug);
+      checked[index] = { draft, check: checkPage(draft.markdown, cwd), attempts: 2 };
     }
-    return { checked, carried };
+    return { checked, carried, planned };
   });
 
   const generatedAt = new Date().toISOString();
   const costEach = checked.length ? costUsd / checked.length : 0;
+  const kindOfPage = (slug: string) => (planned && plan.find((p) => p.slug === slug)?.kind) || kindOf(slug);
   const written = new Map<string, WikiPage>();
   for (const { draft, check } of checked) {
     if (!check.publishable) continue;
@@ -236,6 +313,7 @@ export async function generateWiki(store: Store, runner: Runner, name: string, o
       repo: name,
       slug: draft.slug,
       title: draft.title.trim(),
+      kind: kindOfPage(draft.slug),
       markdown: check.markdown.trim(),
       commit: state.commit,
       ...counts(check),
@@ -258,17 +336,39 @@ export async function generateWiki(store: Store, runner: Runner, name: string, o
         reports.map((r) => `${r.slug}: ${r.claims - r.removed.length}/${r.claims} claims supported`).join("; "),
     );
   }
-  // A full run sets the page list; an update keeps it, adding any missing page that passed. Either
-  // way a failed page keeps its old version.
+  // A plan sets the page list and its order. Without one, a full run sets it and an update keeps
+  // it, adding any missing page that passed. Either way a failed page keeps its old version.
   const before = new Map(previous.map((page) => [page.slug, page]));
-  const slugs = mode === "full" ? checked.map((c) => c.draft.slug) : [...previous.map((p) => p.slug), ...missing];
-  const pages = slugs.flatMap((slug) => written.get(slug) ?? carried.get(slug) ?? before.get(slug) ?? []);
+  const slugs = planned
+    ? plan.map((p) => p.slug)
+    : mode === "full"
+      ? checked.map((c) => c.draft.slug)
+      : [...new Set([...previous.map((p) => p.slug), ...written.keys()])];
+  const pages = slugs.flatMap((slug) => {
+    const page = written.get(slug) ?? carried.get(slug) ?? before.get(slug);
+    return page ? [{ ...page, kind: kindOfPage(slug) }] : [];
+  });
   store.replacePages(name, pages);
-  const stillMissing = [...requiredPages().keys()].filter((slug) => !pages.some((p) => p.slug === slug));
-  // Only a run that tried a required page records whether it failed; a waiting page keeps waiting.
-  if (missing.length || mode === "full") store.setPagesFailedAt(name, stillMissing.length ? state.commit : null);
-  const waiting = missing.length ? [] : lacking;
-  return { repo: name, commit: state.commit, mode, pages, reports, carried: [...carried.keys()], waiting, costUsd, durationMs };
+  if (replanned) store.replaceWikiPlan(name, plan, { commit: state.commit, note });
+  else if (!map.large && plan.length) store.replaceWikiPlan(name, [], { commit: null, note: null });
+
+  const wanted = planned ? plan.map((p) => p.slug) : [...requiredPages().keys()];
+  const stillMissing = wanted.filter((slug) => !pages.some((p) => p.slug === slug));
+  // Only a run that tried a missing page records whether it failed; a waiting page keeps waiting.
+  const tried = mode === "full" || checked.some((c) => !before.has(c.draft.slug));
+  if (tried) store.setPagesFailedAt(name, stillMissing.length ? state.commit : null);
+  return {
+    repo: name,
+    commit: state.commit,
+    mode,
+    pages,
+    reports,
+    carried: [...carried.keys()],
+    waiting: tried ? [] : stillMissing,
+    plan: planReport,
+    costUsd,
+    durationMs: Date.now() - started,
+  };
 }
 
 function counts(check: CheckedPage): Pick<WikiPage, "claims" | "removed"> {

@@ -67,6 +67,29 @@ export function parseClaudeResult<T>(stdout: string): RunResult<T> {
   };
 }
 
+/**
+ * A runner that lets at most `max` runs go at once and queues the rest in order, so steps and
+ * repos can go side by side without passing the account's rate limits.
+ */
+export function limitRunner(runner: Runner, max: number): Runner {
+  let running = 0;
+  const waiting: (() => void)[] = [];
+  return {
+    async run<T>(request: RunRequest): Promise<RunResult<T>> {
+      // A finished run hands its slot straight to the next in line, so none is free in between.
+      if (running >= max) await new Promise<void>((resolve) => waiting.push(resolve));
+      else running++;
+      try {
+        return await runner.run<T>(request);
+      } finally {
+        const next = waiting.shift();
+        if (next) next();
+        else running--;
+      }
+    },
+  };
+}
+
 /** Runs the locally installed Claude Code CLI (`claude` on PATH). */
 export const claudeRunner: Runner = {
   run<T>(request: RunRequest): Promise<RunResult<T>> {

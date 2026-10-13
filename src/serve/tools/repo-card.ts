@@ -1,6 +1,6 @@
 import type { NamedFamily } from "../../core/links.js";
 import { FAMILIES, type SeamCoverage } from "../../core/seams.js";
-import type { Freshness, LanguageShare } from "../../core/types.js";
+import type { Freshness, LanguageShare, PageKind } from "../../core/types.js";
 import type { Caller } from "../access.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
 import { factCountText, factsAbout } from "../facts.js";
@@ -23,7 +23,7 @@ export interface RepoCard {
   seams: SeamCoverage & { commit: string | null };
   neighbours: Neighbours;
   /** The AI-written wiki, if one has been generated. */
-  wiki: { pages: string[]; commit: string } | null;
+  wiki: { pages: string[]; kinds: PageKind[]; commit: string } | null;
   /** The product page's opening sentence: what the repo is for. Null without a product page. */
   product: string | null;
   /** The system the repo belongs to, with its other readable members. */
@@ -137,15 +137,26 @@ function productLines({ product, system, facts }: RepoCard): string[] {
   return lines;
 }
 
+/** Past this many pages, the card counts them by kind instead of naming them. */
+const LISTED_PAGES = 8;
+
 function wikiOf(deps: ToolDeps, name: string, indexed: string): RepoCard["wiki"] {
   const pages = deps.store.pages(name);
-  return pages.length ? { pages: pages.map((p) => p.slug), commit: wikiCommit(pages, indexed) } : null;
+  return pages.length ? { pages: pages.map((p) => p.slug), kinds: pages.map((p) => p.kind), commit: wikiCommit(pages, indexed) } : null;
 }
 
 function wikiLine({ repo, wiki, freshness }: RepoCard): string {
-  if (!wiki) return `Wiki: not generated yet (brain sync ${repo})`;
+  if (!wiki) return `Wiki: not written yet (brain sync ${repo} writes it; a sync already running will)`;
   const older = wiki.commit === freshness.commit ? "" : ` · written at @${wiki.commit.slice(0, 7)}, older than the index`;
-  return `Wiki: ${count(wiki.pages.length, "page")} (${wiki.pages.join(", ")}) · read with brain_get${older}`;
+  if (wiki.pages.length <= LISTED_PAGES) return `Wiki: ${count(wiki.pages.length, "page")} (${wiki.pages.join(", ")}) · read with brain_get${older}`;
+  // A large wiki by kind: "4 core, 8 areas, 3 flows, data model, integrations".
+  const kinds = (["core", "area", "flow", "data-model", "integrations"] as const).flatMap((kind) => {
+    const n = wiki.kinds.filter((k) => k === kind).length;
+    if (n === 0) return [];
+    if (kind === "data-model" || kind === "integrations") return [kind === "data-model" ? "data model" : "integrations"];
+    return [kind === "core" ? `${n} core` : count(n, kind)];
+  });
+  return `Wiki: ${count(wiki.pages.length, "page")}: ${kinds.join(", ")} · brain_get lists them; start with overview${older}`;
 }
 
 function seamsLine({ repo, seams, freshness }: RepoCard): string {

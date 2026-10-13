@@ -1,7 +1,7 @@
 import type { FactCheck, FactRecord, Gap, GapSummary, NewFact } from "../core/facts.js";
 import type { Seam, SeamCoverage, SeamKind } from "../core/seams.js";
 import type { SystemRecord } from "../core/systems.js";
-import type { FileRecord, LanguageShare, RepoRecord, RepoState, WikiPage } from "../core/types.js";
+import type { FileRecord, LanguageShare, PlannedPage, RepoNote, RepoRecord, RepoState, WikiPage } from "../core/types.js";
 
 /** Everything one sync changes, applied atomically. Removing a file removes its seams. */
 export interface SyncUpdate {
@@ -83,6 +83,10 @@ export interface Store {
   listRepos(): RepoRecord[];
   /** Changes which ref a repo is indexed from; the next sync catches up. */
   setRepoRef(name: string, ref: string): boolean;
+  /** Sets or clears the note that steers a repo's wiki. */
+  setRepoNote(name: string, note: RepoNote | null): void;
+  /** Sets or clears a note waiting for a person to confirm it. */
+  setProposedNote(name: string, note: RepoNote | null): void;
   /** Deletes the repo and every row that belongs to it. */
   removeRepo(name: string): boolean;
 
@@ -102,6 +106,10 @@ export interface Store {
   replacePages(repo: string, pages: readonly WikiPage[]): void;
   /** A repo's wiki pages in the order they were written. */
   pages(repo: string): WikiPage[];
+  /** A large repo's page plan, in order; empty for a repo without one. */
+  wikiPlan(repo: string): PlannedPage[];
+  /** Replaces a repo's page plan, recording the commit and note it was made with (empty and null to clear). */
+  replaceWikiPlan(repo: string, plan: readonly PlannedPage[], madeWith: { commit: string | null; note: string | null }): void;
 
   /** Wiki sections matching a search, best first. Kept in step with pages by `replacePages`. */
   searchSections(filter: SearchFilter): SearchPage<SectionHit>;

@@ -12,6 +12,17 @@ export interface Section {
 
 const HEADING = /^#{2,3}\s+(.+?)\s*#*\s*$/;
 const FENCE = /^\s*(```|~~~)/;
+const DIAGRAM = /^[ \t]*(```|~~~)[ \t]*mermaid\b[\s\S]*?^[ \t]*\1[ \t]*$\n?/gim;
+
+/** Whether a fence opens a Mermaid diagram. */
+export function opensDiagram(line: string): boolean {
+  return /^\s*(```|~~~)\s*mermaid\b/i.test(line);
+}
+
+/** The markdown without its diagrams, for answers and search that don't need them. */
+export function withoutDiagrams(markdown: string): string {
+  return markdown.replace(DIAGRAM, "").replace(/\n{3,}/g, "\n\n");
+}
 
 /**
  * Splits a page at its `##` and `###` headings, ignoring `#` lines inside code blocks. A page is a
@@ -21,7 +32,8 @@ const FENCE = /^\s*(```|~~~)/;
 export function splitSections(markdown: string): Section[] {
   const parts: { heading: string; lines: string[] }[] = [{ heading: "", lines: [] }];
   let inFence = false;
-  for (const line of markdown.split(/\r?\n/)) {
+  // Diagrams repeat what the text says, in syntax search shouldn't match.
+  for (const line of withoutDiagrams(markdown).split(/\r?\n/)) {
     if (FENCE.test(line)) inFence = !inFence;
     const heading = inFence ? null : HEADING.exec(line);
     if (heading) parts.push({ heading: heading[1]!, lines: [] });

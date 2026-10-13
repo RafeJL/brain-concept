@@ -77,8 +77,12 @@ Two halves share only the store:
    prefix). Each is verified against its cited lines before it replaces the
    old ones; Markdown and other files that can't declare an endpoint cost no run. Cross-repo
    links are worked out at query time, so nothing else is re-linked.
-4. Wiki pages that cite a changed file, or a folder a file was added to, are rewritten in one
-   Claude Code run and must pass the citation check. Pass → publish tagged with b. Fail → written
+4. Wiki pages whose cited lines changed, whose cited file grew by ten lines or more, or whose
+   cited folder gained a file, are rewritten, four pages to a Claude Code run with the runs side by
+   side, and must pass the citation check. A page whose cited file changed only around the cited
+   lines has its citations moved through the diff, as fact anchors are, and is carried with no AI
+   run. A large repo is planned again only when a new project or enough new code lands outside
+   every page, or its steering note changes; then only its new pages are written. Pass → publish tagged with b. Fail → written
    once more with the removed claims as feedback; fail again → keep the old page, which then
    shows it was kept from an older commit. Pages that cite nothing changed are re-checked against
    b without AI and moved to b. One run per repo at a time; a trigger mid-run is folded into one
@@ -91,6 +95,40 @@ Two halves share only the store:
    code in one Claude Code run per repo: agrees, contradicts, or absent, verified against the
    lines cited. A re-check that still agrees clears the stale mark on anchors it found itself;
    it never touches a fact's text or status.
+
+## Wikis that fit the repo (B4a)
+
+A planner needs the architecture, the flows, the data model and the integrations without
+grepping, and five fixed pages can't hold that for a repo of twenty projects.
+
+- **Small or large, decided without AI.** `src/ai/inventory.ts` counts the indexed files: a repo
+  with 200 or more source files outside tests and vendored folders, or four or more projects
+  (folders with a manifest), is large. On the samples only eShop is (573 files, 20 projects).
+- **Small repos** keep one run writing the fixed pages, plus `data-model` and `integrations`
+  pages when the repo has them.
+- **Large repos are planned.** The planning run gets the inventory (folders and their file
+  counts, projects, likely entry points) rather than listing folders itself, and returns up to 20
+  pages: the four core pages, a page per area, up to three flow pages, data model and
+  integrations, each with the folders it covers and its key files. The plan is checked without AI
+  (folders and files exist, unique slugs, core pages present, within the caps) and retried once;
+  a plan that still fails leaves the repo with what it had. Pages are written four to a run, the
+  runs side by side, each given the whole plan so pages refer to each other rather than repeat.
+  A run that fails costs only its own pages.
+- **Steering note.** A person sets what the wiki should stress (`brain note`, or
+  `brain_set_note` with a confirm dialog; a proposed note steers nothing). It goes to the
+  planning run and every page run as guidance under the checking rules. It is never read from
+  the repo, whose text is untrusted.
+- **Diagrams.** The overview has a Mermaid flowchart and each flow page a sequence diagram. A
+  `%% [path:lines]` comment above each box, labelled link and message cites it, and the checker
+  (`src/ai/diagrams.ts`) checks each like a sentence: removed when it fails, with links to removed
+  boxes; the diagram is dropped when more than half fails or it isn't a flowchart or sequence
+  diagram. Agents get pages without diagrams unless they ask, and search skips them.
+- **Serving.** `brain_get` lists pages by kind with each page's first sentence; the card counts a
+  large wiki's pages by kind; the integrations page gains the enrolled repos it talks to from the
+  link map when read; `brain_impact` with `work` names the area and flow pages to read.
+- **Side by side.** A sync's three steps (links, wiki, fact checks) share one worktree and run at
+  once; `brain add` and `brain sync` take three repos at a time; one cap of four Claude Code runs
+  covers everything a command does.
 
 ## MCP tools
 
