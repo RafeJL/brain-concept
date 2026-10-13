@@ -395,3 +395,42 @@ changes to the server's instructions. Ask in plain words, without naming tools:
 
 If it searches the web, greps folders or clones instead, note the exact wording. That is how the
 server instructions in `src/serve/mcp.ts` get improved.
+
+## Part D: facts from people (B3)
+
+None of this runs Claude Code in the background, so it costs nothing beyond the session itself.
+
+1. **Record a fact in a conversation.** In a new Claude Code session, run a short PO-style brief:
+   *"For RealWorld, users should only be able to follow up to 500 authors; people were
+   bulk-following. Can the brain remember that?"* The agent should call `brain_record_fact`.
+   Claude Code first asks permission for the tool (every time, by design). Then a dialog shows
+   the fact, your name, and what the product pages already say about following. Accept it,
+   editing the wording if you like.
+2. **See it used.** In another new session, ask *"What limits apply to following in RealWorld?"*
+   The answer should quote your fact as human-reviewed, with your name and the date, ahead of
+   anything AI-written.
+3. **Decline one.** Ask it to record something and decline the dialog. `npm run brain -- facts`
+   shouldn't list it.
+4. **See it from the command line:**
+
+| Command | Expect |
+|---|---|
+| `facts` | The fact under the repo or system it was recorded on, `human-reviewed`, with your name and `fact #1` |
+| `page react-web product` | `## From people` above the AI-written page, holding the fact (also when it was recorded on the RealWorld system) |
+| `card react-web` | `Facts from people: 1 confirmed by people · at the top of its product page` |
+| `search "follow limit"` | `From people:` first, with the fact |
+| `systems show RealWorld` | The fact under `From people` |
+
+5. **Staleness, in the playground from Part A** (with its `$env:BRAIN_DB` set). Anchor a fact
+   to the line that serves one article:
+   `npm run brain -- facts add aspnet-api --kind rule --text "Anyone can read an article without signing in." --anchor src/Conduit/Features/Articles/ArticlesController.cs:39`.
+   In `teammate\aspnet-api`, add a comment line at the top of that file, commit and push; fetch in
+   `aspnet-api`. `facts aspnet-api` shows the anchor moved to line 40. Then change line 40 itself
+   and push again: the sync prints `code under 1 fact from people changed`, and the fact shows
+   `stale`. `facts confirm <id>` clears it.
+6. **Gaps.** Search for something no repo covers (`search "refund policy"`), then run `gaps`. It
+   should list the search with a count.
+7. **The desktop app.** In the Code tab of the desktop app (tried 2026-10-12), the permission
+   prompt appears but the confirm dialog doesn't: it comes back declined at once. The agent
+   should say the dialog was most likely never shown, and offer to save it as proposed. Say yes;
+   `facts` lists it as proposed, and `facts confirm <id>` confirms it.

@@ -1,7 +1,8 @@
 import type { Freshness, WikiPage } from "../../core/types.js";
 import type { Caller } from "../access.js";
+import { factBlock, factsAbout } from "../facts.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
-import { requireSyncedRepo, TIER, wikiCommit, type ToolDeps, type ToolResult } from "./common.js";
+import { count, requireSyncedRepo, TIER, wikiCommit, type ToolDeps, type ToolResult } from "./common.js";
 import { systemOverview } from "./system-overview.js";
 
 export interface PageInput {
@@ -59,10 +60,13 @@ export async function getPage(deps: ToolDeps, caller: Caller, input: PageInput):
     return { ok: false, text: `${repo.name} has no page "${input.page}". Pages: ${pages.map((p) => p.slug).join(", ")}.` };
   }
   const freshness = await freshnessOf(repo, { ...state, commit: page.commit });
+  // The product page opens with what people have stated about the repo and its system.
+  const facts = page.slug === "product" ? factsAbout(deps.store, repo.name, found.readable) : [];
   const text = [
-    `${repo.name} · ${page.slug} · ${describeFreshness(freshness, repo.ref)} · ${TIER} · ${checkedNote(page)}`,
+    `${repo.name} · ${page.slug} · ${describeFreshness(freshness, repo.ref)} · ${TIER}${facts.length ? `, with ${count(facts.length, "fact")} from people` : ""} · ${checkedNote(page)}`,
     ...(keptNote(page) ? [`Note: ${keptNote(page)}, so this older version is shown.`] : []),
     "",
+    ...factBlock(facts),
     page.markdown,
     "",
     CAUTION,

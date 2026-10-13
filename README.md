@@ -67,6 +67,8 @@ the brain:
 - *Where do we validate login tokens?* (searches every repo you've added)
 - *What can users do in some-repo, and what rules apply?* (answered from its product page)
 - *Which repos would "let users save articles to read later" touch?*
+- *Users can follow at most 500 authors: record that.* (you confirm it in a dialog; later sessions
+  answer with it)
 
 To see exactly what an agent gets, use the same answers from the command line:
 `npm run brain -- card some-repo`, `page some-repo`, `search "tokens"`.
@@ -81,7 +83,8 @@ MCP server with `claude mcp remove citation-brain -s user`.
 
 ## What agents can ask
 
-The MCP server tells Claude Code when to use it. These are its five tools, all read-only:
+The MCP server tells Claude Code when to use it. These are its six tools. Five only read; the
+sixth records what a person tells it, and only once that person confirms:
 
 | Tool | Answers | From |
 |---|---|---|
@@ -90,6 +93,7 @@ The MCP server tells Claude Code when to use it. These are its five tools, all r
 | `brain_search` | Where is this handled? (when you don't know which repo or page) | Every repo's wiki sections, endpoints and other links, and system names |
 | `brain_find_consumers` | Who serves this endpoint, and who calls it? Who publishes this event and who handles it? The same for a gRPC method or a shared package | Routes, calls, events, gRPC and packages across every repo |
 | `brain_impact` | What breaks if I change this repo, file or endpoint? Or: which systems, repos and endpoints would this piece of work touch? | What it serves or publishes, and everyone who uses each; for work, the wiki and route map |
+| `brain_record_fact` | Records a rule, term, purpose, decision or answer a person has just stated, on a repo or a system | The person, who confirms it in a dialog |
 
 For example, `npm run brain -- consumers "GET /api/articles/:slug"` gives:
 
@@ -160,6 +164,32 @@ Weaker matches: citation-harness-library
 It also names the repos that call the matching endpoints. No AI runs, so it is instant and free;
 the calling agent does the reasoning.
 
+### Facts from people
+
+The code can't say everything: "follows are capped at 500 because people bulk-followed" lives in
+someone's head. When a person tells their agent something like that, the agent offers to record
+it with `brain_record_fact`. The brain then asks the person directly, in a dialog the agent can't
+answer for them, showing the fact and what the wiki already says nearby, so a contradiction shows
+before anyone accepts. Accepted facts are stored as `human-reviewed`, with who and when, and come
+first: at the top of the product page, on the card, in search and in system overviews.
+
+```
+## From people
+
+- Users can follow at most 500 authors. (rule · human-reviewed · Rafe Loveday, 2026-10-12 · enforced at src/follow.ts:2 · fact #1)
+```
+
+- **Where no dialog is possible** (a headless `claude -p` run, an older client, and Claude Code's
+  desktop app, which declines the dialog without showing it), the fact is stored as *proposed*,
+  and agents see it labelled so until someone runs `brain facts confirm`.
+- **Anchored facts go stale.** A fact can point at the lines that enforce it. When those lines
+  change, the next sync marks it stale ("re-confirm before relying on it"); lines moving around
+  it don't.
+- **Gaps:** searches the brain couldn't answer are logged on your machine. `brain gaps` lists
+  the most asked, which is what is worth writing down.
+
+You can also add facts yourself: `npm run brain -- facts add <repo or system> --kind rule --text "..."`.
+
 ## How far to trust an answer
 
 - **Every claim is checked before it's stored, with no AI involved.**
@@ -175,9 +205,12 @@ the calling agent does the reasoning.
   if its repos exist, none is in two systems, and each repo in it calls or is called by another
   member in the route map. Agents
   see unconfirmed systems labelled "suggested".
-- **Every answer is labelled `llm-generated`.** The check confirms the cited lines say what the
-  claim names, not that the claim reads them correctly. So agents are told to confirm at the
-  citation before relying on it.
+- **Everything Claude Code wrote is labelled `llm-generated`.** The check confirms the cited
+  lines say what the claim names, not that the claim reads them correctly. So agents are told to
+  confirm at the citation before relying on it.
+- **Facts from people are labelled `human-reviewed`** once the person confirms them, with who and
+  when, or "proposed" until then. Only the person can confirm through the dialog; text in a repo
+  can't plant one, since agents are told to record only what the person said.
 - **Answers give file and line pointers, never pasted code.**
 - **Gaps are stated, not hidden.** For example, calls whose URL (or events whose name) is only
   known at run time are counted and located.
@@ -211,7 +244,12 @@ gets.
 | `systems show <system>` | `brain_get` with `system`: the system's overview. |
 | `systems confirm <system>` or `--all` | Confirms suggested systems. |
 | `systems set <system> <repo>... [--summary "<line>"]` | Adds or moves repos into a system (creating it if needed), or changes its one-line summary. Either way the system counts as confirmed. |
-| `systems rename <system> <new>` / `systems remove <system>` | Tidies up. Removing a system leaves its repos enrolled. |
+| `systems rename <system> <new>` / `systems remove <system>` | Tidies up. Removing a system leaves its repos enrolled, and removes the facts on it. |
+| `facts [<repo or system>] [--all]` | Lists facts from people; proposed and stale ones are marked. `--all` adds retired ones. |
+| `facts add <repo or system> --kind <k> --text "<fact>" [--quote ...] [--anchor file:lines]... [--ticket t]` | Records a fact yourself, confirmed. Kinds: rule, term, purpose, decision, answer. |
+| `facts confirm <id>` / `facts edit <id> [--text ...] [--anchor ...]` / `facts retire <id>` | Confirms a proposed or stale fact, rewords or re-anchors one, or marks one no longer true. |
+| `facts export` | Every fact as Markdown, by repo and system. |
+| `gaps` | Searches the brain couldn't answer, most asked first. |
 
 A repo tracks what `origin/HEAD` points at (usually `origin/main`), so it describes what has been
 merged, and a fetch is enough to update it. The store is `%USERPROFILE%\.brain\brain.db`. Set
@@ -242,7 +280,8 @@ merged, and a fetch is enough to update it. The store is `%USERPROFILE%\.brain\b
   "login security".
 - **Re-planning a wiki:** updates keep the same pages. After a big restructure, run
   `brain sync <name> --full`.
-- **Corrections from people:** curated, human-reviewed facts are planned (phase 4).
+- **Checking a person's fact against the code:** the dialog shows what the wiki says nearby, but
+  nothing yet checks whether the code contradicts a fact (planned, B3b).
 - **Hosting:** today it runs on your machine. A hosted version with GitHub permissions is phase 6.
 
 ## Working on the brain

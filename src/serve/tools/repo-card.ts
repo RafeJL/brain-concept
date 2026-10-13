@@ -3,6 +3,7 @@ import { FAMILIES, type SeamCoverage } from "../../core/seams.js";
 import type { Freshness, LanguageShare } from "../../core/types.js";
 import type { Caller } from "../access.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
+import { factCountText, factsAbout } from "../facts.js";
 import { linkSummary, neighbours, type Neighbour, type Neighbours } from "../neighbours.js";
 import { findSystem, systemOf } from "../systems.js";
 import { firstSentence } from "../../core/sections.js";
@@ -27,6 +28,8 @@ export interface RepoCard {
   product: string | null;
   /** The system the repo belongs to, with its other readable members. */
   system: { name: string; status: SystemStatus; others: string[] } | null;
+  /** What people have stated about the repo and its system, counted ("2 confirmed by people"); null when nothing. */
+  facts: string | null;
 }
 
 const CONCISE_LANGUAGES = 5;
@@ -111,17 +114,18 @@ function detailedText(card: RepoCard): string {
   ].join("\n");
 }
 
-function productAndSystem(deps: ToolDeps, name: string, readable: readonly string[]): Pick<RepoCard, "product" | "system"> {
+function productAndSystem(deps: ToolDeps, name: string, readable: readonly string[]): Pick<RepoCard, "product" | "system" | "facts"> {
   const page = deps.store.pages(name).find((p) => p.slug === "product");
   const system = systemOf(deps.store, name, readable);
   return {
     product: page ? firstSentence(page.markdown) : null,
     system: system ? { name: system.name, status: system.status, others: system.repos.filter((repo) => repo !== name) } : null,
+    facts: factCountText(factsAbout(deps.store, name, readable)),
   };
 }
 
 /** What the repo is for and which product it is part of, for a PO's first question. */
-function productLines({ product, system }: RepoCard): string[] {
+function productLines({ product, system, facts }: RepoCard): string[] {
   const lines = product ? [`Product: ${product} · read with brain_get (page "product")`] : [];
   if (system) {
     const shown = system.others.slice(0, 5).join(", ") + (system.others.length > 5 ? ", …" : "");
@@ -129,6 +133,7 @@ function productLines({ product, system }: RepoCard): string[] {
     const detail = [label, shown && `with ${shown}`].filter(Boolean).join("; ");
     lines.push(`System: ${system.name}${detail ? ` (${detail})` : ""} · overview with brain_get (system "${system.name}")`);
   }
+  if (facts) lines.push(`Facts from people: ${facts} · at the top of its product page (brain_get page "product")`);
   return lines;
 }
 

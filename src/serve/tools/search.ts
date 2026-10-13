@@ -1,7 +1,9 @@
+import type { FactRecord } from "../../core/facts.js";
 import { KIND_LABEL, type Seam } from "../../core/seams.js";
 import type { SystemRecord } from "../../core/systems.js";
-import type { SectionHit } from "../../store/store.js";
+import type { FactFilter, SectionHit } from "../../store/store.js";
 import type { Caller } from "../access.js";
+import { factLine, visibleFacts } from "../facts.js";
 import { visibleSystems } from "../systems.js";
 import { builtFrom, count, indexedAt, PAGE_SIZE, pointer, readableRepos, TIER, type Format, type ToolDeps, type ToolResult } from "./common.js";
 
@@ -24,6 +26,8 @@ export interface SearchAnswer {
   endpoints: Seam[];
   /** Systems whose name or summary match, best first. Only on the first page. */
   systems: SystemRecord[];
+  /** Facts people stated that match, best first. Only on the first page. */
+  facts: FactRecord[];
 }
 
 /** Words that say how a question is asked, not what it's about. */
@@ -38,19 +42,21 @@ const SECTIONS = { concise: 8, detailed: PAGE_SIZE };
 const ENDPOINTS = { concise: 5, detailed: 20 };
 /** Endpoints looked at to fill that list, since one endpoint can be declared and called many times. */
 const ENDPOINT_POOL = 200;
+/** Facts from people listed per answer. */
+const FACTS = 5;
 
 /**
  * The query as an FTS5 expression: its words, OR'd. Stemming already matches other forms
  * ("tests" finds "testing"); prefixes aren't used, since "run" would find "runtime" and "calls"
  * "Callback". Quotes and operators become plain words, so nobody writes FTS syntax by accident.
- * Null when the query has no words.
+ * With `all`, every word must match instead. Null when the query has no words.
  */
-export function matchExpression(query: string): string | null {
+export function matchExpression(query: string, all = false): string | null {
   const words = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])];
   const meaningful = words.filter((w) => !STOP_WORDS.has(w));
   const terms = meaningful.length ? meaningful : words;
   if (terms.length === 0) return null;
-  return terms.map((w) => `"${w}"`).join(" OR ");
+  return terms.map((w) => `"${w}"`).join(all ? " AND " : " OR ");
 }
 
 /**
@@ -73,9 +79,31 @@ export async function search(deps: ToolDeps, caller: Caller, input: SearchInput)
   const matchedRepos = [...new Set([...sections.repos, ...seams.repos])].sort();
   const visible = visibleSystems(deps.store, scope);
   const systems = offset === 0 ? deps.store.searchSystems(match).flatMap((name) => visible.filter((s) => s.name === name)) : [];
+  const factFilter = visibleFacts(deps.store, scope);
+  const facts = offset === 0 ? deps.store.searchFacts({ ...factFilter, match, limit: FACTS }) : [];
+  if (offset === 0 && !answers(deps, scope, factFilter, input.query)) {
+    // Worth an owner writing down (brain gaps).
+    deps.store.logGap({ tool: "brain_search", query: input.query, repos: input.repos ?? [], askedAt: new Date().toISOString() });
+  }
 
-  const data: SearchAnswer = { query: input.query, sections: sections.hits, sectionTotal: sections.total, matchedRepos, endpoints, systems };
+  const data: SearchAnswer = { query: input.query, sections: sections.hits, sectionTotal: sections.total, matchedRepos, endpoints, systems, facts };
   return { ok: true, data, text: await render(deps, data, scope, input.format, offset) };
+}
+
+/**
+ * Whether anything the brain holds mentions every word of the question: a fact, a wiki section or
+ * an endpoint. Words are OR'd for ranking, so "refund approval policy" still lists sections that
+ * only say "policy"; when none has all three, the brain didn't really answer it.
+ */
+function answers(deps: ToolDeps, scope: readonly string[], factFilter: FactFilter, query: string): boolean {
+  const all = matchExpression(query, true);
+  if (!all) return true;
+  const filter = { repos: scope, match: all, limit: 1 };
+  return (
+    deps.store.searchFacts({ ...factFilter, match: all, limit: 1 }).length > 0 ||
+    deps.store.searchSections(filter).total > 0 ||
+    deps.store.searchSeams(filter).total > 0
+  );
 }
 
 /** One endpoint per repo, kind, method and path: the best-ranked declaration or call of it. */
@@ -90,22 +118,30 @@ function distinctEndpoints(seams: readonly Seam[]): Seam[] {
 }
 
 async function render(deps: ToolDeps, answer: SearchAnswer, scope: string[], format: Format, offset: number): Promise<string> {
-  const { sections, sectionTotal, endpoints, systems } = answer;
+  const { sections, sectionTotal, endpoints, systems, facts } = answer;
   const noWiki = scope.filter((name) => deps.store.pages(name).length === 0);
   const noWikiNote = noWiki.length ? `No wiki yet, so not searched: ${noWiki.join(", ")} (brain sync <repo> writes one).` : "";
 
-  if (sectionTotal === 0 && endpoints.length === 0 && systems.length === 0) {
+  if (sectionTotal === 0 && endpoints.length === 0 && systems.length === 0 && facts.length === 0) {
     return [`No wiki sections or endpoints match "${answer.query}" in ${count(scope.length, "repo")}.`, noWikiNote].filter(Boolean).join("\n");
   }
 
   const found = new Set([...sections.map((s) => s.repo), ...endpoints.map((s) => s.repo)]);
   const summary = [
+    ...(facts.length ? [count(facts.length, "fact") + " from people"] : []),
     ...(sectionTotal ? [count(sectionTotal, "section")] : []),
     ...(endpoints.length ? [count(endpoints.length, "endpoint")] : []),
-  ].join(" and ");
+  ].join(", ");
   const lines = [summary ? `${summary} match "${answer.query}" across ${count(answer.matchedRepos.length, "repo")}` : `No wiki sections or endpoints match "${answer.query}"`, ""];
 
-  // Systems first: a match on a product's name or summary is usually what the question is about.
+  // What people stated comes first: it is the team's own word, not the AI's reading of the code.
+  if (facts.length) {
+    lines.push("From people:");
+    for (const fact of facts) lines.push(`  ${fact.repo ?? fact.system}: ${factLine(fact)}`);
+    lines.push("");
+  }
+
+  // Then systems: a match on a product's name or summary is usually what the question is about.
   if (systems.length) {
     lines.push("Systems:");
     for (const system of systems) {

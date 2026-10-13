@@ -1,7 +1,12 @@
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { resolveDbPath } from "./config.js";
+import { localPerson, resolveDbPath } from "./config.js";
+import type { FactKind, FactRecord } from "./core/facts.js";
+import { anchorProblems, parseAnchor } from "./ingest/facts.js";
+import { factLine, visibleFacts } from "./serve/facts.js";
+import { findSystem } from "./serve/systems.js";
+import { recordFact } from "./serve/tools/record-fact.js";
 import { runQueued } from "./core/queue.js";
 import { listTree, resolveCommit } from "./core/git.js";
 import { familyOf } from "./core/seams.js";
@@ -66,6 +71,18 @@ Systems (which repos make up a product):
   brain systems rename <system> <new name>                 rename a system
   brain systems remove <system>                            remove a system (its repos stay enrolled)
 
+Facts from people (agents record them with brain_record_fact; you confirm them):
+  brain facts [<repo or system>] [--all]                   list facts, proposed and stale ones marked; --all adds retired
+  brain facts add <repo or system> --kind <k> --text "<fact>" [--quote "<words>"] [--anchor <file:lines>]... [--ticket <t>]
+                                                           record a fact yourself, confirmed (kinds: rule, term,
+                                                           purpose, decision, answer)
+  brain facts confirm <id>                                 confirm a proposed fact, or re-confirm a stale one
+  brain facts edit <id> [--text "<fact>"] [--anchor <file:lines>]...
+                                                           reword a fact or re-anchor it at the current commit
+  brain facts retire <id>                                  mark a fact no longer true (kept for history)
+  brain facts export                                       every fact as Markdown, by repo and system
+  brain gaps                                               searches the brain couldn't answer, most asked first
+
 Store: ${resolveDbPath()} (set BRAIN_DB to change). Model: ${DEFAULT_MODEL} unless --model is given.`;
 
 async function main(argv: string[]): Promise<void> {
@@ -87,6 +104,11 @@ async function main(argv: string[]): Promise<void> {
       "no-hook": { type: "boolean", default: false },
       full: { type: "boolean", default: false },
       only: { type: "string" },
+      kind: { type: "string" },
+      text: { type: "string" },
+      quote: { type: "string" },
+      ticket: { type: "string" },
+      anchor: { type: "string", multiple: true },
       detailed: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
@@ -182,6 +204,12 @@ async function main(argv: string[]): Promise<void> {
         if (!sub) throw new BrainError('Usage: brain search "<query>" [--repo <name>]... [--detailed] [--offset <n>]');
         print(await search(tools, LOCAL_CALLER, { query: sub, repos: values.repo, format, offset: Number(values.offset ?? 0) || 0 }));
         break;
+      case "facts":
+        await facts(store, tools, sub, arg, values);
+        break;
+      case "gaps":
+        printGaps(store);
+        break;
       default:
         throw new BrainError(`Unknown command "${command}".\n\n${HELP}`);
     }
@@ -190,11 +218,6 @@ async function main(argv: string[]): Promise<void> {
   }
 }
 
-/**
- * Syncs a repo, then has Claude Code bring its routes and calls and its wiki up to the new
- * commit. One run per repo at a time: a hook firing mid-run is folded into one more pass when
- * this one finishes. A failed AI step is reported and the next one still runs.
- */
 /** `--only links` maps routes, calls and other links without touching the wiki; `--only wiki` the reverse. */
 type Step = "links" | "wiki";
 
@@ -203,6 +226,11 @@ function onlyStep(value: string | undefined): Step | undefined {
   throw new BrainError(`--only takes links or wiki, not "${value}".`);
 }
 
+/**
+ * Syncs a repo, then has Claude Code bring its routes and calls and its wiki up to the new
+ * commit. One run per repo at a time: a hook firing mid-run is folded into one more pass when
+ * this one finishes. A failed AI step is reported and the next one still runs.
+ */
 async function syncAndRefresh(store: Store, name: string, options: { model?: string; full?: boolean; only?: Step }): Promise<void> {
   let full = options.full;
   const outcome = await runQueued(join(dirname(resolveDbPath()), "locks"), name, async () => {
@@ -446,6 +474,131 @@ function printSuggestion(result: SuggestResult): void {
   if (result.kept.length) console.log("Agents see these labelled suggested. Confirm with: brain systems confirm <system> (or --all)");
 }
 
+/** `brain facts`: list, add, confirm, edit, retire, export. */
+async function facts(
+  store: Store,
+  tools: ToolDeps,
+  action: string | undefined,
+  arg: string | undefined,
+  options: { all: boolean; kind?: string; text?: string; quote?: string; ticket?: string; anchor?: string[] },
+): Promise<void> {
+  const readable = store.listRepos().map((r) => r.name);
+  const filter = (target?: string) => {
+    if (!target) return { ...visibleFacts(store, readable), retired: options.all };
+    if (store.getRepo(target)) return { repos: [target], systems: [], retired: options.all };
+    const system = findSystem(store, target, readable);
+    if (!system) throw new BrainError(`No repo or system named "${target}". See: brain repo list, brain systems`);
+    return { repos: [], systems: [system.name], retired: options.all };
+  };
+  const byId = (id: string | undefined) => {
+    const fact = id && /^\d+$/.test(id) ? store.getFact(Number(id)) : undefined;
+    if (!fact) throw new BrainError(`No fact #${id ?? "?"}. See: brain facts`);
+    return fact;
+  };
+  const now = () => new Date().toISOString();
+  switch (action) {
+    case "add": {
+      if (!arg || !options.kind || !options.text) throw new BrainError('Usage: brain facts add <repo or system> --kind rule --text "<fact>" [--quote "<their words>"] [--anchor <file:lines>]... [--ticket <t>]');
+      const repo = store.getRepo(arg) ? arg : undefined;
+      const person = await localPerson();
+      // Running the command is the person confirming it.
+      const result = await recordFact(
+        tools,
+        LOCAL_CALLER,
+        { repo, system: repo ? undefined : arg, kind: options.kind as FactKind, text: options.text, quote: options.quote ?? options.text, ticket: options.ticket, anchors: options.anchor },
+        { confirm: async ({ text, statedBy }) => ({ action: "accept", text, statedBy }), person },
+      );
+      print(result);
+      return;
+    }
+    case "confirm": {
+      const fact = byId(arg);
+      if (fact.status === "confirmed" && !fact.staleSince) {
+        console.log(`Fact #${fact.id} is already confirmed.`);
+        return;
+      }
+      const commit = fact.repo ? store.getState(fact.repo)?.commit ?? null : null;
+      store.updateFact(fact.id, {
+        status: "confirmed",
+        confirmedBy: await localPerson(),
+        confirmedAt: now(),
+        staleSince: null,
+        ...(fact.anchors.length && commit ? { anchorCommit: commit } : {}),
+      });
+      console.log(`- ${factLine(store.getFact(fact.id)!)}`);
+      if (fact.staleSince && fact.anchors.length) console.log("Its code changed: if the anchors no longer point at it, fix them with: brain facts edit " + fact.id + " --anchor <file:lines>");
+      return;
+    }
+    case "edit": {
+      const fact = byId(arg);
+      if (options.text === undefined && !options.anchor?.length) throw new BrainError('Usage: brain facts edit <id> [--text "<fact>"] [--anchor <file:lines>]...');
+      let anchors: Partial<FactRecord> = {};
+      if (options.anchor?.length) {
+        const repo = fact.repo ? store.getRepo(fact.repo) : undefined;
+        const state = fact.repo ? store.getState(fact.repo) : undefined;
+        if (!repo || !state) throw new BrainError("Anchors point at lines in a repo: this fact is on a system.");
+        const cites = options.anchor.map((a) => parseAnchor(a) ?? fail(`Anchors are file:lines, e.g. src/follow.ts:12-20. Can't read: ${a}`));
+        const problems = await anchorProblems(repo.path, state.commit, cites);
+        if (problems.length) throw new BrainError(`The anchors don't hold at @${state.commit.slice(0, 7)}: ${problems.join("; ")}`);
+        anchors = { anchors: cites, anchorCommit: state.commit, staleSince: null };
+      }
+      store.updateFact(fact.id, { ...(options.text !== undefined ? { text: options.text.trim() } : {}), ...anchors });
+      console.log(`- ${factLine(store.getFact(fact.id)!)}`);
+      return;
+    }
+    case "retire": {
+      const fact = byId(arg);
+      store.updateFact(fact.id, { status: "retired" });
+      console.log(`Retired fact #${fact.id}. Agents no longer see it; brain facts --all still lists it.`);
+      return;
+    }
+    case "export": {
+      const all = store.facts({ ...visibleFacts(store, readable), retired: true });
+      if (all.length === 0) {
+        console.log("No facts yet.");
+        return;
+      }
+      const targets = [...new Set(all.map((f) => (f.repo ? `repo ${f.repo}` : `system ${f.system}`)))].sort();
+      for (const target of targets) {
+        console.log(`# ${target}\n`);
+        for (const fact of all.filter((f) => (f.repo ? `repo ${f.repo}` : `system ${f.system}`) === target)) {
+          console.log(`- ${factLine(fact)}`);
+          console.log(`  - Their words: "${fact.quote}"`);
+        }
+        console.log("");
+      }
+      return;
+    }
+    default: {
+      // `brain facts` or `brain facts <repo or system>`.
+      const target = action === undefined || action === "list" ? arg : action;
+      const listed = store.facts(filter(target));
+      if (listed.length === 0) {
+        console.log(target ? `No facts on ${target} yet.` : "No facts yet. Agents record them with brain_record_fact; you can add one with: brain facts add");
+        return;
+      }
+      for (const fact of listed) console.log(`${(fact.repo ?? fact.system)!.padEnd(24)} ${factLine(fact)}`);
+      const toConfirm = listed.filter((f) => f.status === "proposed" || f.staleSince).length;
+      if (toConfirm) console.log(`\n${count(toConfirm, "fact")} to confirm: brain facts confirm <id>`);
+    }
+  }
+}
+
+function fail(message: string): never {
+  throw new BrainError(message);
+}
+
+/** `brain gaps`: what agents searched for and the brain couldn't answer. */
+function printGaps(store: Store): void {
+  const gaps = store.gaps(50);
+  if (gaps.length === 0) {
+    console.log("No gaps logged yet: every search found something.");
+    return;
+  }
+  console.log("Searches the brain couldn't answer, most asked first. Worth writing down (brain facts add), or a sign a wiki is missing a page.");
+  for (const gap of gaps) console.log(`  ${String(gap.times).padStart(3)}×  "${gap.query}"  (${gap.tools.join(", ")}, last ${gap.lastAsked.slice(0, 10)})`);
+}
+
 function print(result: ToolResult<unknown>): void {
   if (!result.ok) throw new BrainError(result.text);
   console.log(result.text);
@@ -454,6 +607,7 @@ function print(result: ToolResult<unknown>): void {
 function printSync(result: SyncResult): void {
   const from = result.previousCommit ? `${result.previousCommit.slice(0, 7)} -> ` : "";
   console.log(`${result.repo}: ${from}${result.commit.slice(0, 7)} (+${result.added} ~${result.changed} -${result.removed}, ${result.unchanged} unchanged)`);
+  if (result.staleFacts) console.log(`${result.repo}: code under ${count(result.staleFacts, "fact")} from people changed; re-confirm with: brain facts ${result.repo}`);
 }
 
 main(process.argv.slice(2)).catch((error: unknown) => {

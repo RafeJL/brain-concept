@@ -212,7 +212,8 @@ describe("cards and search", () => {
     expect(kit.text).toContain("Called by: ui-app (1 package use)");
     expect(client.ok && client.data.neighbours.calls).toEqual([{ repo: "basket-grpc", count: 0, suffix: false, links: { grpc: 1 } }]);
     expect(client.text).toContain("Calls: basket-grpc (1 gRPC method)");
-  });
+    // Six repos synced and mapped: about 10s alone, twice that when the whole suite runs at once.
+  }, 30_000);
 
   it("finds events by the words in their names", async () => {
     const { deps } = await enrolled("ordering-events", "notify-worker");

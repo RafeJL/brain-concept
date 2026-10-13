@@ -44,7 +44,7 @@ Every fact records how it was made, and every answer carries that label.
 | Tier | Built by | Holds | Agent should |
 |---|---|---|---|
 | **index** | git only: the committed tree at the tracked ref. No LLM. | File inventory, languages, freshness | Rely on it |
-| **human-reviewed** | People, or an agent draft merged through a PR by an owner | Glossary, customers, features, ADRs, repo purposes | Treat as the team's stated intent |
+| **human-reviewed** | People: a fact a person stated and confirmed in their agent's dialog, or with `brain facts` (B3a); hosted, also curated content merged through a PR | Business rules, terms, purposes, decisions and answers, on a repo or a system | Treat as the team's stated intent; check the code when one matters, and re-confirm a stale one |
 | **llm-generated** | Claude Code (headless, isolated, read-only) from the code at the indexed commit, with a citation on every claim | Wiki pages (W1), including a product page (B2a); routes and calls in any language (W4), and events, gRPC methods and shared packages (B2b), from which the seam graph and cross-repo links are built; suggested systems (B2a) | Every citation is checked automatically (W2, W4); use as a map, and confirm at the citation before relying on a claim |
 
 Why: generated context files lowered agent success in a controlled study, and public
@@ -85,11 +85,12 @@ Two halves share only the store:
    more pass. (Built in W3 and W4: the git hook runs `brain sync`.)
 5. The search index changes with the pages and seams, in the same transaction, so it never
    describes a different commit from them.
-6. Curated facts citing changed lines are never rewritten automatically; the owner gets a draft PR.
+6. Facts from people anchored to changed lines are marked stale, never rewritten; lines moving
+   around them move their anchors. A person re-confirms a stale fact (`brain facts confirm`).
 
 ## MCP tools
 
-A few broad, read-only tools. Short answers by default, `format: "detailed"` on request,
+A few broad tools, all read-only but `brain_record_fact`. Short answers by default, `format: "detailed"` on request,
 paginated lists, pointers rather than pasted code. No free-text "ask" tool.
 
 | Tool | Answers | Harness stage | Status |
@@ -97,8 +98,9 @@ paginated lists, pointers rather than pasted code. No free-text "ask" tool.
 | `brain_find_consumers` | Who produces or consumes an endpoint, event, gRPC method or package, across repos | Contract review, technical planning | Built |
 | `brain_impact` | What depends on a route, published event, gRPC method, package, symbol or file, in the repo and across repos; or, given a description of work, which systems, repos and endpoints it would most likely touch | Product brief, technical planning, scope drift, maintainability review | Built for everything a repo or file provides, and work descriptions; symbols in phase 3b |
 | `brain_repo_card` | What a repo is: what it is for (product line), its system, freshness, languages, neighbours, seam counts, where its wiki is | Product brief, technical planning | Built |
-| `brain_search` | Systems, then ranked wiki sections and endpoints for keywords, across every readable repo | Any, when you don't know which repo holds the answer | Built over systems, wiki sections, endpoints and other links; curated context in phase 4 |
-| `brain_get` | One item in full (page, system overview, glossary entry, ADR, symbol map) with citations | Product brief, feature planning, development | Built for wiki pages and system overviews |
+| `brain_search` | Facts from people, systems, then ranked wiki sections and endpoints for keywords, across every readable repo | Any, when you don't know which repo holds the answer | Built; logs searches that find nothing as gaps |
+| `brain_get` | One item in full (page, system overview, glossary entry, ADR, symbol map) with citations | Product brief, feature planning, development | Built for wiki pages and system overviews; the product page and overviews open with facts from people |
+| `brain_record_fact` | Records a fact a person stated, after they confirm it in an elicitation dialog | Product brief (the loop back from the PO) | Built (B3a) |
 
 A hit looks like: `orders-web · src/api/orders.ts:42-58 · @9f3c1e2 · 2 commits behind · llm-generated`.
 
@@ -186,7 +188,10 @@ their own API, a service handling its own event) links only within that repo and
 
 ## Safety
 
-- Agent-facing tools are read-only.
+- Agent-facing tools are read-only, except `brain_record_fact`. It asks the person through MCP
+  elicitation, so the agent can't confirm for them; without a dialog the fact is only proposed.
+  It is marked `requiresUserInteraction`, so Claude Code prompts for every call. Agents are told
+  to record only what the person said, never repo text or tool output.
 - Repo text, tickets and PR bodies are untrusted; tool output is data, never instructions.
 - AI runs are read-only (Read, Grep, Glob), load no MCP servers, settings or skills, and store
   only pointers to the lines they cite.
