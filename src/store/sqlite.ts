@@ -438,8 +438,8 @@ export class SqliteStore implements Store {
     }
     const { lastInsertRowid } = this.db
       .prepare(
-        `INSERT INTO facts (repo, system, kind, text, quote, stated_by, ticket, anchors, anchor_commit, status, recorded_at, confirmed_by, confirmed_at, replaces)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO facts (repo, system, kind, text, quote, stated_by, ticket, anchors, anchor_commit, status, recorded_at, confirmed_by, confirmed_at, confirmed_with, replaces)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         fact.repo,
@@ -455,6 +455,7 @@ export class SqliteStore implements Store {
         fact.recordedAt,
         fact.confirmedBy,
         fact.confirmedAt,
+        fact.confirmedWith,
         fact.replaces,
       );
     return Number(lastInsertRowid);
@@ -512,6 +513,7 @@ export class SqliteStore implements Store {
       status: "status",
       confirmedBy: "confirmed_by",
       confirmedAt: "confirmed_at",
+      confirmedWith: "confirmed_with",
       staleSince: "stale_since",
       anchors: "anchors",
       anchorCommit: "anchor_commit",
@@ -539,14 +541,22 @@ export class SqliteStore implements Store {
     this.db.prepare("INSERT INTO gaps (tool, query, repos, asked_at) VALUES (?, ?, ?, ?)").run(gap.tool, gap.query, gap.repos.join(" "), gap.askedAt);
   }
 
-  gaps(limit: number): GapSummary[] {
-    const rows = this.db
-      .prepare(
-        `SELECT MIN(query) AS query, GROUP_CONCAT(DISTINCT tool) AS tools, COUNT(*) AS times, MAX(asked_at) AS last_asked
-         FROM gaps GROUP BY LOWER(TRIM(query)) ORDER BY times DESC, last_asked DESC LIMIT ?`,
-      )
-      .all(limit) as Row[];
-    return rows.map((row) => ({ query: String(row.query), tools: String(row.tools).split(","), times: Number(row.times), lastAsked: String(row.last_asked) }));
+  gaps(limit: number, readable?: readonly string[]): GapSummary[] {
+    // Grouped here rather than in SQL, so a search limited to a repo the caller can't read is left out first.
+    const rows = this.db.prepare("SELECT tool, query, repos, asked_at FROM gaps ORDER BY asked_at, id").all() as Row[];
+    const groups = new Map<string, GapSummary>();
+    for (const row of rows) {
+      const repos = String(row.repos).split(" ").filter(Boolean);
+      if (readable && repos.some((repo) => !readable.includes(repo))) continue;
+      const query = String(row.query);
+      const key = query.trim().toLowerCase();
+      const group = groups.get(key) ?? groups.set(key, { query, tools: [], times: 0, lastAsked: "" }).get(key)!;
+      if (query < group.query) group.query = query;
+      if (!group.tools.includes(String(row.tool))) group.tools.push(String(row.tool));
+      group.times += 1;
+      group.lastAsked = String(row.asked_at);
+    }
+    return [...groups.values()].sort((a, b) => b.times - a.times || b.lastAsked.localeCompare(a.lastAsked)).slice(0, limit);
   }
 
   private systemRows(): Row[] {
@@ -593,6 +603,7 @@ function toFact(row: Row): Omit<FactRecord, "checks"> {
     recordedAt: String(row.recorded_at),
     confirmedBy: optional(row.confirmed_by),
     confirmedAt: optional(row.confirmed_at),
+    confirmedWith: optional(row.confirmed_with),
     staleSince: optional(row.stale_since),
     replaces: row.replaces === null ? null : Number(row.replaces),
     anchorsFound: Number(row.anchors_found) === 1,

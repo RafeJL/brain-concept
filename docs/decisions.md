@@ -879,3 +879,62 @@ nothing is now skipped quietly.
 - Chains through a mediator or service are dropped when the run skips the step that defines the
   linking name (aspnet-api 27 of 103, express-api 4).
 - Calls whose URL is only known at run time can't be linked.
+
+## 2026-10-13: everything a person does, through MCP (B5)
+
+**Why:** the brain is used through the harness, and a PO shapes the brief with an agent in Claude
+Code's desktop app. Three things worked only in a terminal:
+- **Confirming a fact or note.** That needed an elicitation dialog, which the desktop app declines
+  without showing it.
+- **Confirming, rewording or retiring a fact** after it was recorded.
+- **Confirming or changing systems.**
+
+The gaps list was terminal-only too. `brain web` (a local view with a confirm button) was the old
+B5; Rafe dropped it, since everything should be a tool call. Setup (add, sync, remove, hooks,
+doctor, set-ref) stays in the terminal.
+
+**What:**
+- **The person confirms in the conversation.** The agent shows the fact; when the person agrees,
+  the call carries their words (`confirmed_with`), stored on the fact (migration 17) and on a
+  note. Without them a fact or note is proposed, and other changes are refused.
+- **The permission prompt is the second gate.** Each write tool sets
+  `anthropic/requiresUserInteraction`, so Claude Code asks the person to allow every call,
+  showing what will be stored.
+- **The dialog is gone,** with its fast-decline handling and `propose`. Keeping two ways to
+  confirm would double the instructions, tests and failure modes.
+- **New tools:**
+  - `brain_review` (reads): what's waiting for a person (proposed or stale facts, suggested
+    systems, proposed notes) and gaps;
+  - `brain_facts` (writes): confirm, edit, retire;
+  - `brain_systems` (writes): confirm, set, rename.
+- **Other changes:**
+  - `brain_set_note` can confirm a proposed note;
+  - rewording a confirmed fact without the person's words makes it proposed again;
+  - gaps from a search limited to a repo the caller can't read are left out;
+  - answers no longer tell people to run a command.
+
+**Design calls:**
+- **Reads and writes in separate tools.** At first `brain_facts` and `brain_systems` also listed.
+  A headless check showed the cost: a write tool prompts on every call, so a list prompted too,
+  and a headless run couldn't list at all. That makes ten tools, not nine, and no read ever
+  prompts.
+- **Actions over tools.** One tool per terminal command would have made about twenty. Every
+  description sits in every session's context, and agents choose worse from long lists.
+- **Names are frozen.** H1's skills will name these tools and their parameters.
+- **Left out:**
+  - deleting a system (a deletion, like `repo remove`);
+  - suggesting systems and checking facts (AI runs that sync already does);
+  - export (H2).
+
+**Gate:**
+- 231 tests pass.
+- **Headless `claude -p`** on a copy of the real store, with `mcp__citation-brain__*` allowed:
+  - `brain_record_fact` and `brain_facts` were refused before reaching the server ("MCPTool
+    requires permission"), and no fact was written;
+  - `brain_review` and `brain_repo_card` answered.
+
+  So the technical-planning stage can read headless, and only a person can write.
+- The desktop walkthrough is manual-testing Part G (Rafe).
+
+**What would change it:** hosted (H2), confirmed facts may go to owners for review. The export
+shape exists, and `confirmed_with` shows what each person agreed to.

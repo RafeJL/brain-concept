@@ -11,7 +11,6 @@ import { confirmProposedNote, enrolRepo } from "../src/ingest/registry.js";
 import { syncRepo } from "../src/ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy } from "../src/serve/access.js";
 import { getPage } from "../src/serve/tools/get-page.js";
-import type { Confirm } from "../src/serve/tools/record-fact.js";
 import { repoCard } from "../src/serve/tools/repo-card.js";
 import { setNote } from "../src/serve/tools/set-note.js";
 import { workImpact } from "../src/serve/tools/work-impact.js";
@@ -265,43 +264,36 @@ describe("a small repo's wiki", () => {
 });
 
 describe("the steering note", () => {
-  const confirmWith = (answer: Awaited<ReturnType<Confirm>>) => {
-    const asked: string[] = [];
-    const confirm: Confirm = async ({ message, label }) => {
-      asked.push(`${label}: ${message}`);
-      return answer;
-    };
-    return { confirm, asked };
-  };
-
-  it("is set through the person's dialog, and steers the plan and every page run", async () => {
+  it("is set with the person's words agreeing, and steers the plan and every page run", async () => {
     const { store, deps } = await shop();
-    const { confirm, asked } = confirmWith({ action: "accept", text: "Ordering matters most.", statedBy: "Rafe" });
 
-    const set = await setNote(deps, LOCAL_CALLER, { repo: "shop", text: "Ordering matters most" }, { confirm, person: "someone" });
+    const set = await setNote(deps, LOCAL_CALLER, { repo: "shop", text: "Ordering matters most.", confirmedWith: "yes, set that" }, { person: "Rafe" });
 
-    expect(asked[0]).toContain("Note: Steer shop's wiki with this note?");
     expect(set.text).toContain('Set shop\'s note, from Rafe: "Ordering matters most."');
+    expect(store.getRepo("shop")?.note).toMatchObject({ text: "Ordering matters most.", by: "Rafe", with: "yes, set that" });
     const { runner, requests } = shopRunner();
     await generateWiki(store, runner, "shop");
     expect(requests.every((r) => r.prompt.includes("<note>\nOrdering matters most.\n</note>"))).toBe(true);
     expect(store.getState("shop")?.planNote).toBe("Ordering matters most.");
   });
 
-  it("waits as proposed, steering nothing, where the person can't be asked; declined, nothing changes", async () => {
+  it("waits as proposed, steering nothing, without their words; confirmed later in the conversation or a terminal", async () => {
     const { store, deps } = await shop();
-    const declined = await setNote(deps, LOCAL_CALLER, { repo: "shop", text: "x" }, { ...confirmWith({ action: "decline", automatic: true }), person: "Rafe" });
-    expect(declined.text).toContain("most likely never shown");
-    expect(store.getRepo("shop")).toMatchObject({ note: null, proposedNote: null });
-
-    await setNote(deps, LOCAL_CALLER, { repo: "shop", text: "Ordering matters most", propose: true }, { ...confirmWith({ action: "accept", text: "", statedBy: "" }), person: "Rafe" });
+    const proposed = await setNote(deps, LOCAL_CALLER, { repo: "shop", text: "Ordering matters most" }, { person: "Rafe" });
+    expect(proposed.text).toContain("Stored as a proposed note on shop");
     expect(store.getRepo("shop")).toMatchObject({ note: null, proposedNote: { text: "Ordering matters most", by: "Rafe" } });
     const { runner, requests } = shopRunner();
     await generateWiki(store, runner, "shop");
     expect(requests.some((r) => r.prompt.includes("Ordering matters most"))).toBe(false);
 
+    const unworded = await setNote(deps, LOCAL_CALLER, { repo: "shop", confirmProposed: true }, { person: "Sam" });
+    expect(unworded.ok).toBe(false);
+    await setNote(deps, LOCAL_CALLER, { repo: "shop", confirmProposed: true, confirmedWith: "go with that" }, { person: "Sam" });
+    expect(store.getRepo("shop")).toMatchObject({ note: { text: "Ordering matters most", by: "Sam", with: "go with that" }, proposedNote: null });
+
+    await setNote(deps, LOCAL_CALLER, { repo: "shop", text: "Basket too" }, { person: "Rafe" });
     confirmProposedNote(store, "shop", "Sam");
-    expect(store.getRepo("shop")).toMatchObject({ note: { text: "Ordering matters most", by: "Sam" }, proposedNote: null });
+    expect(store.getRepo("shop")).toMatchObject({ note: { text: "Basket too", by: "Sam" }, proposedNote: null });
   });
 });
 

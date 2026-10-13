@@ -249,4 +249,8 @@ export const MIGRATIONS: (string | ((db: DatabaseSync) => void))[] = [
   );
   CREATE INDEX trace_links_by_entry ON trace_links(repo, entry);
   `,
+  // B5: a person confirms facts in the conversation with an agent; their words agreeing are kept.
+  `
+  ALTER TABLE facts ADD COLUMN confirmed_with TEXT;
+  `,
 ];

@@ -19,15 +19,18 @@ calls it; nothing is ever moved out of the harness into here.
   never the working copy.
 - **Every answer carries its tier** (`llm-generated` for what Claude Code wrote, `human-reviewed` for facts a person confirmed) and its
   freshness (commit, commits behind the ref).
-- **Agent-facing tools are read-only, but one.** `brain_record_fact` stores a fact as confirmed
-  only when the person accepts it in an MCP elicitation dialog (proposed otherwise), and is
-  marked to prompt for permission on every call. Reads may log gaps (searches that found
+- **Agent-facing tools read, except four that record what a person says.** `brain_record_fact`,
+  `brain_set_note`, `brain_facts` and `brain_systems` count a change as confirmed only with the
+  person's words agreeing (`confirmed_with`); otherwise it is proposed, or refused. All four are
+  marked to prompt for permission on every call, so headless runs can't write. Reads may log gaps (searches that found
   nothing). Otherwise only ingest writes to the store.
 - **Permission checks go through `AccessPolicy`** before any query reads rows. Unknown and
   unreadable repos get the same answer.
 - **Few broad tools.** The set is `brain_find_consumers`, `brain_impact`, `brain_repo_card`,
-  `brain_search`, `brain_get` and `brain_record_fact`, all built. Don't add tools outside it without a decision
-  entry. Default to concise output and return pointers, not pasted code.
+  `brain_search`, `brain_get`, `brain_review`, `brain_record_fact`, `brain_set_note`, `brain_facts` and
+  `brain_systems`, all built. Reads and writes stay in separate tools: a write tool prompts on every call,
+  so a read inside one would prompt too and fail headless. Names and parameters are frozen: harness skills name them. Don't add tools outside the set
+  without a decision entry; prefer an action on an existing tool. Default to concise output and return pointers, not pasted code.
 - **AI output is cited and checked deterministically before it is stored.** Wiki claims go
   through the citation checker; routes and calls through seam verification. Both drop what the
   cited lines don't support and report why.

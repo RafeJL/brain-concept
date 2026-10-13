@@ -29,6 +29,7 @@ async function brain() {
       recordedAt: "2026-10-13T09:00:00Z",
       confirmedBy: "Rafe",
       confirmedAt: "2026-10-13T09:00:00Z",
+      confirmedWith: null,
       replaces: null,
       ...fact,
     });

@@ -69,8 +69,9 @@ the brain:
 - *Where do we validate login tokens?* (searches every repo you've added)
 - *What can users do in some-repo, and what rules apply?* (answered from its product page)
 - *Which repos would "let users save articles to read later" touch?*
-- *Users can follow at most 500 authors: record that.* (you confirm it in a dialog; later sessions
-  answer with it)
+- *Users can follow at most 500 authors: record that.* (the agent shows you the fact, you say yes
+  and allow the call; later sessions answer with it)
+- *What's waiting for me to confirm? What do people ask that you can't answer?*
 
 To see exactly what an agent gets, use the same answers from the command line:
 `npm run brain -- card some-repo`, `page some-repo`, `search "tokens"`.
@@ -85,8 +86,8 @@ MCP server with `claude mcp remove citation-brain -s user`.
 
 ## What agents can ask
 
-The MCP server tells Claude Code when to use it. These are its seven tools. Five only read; the
-other two record what a person tells them, and only once that person confirms:
+The MCP server tells Claude Code when to use it. These are its ten tools. Six only read; the
+other four record what a person tells them, and count only once that person agrees:
 
 | Tool | Answers | From |
 |---|---|---|
@@ -94,9 +95,15 @@ other two record what a person tells them, and only once that person confirms:
 | `brain_get` | What it is, who uses it and its business rules, how to build and test it, what API it serves, how its key modules work; or an overview of a whole system | The repo's wiki pages; for a system, its repos' product pages and the links between them |
 | `brain_search` | Where is this handled? (when you don't know which repo or page) | Every repo's wiki sections, endpoints and other links, and system names |
 | `brain_find_consumers` | Who serves this endpoint, and who calls it? Who publishes this event and who handles it? The same for a gRPC method or a shared package | Routes, calls, events, gRPC and packages across every repo |
+| `brain_review` | What's waiting for me to decide: proposed or stale facts, suggested systems, proposed notes; and what the brain couldn't answer | Facts, systems, notes and gaps |
 | `brain_impact` | What breaks if I change this repo, file or endpoint? Or: which systems, repos and endpoints would this piece of work touch? | What it serves or publishes, and everyone who uses each; for work, the wiki and route map |
-| `brain_record_fact` | Records a rule, term, purpose, decision or answer a person has just stated, on a repo or a system | The person, who confirms it in a dialog |
-| `brain_set_note` | Sets what a repo's wiki should focus on, when a person says so | The person, who confirms it in a dialog |
+| `brain_record_fact` | Records a rule, term, purpose, decision or answer a person has just stated, on a repo or a system | The person, who agrees in the conversation |
+| `brain_set_note` | Sets what a repo's wiki should focus on, when a person says so | The person, who agrees in the conversation |
+| `brain_facts` | Confirms, rewords, re-anchors or retires a fact | The person, who agrees in the conversation |
+| `brain_systems` | Confirms a suggested system, adds or moves repos, changes a summary, renames one | The person, who agrees in the conversation |
+
+Everything a person does with the brain works from the conversation. Only setup stays in the
+terminal: adding, syncing and removing repos, hooks, `doctor`.
 
 For example, `npm run brain -- consumers "GET /api/articles/:slug"` gives:
 
@@ -208,7 +215,7 @@ The wiki follows the code:
   them and no AI runs.
 - **A new project or area:** it's planned again, adding pages only for what's new.
 - **A steering note:** you set one with `brain note <repo> "Ordering matters most"`, or an agent
-  sets it with `brain_set_note` once you confirm it in a dialog. It re-plans the wiki at the next
+  sets it with `brain_set_note` once you agree. It re-plans the wiki at the next
   sync, and each page follows it when it's next rewritten (`sync <repo> --only wiki --full`
   rewrites them all now). It can't switch off a check.
 
@@ -218,10 +225,16 @@ The wiki follows the code:
 
 The code can't say everything: "follows are capped at 500 because people bulk-followed" lives in
 someone's head. When a person tells their agent something like that, the agent offers to record
-it with `brain_record_fact`. The brain then asks the person directly, in a dialog the agent can't
-answer for them, showing the fact and what the wiki already says nearby, so a contradiction shows
-before anyone accepts. Accepted facts are stored as `human-reviewed`, with who and when, and come
-first: at the top of the product page, on the card, in search and in system overviews.
+it with `brain_record_fact`. Two things make it the person's decision, not the agent's:
+- **Their words.** The agent shows the fact and asks; the call carries their reply ("yes, record
+  that"), and it is stored with the fact. Without it, the fact is only *proposed*.
+- **The permission prompt.** Claude Code asks the person to allow every call to a writing tool,
+  showing what will be stored, even when the brain's tools are allowed. An agent can't click it.
+  A headless run (`claude -p`) has no one to allow it, so it can't write at all.
+
+Confirmed facts are stored as `human-reviewed`, with who, when and their words, and come first:
+at the top of the product page, on the card, in search and in system overviews. The answer to
+recording one lists what the brain already says nearby, so the agent can raise a contradiction.
 
 ```
 ## From people
@@ -229,9 +242,10 @@ first: at the top of the product page, on the card, in search and in system over
 - Users can follow at most 500 authors. (rule · human-reviewed · Rafe Loveday, 2026-10-12 · enforced at src/follow.ts:2 · fact #1)
 ```
 
-- **Where no dialog is possible** (a headless `claude -p` run, an older client, and Claude Code's
-  desktop app, which declines the dialog without showing it), the fact is stored as *proposed*,
-  and agents see it labelled so until someone runs `brain facts confirm`.
+- **Proposed facts wait.** Agents see them labelled "proposed" until the person agrees
+  (`brain_review` lists them; `brain_facts` confirms, or `brain facts confirm` in a terminal). Rewording a confirmed
+  fact without their agreement makes it proposed again, so a confirmed fact never says something
+  nobody agreed to.
 - **A changed rule replaces the old one.** If the person changes something already recorded
   ("the cap is now 1000"), the agent offers to replace that fact. The old one is retired when the
   new one is confirmed, so the two never both stand.
@@ -246,8 +260,8 @@ first: at the top of the product page, on the card, in search and in system over
   express-api, …`. Where the code agrees with a fact nobody anchored, those lines become its
   anchors, so it goes stale when they change. Checks run again only when the fact or the code
   they read changes: cents each, nothing otherwise.
-- **Gaps:** searches the brain couldn't answer are logged on your machine. `brain gaps` lists
-  the most asked, which is what is worth writing down.
+- **Gaps:** searches the brain couldn't answer are logged on your machine. `brain_review` (or
+  `brain gaps`) lists the most asked, which is what is worth writing down.
 
 You can also add facts yourself: `npm run brain -- facts add <repo or system> --kind rule --text "..."`.
 
@@ -270,8 +284,9 @@ You can also add facts yourself: `npm run brain -- facts add <repo or system> --
   lines say what the claim names, not that the claim reads them correctly. So agents are told to
   confirm at the citation before relying on it.
 - **Facts from people are labelled `human-reviewed`** once the person confirms them, with who and
-  when, or "proposed" until then. Only the person can confirm through the dialog; text in a repo
-  can't plant one, since agents are told to record only what the person said.
+  when, or "proposed" until then. Only the person can confirm: with their words in the conversation and their
+  click on the permission prompt. Text in a repo can't plant one, since agents are told to record
+  only what the person said.
 - **Answers give file and line pointers, never pasted code.**
 - **Gaps are stated, not hidden.** For example, calls whose URL (or events whose name) is only
   known at run time are counted and located.

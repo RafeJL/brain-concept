@@ -5,8 +5,7 @@ export type FactKind = "rule" | "term" | "purpose" | "decision" | "answer";
 export const FACT_KINDS: readonly FactKind[] = ["rule", "term", "purpose", "decision", "answer"];
 
 /**
- * "proposed": recorded without the person confirming it (no dialog was possible). "confirmed": a
- * person accepted it. "retired": no longer true, kept for history. Either of the first two can
+ * "proposed": recorded without the person confirming it. "confirmed": a person agreed to it. "retired": no longer true, kept for history. Either of the first two can
  * also be stale (`staleSince`): code it is anchored to has changed since.
  */
 export type FactStatus = "proposed" | "confirmed" | "retired";
@@ -34,6 +33,11 @@ export interface FactRecord {
   recordedAt: string;
   confirmedBy: string | null;
   confirmedAt: string | null;
+  /**
+   * The person's words agreeing to it, when they confirmed it in a conversation with an agent
+   * ("yes, record that"). Null when confirmed in a terminal, or in the dialog before B5.
+   */
+  confirmedWith: string | null;
   /** The commit at which an anchored line changed, making the fact stale. */
   staleSince: string | null;
   /** The earlier fact this one replaces, retired once this one is confirmed. */

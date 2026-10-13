@@ -656,7 +656,7 @@ async function facts(
         tools,
         LOCAL_CALLER,
         { repo, system: repo ? undefined : arg, kind: options.kind as FactKind, text: options.text, quote: options.quote ?? options.text, ticket: options.ticket, anchors: options.anchor },
-        { confirm: async ({ text, statedBy }) => ({ action: "accept", text, statedBy }), person },
+        { person, terminal: true },
       );
       print(result);
       return;
