@@ -46,6 +46,19 @@ export function unreadableCitation(text: string): string | null {
   return null;
 }
 
+/** `path:start-end`, or `path:line` for one line. */
+export function formatCitation(cite: Citation): string {
+  return `${cite.path}:${cite.start === cite.end ? cite.start : `${cite.start}-${cite.end}`}`;
+}
+
+/** The text with each citation bracket rewritten from `move`'s answer for each of its citations. */
+export function mapCitations(text: string, move: (cite: Citation) => Citation): string {
+  return text.replace(BRACKET, (whole, inside: string) => {
+    const cites = citationsIn(inside);
+    return cites.length ? `[${cites.map((c) => formatCitation(move(c))).join("; ")}]` : whole;
+  });
+}
+
 /** The text with its citations taken out; other brackets (`[Authorize]`, links) stay. */
 export function withoutCitations(text: string): string {
   return text.replace(BRACKET, (whole, inside: string) => (citationsIn(inside).length ? "" : whole));

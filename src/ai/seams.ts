@@ -1,5 +1,5 @@
 import { cleanPath } from "../core/citations.js";
-import { changedFiles, withWorktree } from "../core/git.js";
+import { changedFiles, inWorktree } from "../core/git.js";
 import { normalisePath, PARAM } from "../core/http.js";
 import { detectLanguage } from "../core/languages.js";
 import { normaliseName, withoutVersion, type NamedFamily } from "../core/links.js";
@@ -122,6 +122,8 @@ export interface SeamOptions {
   model?: string;
   /** Map the whole repo again even if its seams exist. */
   full?: boolean;
+  /** A worktree of the indexed commit, shared with sync's other steps; one is made if not given. */
+  cwd?: string;
 }
 
 /**
@@ -190,7 +192,7 @@ export async function updateSeams(store: Store, runner: Runner, name: string, op
     }
   };
 
-  const { kept, dropped, retried, swept } = await withWorktree(repo.path, state.commit, async (cwd) => {
+  const { kept, dropped, retried, swept } = await inWorktree(repo.path, state.commit, options.cwd, async (cwd) => {
     // The runs are independent and only read the worktree, so they go side by side. An update
     // runs one only when a file it's redoing could hold that run's kinds.
     const results = await Promise.all(PASSES.filter((pass) => !redo || redo.some(pass.covers)).map((pass) => run(cwd, pass)));

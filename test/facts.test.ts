@@ -26,7 +26,7 @@ async function brain() {
   await enrolRepo(store, { path: dir, name: "web" });
   await syncRepo(store, "web");
   const markdown = "# Product\n\nLets readers follow the authors they like [src/follow.ts:1-3].\n\n## Business rules\n\nFollowing has no limit [src/follow.ts:2].\n";
-  store.replacePages("web", [{ repo: "web", slug: "product", title: "Product", markdown, commit: store.getState("web")!.commit, claims: 2, removed: 0, model: "m", costUsd: 0, generatedAt: "now" }]);
+  store.replacePages("web", [{ repo: "web", slug: "product", title: "Product", kind: "core", markdown, commit: store.getState("web")!.commit, claims: 2, removed: 0, model: "m", costUsd: 0, generatedAt: "now" }]);
   store.setSystem("Blog", ["web"], "A blogging platform.");
   const deps = { store, access: new LocalAccessPolicy() };
   return { store, dir, deps };
@@ -62,7 +62,7 @@ describe("recording a fact a person stated", () => {
     expect(store.facts({ repos: ["web"], systems: [] })).toEqual([]);
 
     const unasked = await recordFact(deps, LOCAL_CALLER, rule, { confirm: async () => ({ action: "unavailable" }), person: "Rafe" });
-    expect(unasked.text).toContain("Confirm it with: brain facts confirm");
+    expect(unasked.text).toContain("Confirm it with: npm run brain -- facts confirm");
     expect(store.facts({ repos: ["web"], systems: [] })).toMatchObject([{ status: "proposed", confirmedBy: null }]);
   });
 
@@ -218,7 +218,7 @@ describe("brain_record_fact over MCP", () => {
     const record = tools.find((t) => t.name === "brain_record_fact")!;
     const result = await client.callTool({ name: "brain_record_fact", arguments: { repo: "web", kind: "rule", text: "max 500 follows", quote: "capped at 500" } });
 
-    expect(tools.filter((t) => t.annotations?.readOnlyHint !== true).map((t) => t.name)).toEqual(["brain_record_fact"]);
+    expect(tools.filter((t) => t.annotations?.readOnlyHint !== true).map((t) => t.name)).toEqual(["brain_record_fact", "brain_set_note"]);
     expect(record._meta).toEqual({ "anthropic/requiresUserInteraction": true });
     expect(result.isError).toBe(false);
     expect(store.getFact(1)).toMatchObject({ text: "Users can follow at most 500 authors.", status: "confirmed", confirmedBy: "Rafe Loveday" });

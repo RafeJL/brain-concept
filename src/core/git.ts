@@ -171,6 +171,11 @@ export function stripCredentials(url: string): string {
   }
 }
 
+/** Runs `work` in `cwd` when given (a worktree of `commit` someone else made), or in one made for it. */
+export async function inWorktree<T>(repoPath: string, commit: string, cwd: string | undefined, work: (dir: string) => Promise<T>): Promise<T> {
+  return cwd ? work(cwd) : withWorktree(repoPath, commit, work);
+}
+
 /**
  * Runs `work` in a temporary, detached worktree of `repoPath` at `commit`, then removes it. Lets
  * tools that read files from disk see exactly the committed tree the brain indexed, never the

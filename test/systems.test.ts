@@ -22,7 +22,7 @@ import { SqliteStore } from "../src/store/sqlite.js";
 import { mapSeams, repoFromFixture, tempDir } from "./helpers.js";
 
 function page(repo: string, slug: string, title: string, markdown: string): WikiPage {
-  return { repo, slug, title, markdown, commit: "0".repeat(40), claims: 1, removed: 0, model: "claude-sonnet-5", costUsd: 0.1, generatedAt: "2026-10-08T00:00:00Z" };
+  return { repo, slug, title, kind: "core", markdown, commit: "0".repeat(40), claims: 1, removed: 0, model: "claude-sonnet-5", costUsd: 0.1, generatedAt: "2026-10-08T00:00:00Z" };
 }
 
 /** Pages for the fixture repos. Serving them doesn't re-check citations, so they only need to read well. */

@@ -14,7 +14,7 @@ import { commit, makeRepo, mapSeams, repoFromFixture, tempDir } from "./helpers.
 const local = new LocalAccessPolicy();
 
 function page(repo: string, slug: string, title: string, markdown: string, commitSha = "0".repeat(40)): WikiPage {
-  return { repo, slug, title, markdown, commit: commitSha, claims: 1, removed: 0, model: "claude-sonnet-5", costUsd: 0.1, generatedAt: "2026-10-07T00:00:00Z" };
+  return { repo, slug, title, kind: "core", markdown, commit: commitSha, claims: 1, removed: 0, model: "claude-sonnet-5", costUsd: 0.1, generatedAt: "2026-10-07T00:00:00Z" };
 }
 
 const BUILD = `# Build, run and test

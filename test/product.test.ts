@@ -54,7 +54,7 @@ describe("the product page", () => {
     await generateWiki(store, runner, "api");
 
     const ask = requests[0]!.prompt;
-    expect(ask).toContain("Write exactly these 5 pages:");
+    expect(ask).toContain("Write these pages:");
     expect(ask).toContain('- slug "product": what it does for the people who use it');
     expect(ask).toContain("never put code names in the text");
     expect(ask).toContain("Cite the lines where each rule is enforced");

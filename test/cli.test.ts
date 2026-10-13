@@ -31,6 +31,17 @@ describe("brain add", () => {
     store.close();
   }, 30_000);
 
+  it("adds several repos in one go, and refuses a name or note meant for one", () => {
+    const dbPath = join(tempDir(), "brain.db");
+    const [a, b] = [repoFromFixture("articles-api"), repoFromFixture("articles-api")];
+
+    expect(() => execFileSync(process.execPath, [BRAIN, "add", a!, b!, "--name", "x", "--no-ai"], { encoding: "utf8", env: { ...process.env, BRAIN_DB: dbPath }, stdio: "pipe" })).toThrow(/apply to one repo/);
+    const out = brain(dbPath, "add", a!, b!, "--no-ai", "--no-hook");
+
+    expect(out.match(/^Added /gm)).toHaveLength(2);
+    expect(out).toContain("Next: brain sync to have Claude Code write their wikis");
+  }, 60_000);
+
   it("leaves hooks alone with --no-hook", () => {
     const dir = repoFromFixture("articles-api");
 
@@ -38,6 +49,23 @@ describe("brain add", () => {
 
     expect(existsSync(join(dir, ".git", "hooks", "reference-transaction"))).toBe(false);
   }, 30_000);
+});
+
+describe("brain note and brain wiki plan", () => {
+  it("sets, shows, confirms and clears the note steering a repo's wiki, and says when a repo has no plan", () => {
+    const dbPath = join(tempDir(), "brain.db");
+    brain(dbPath, "add", repoFromFixture("articles-api"), "--name", "api", "--no-ai", "--no-hook", "--note", "Articles matter most");
+
+    expect(brain(dbPath, "note", "api")).toMatch(/^api: "Articles matter most" \(/);
+    const store = new SqliteStore(dbPath);
+    store.setProposedNote("api", { text: "Comments matter most", by: "an agent's user", at: "2026-10-13T00:00:00Z" });
+    store.close();
+    expect(brain(dbPath, "note", "api")).toContain('proposed by an agent\'s user: "Comments matter most". Confirm with: brain note api --confirm');
+    expect(brain(dbPath, "note", "api", "--confirm")).toContain('api: note confirmed: "Comments matter most"');
+    expect(brain(dbPath, "note", "api", "--clear")).toContain("api: note cleared.");
+    expect(brain(dbPath, "note", "api")).toBe("api: no note\n");
+    expect(brain(dbPath, "wiki", "plan", "api")).toContain("api has no page plan: it's small enough for the fixed pages");
+  }, 60_000);
 });
 
 describe("brain systems", () => {

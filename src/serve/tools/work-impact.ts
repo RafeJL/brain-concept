@@ -141,6 +141,16 @@ export async function workImpact(deps: ToolDeps, caller: Caller, input: WorkImpa
   return { ok: true, data, text: await render(deps, data, readable, input.format) };
 }
 
+/** Pages to plan from: the area, flow and data-model pages among a repo's best matches. */
+const PLANNING_KINDS = new Set(["area", "flow", "data-model"]);
+const PLANNING_PAGES = 3;
+
+function planningPages(deps: ToolDeps, repo: LikelyRepo): string[] {
+  const kinds = new Map(deps.store.pages(repo.repo).map((p) => [p.slug, p.kind]));
+  const slugs = [...new Set(repo.sections.map((s) => s.slug))].filter((slug) => PLANNING_KINDS.has(kinds.get(slug) ?? ""));
+  return slugs.slice(0, PLANNING_PAGES).map((slug) => `${kinds.get(slug) === "data-model" ? "" : `${kinds.get(slug)} `}${slug}`);
+}
+
 /** Repos grouped by the system they belong to, systems ordered by their best repo; repos in none last. */
 function groupBySystem(likely: readonly LikelyRepo[], systems: readonly SystemRecord[]): SystemGroup[] {
   const groups = new Map<SystemRecord | null, LikelyRepo[]>();
@@ -174,6 +184,8 @@ async function render(deps: ToolDeps, { work, groups, weaker }: WorkImpact, read
       const reasons = [...sections, ...(routes.length ? [`routes: ${routes.join(", ")}${more}`] : [])];
       out.push(`  ${repo.repo.padEnd(width)}${reasons.join("; ")}`);
       if (format === "detailed") for (const s of repo.sections.slice(0, shown.sections)) out.push(`  ${" ".repeat(width)}  ${s.slug} › ${s.heading || s.pageTitle}: ${s.snippet}`);
+      const deeper = planningPages(deps, repo);
+      if (deeper.length) out.push(`  ${" ".repeat(width)}for a technical plan, read: ${deeper.join(", ")}`);
       for (const c of repo.callers) {
         out.push(`  ${" ".repeat(width)}+ ${c.repo} calls ${c.routes === 1 ? "one of these routes" : `${c.routes} of these routes`}, so it may need updating if the API changes`);
       }

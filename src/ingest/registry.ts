@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { defaultRef, remoteUrl, repoRoot, resolveCommit } from "../core/git.js";
-import { BrainError, type RepoRecord } from "../core/types.js";
+import { BrainError, type RepoNote, type RepoRecord } from "../core/types.js";
 import type { Store } from "../store/store.js";
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -9,6 +9,8 @@ export interface EnrolOptions {
   path: string;
   name?: string;
   ref?: string;
+  /** A steering note for the repo's wiki, from the person enrolling it. */
+  note?: RepoNote;
 }
 
 /** Adds a repo to the registry. Enrolling is all it takes for a repo to join; no code changes. */
@@ -29,6 +31,8 @@ export async function enrolRepo(store: Store, options: EnrolOptions): Promise<Re
     ref,
     remote: await remoteUrl(path),
     enrolledAt: new Date().toISOString(),
+    note: options.note ?? null,
+    proposedNote: null,
   };
   store.addRepo(repo);
   return repo;
@@ -52,4 +56,23 @@ export async function setRepoRef(store: Store, name: string, ref: string): Promi
   const repo = requireRepo(store, name);
   await resolveCommit(repo.path, ref);
   store.setRepoRef(name, ref);
+}
+
+/**
+ * Sets the note that steers a repo's wiki ("Ordering and Basket matter most"), or clears it with
+ * null. Any proposed note is settled by it. The next sync plans the wiki again with it.
+ */
+export function setRepoNote(store: Store, name: string, note: RepoNote | null): void {
+  requireRepo(store, name);
+  store.setRepoNote(name, note);
+  store.setProposedNote(name, null);
+}
+
+/** Applies the note an agent proposed, as confirmed by `by`. */
+export function confirmProposedNote(store: Store, name: string, by: string): RepoNote {
+  const proposed = requireRepo(store, name).proposedNote;
+  if (!proposed) throw new BrainError(`${name} has no proposed note to confirm.`);
+  const note = { text: proposed.text, by, at: new Date().toISOString() };
+  setRepoNote(store, name, note);
+  return note;
 }
