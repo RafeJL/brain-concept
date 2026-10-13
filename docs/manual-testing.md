@@ -403,14 +403,14 @@ None of this runs Claude Code in the background, so it costs nothing beyond the 
 1. **Record a fact in a conversation.** In a new Claude Code session, run a short PO-style brief:
    *"For RealWorld, users should only be able to follow up to 500 authors; people were
    bulk-following. Can the brain remember that?"* The agent should call `brain_record_fact`.
-   Claude Code first asks permission for the tool (every time, by design). Then a dialog shows
-   the fact, your name, and what the product pages already say about following. Accept it,
-   editing the wording if you like.
+   It should first show you the fact as it would record it and ask. Say yes. Claude Code then
+   asks permission for the tool (every time, by design), showing the fact and your words. Allow
+   it. The answer lists what the product pages already say about following.
 2. **See it used.** In another new session, ask *"What limits apply to following in RealWorld?"*
    The answer should quote your fact as human-reviewed, with your name and the date, ahead of
    anything AI-written.
-3. **Decline one.** Ask it to record something and decline the dialog. `npm run brain -- facts`
-   shouldn't list it.
+3. **Decline one.** Ask it to record something and say no when it asks (or deny the permission
+   prompt). `npm run brain -- facts` shouldn't list it.
 4. **See it from the command line:**
 
 | Command | Expect |
@@ -430,8 +430,7 @@ None of this runs Claude Code in the background, so it costs nothing beyond the 
    `stale`. `facts confirm <id>` clears it.
 6. **Replacing a fact.** In a new session, state a change in passing: *"I'm planning a change to
    RealWorld: users should be capped at 1000 authors. What would this touch?"* The agent should
-   point out the recorded 500 rule and offer to replace it. Say yes: the dialog (or, in the
-   desktop app, a proposal) says it replaces fact #1. After confirming, `facts` lists only the
+   point out the recorded 500 rule and offer to replace it. Say yes: the answer says fact #1, which it replaces, is retired. After confirming, `facts` lists only the
    1000 rule, and `facts --all` shows the 500 one as retired.
 7. **Checked against the code.** `facts check RealWorld` runs one Claude Code check per repo
    (cents each). Then `facts`: a rule the code enforces says `code agrees`, the follow cap says
@@ -439,10 +438,8 @@ None of this runs Claude Code in the background, so it costs nothing beyond the 
    with the lines. Run it again: it says nothing changed and runs no AI.
 8. **Gaps.** Search for something no repo covers (`search "refund policy"`), then run `gaps`. It
    should list the search with a count.
-9. **The desktop app.** In the Code tab of the desktop app (tried 2026-10-12), the permission
-   prompt appears but the confirm dialog doesn't: it comes back declined at once. The agent
-   should say the dialog was most likely never shown, and offer to save it as proposed. Say yes;
-   `facts` lists it as proposed, and `facts confirm <id>` confirms it.
+9. **The desktop app.** Steps 1, 3 and 6 work the same in the Code tab of the desktop app: there
+   is no dialog, only the agent asking and the permission prompt.
 
 ## Part E: wikis that fit the repo (B4a)
 
@@ -467,8 +464,7 @@ wiki. These steps run Claude Code: about $4–6 for eShop, under $1 for a small 
    only the new page is written.
 6. **Steering.** `note eshop "Ordering and Basket matter most"`, then sync: it plans again
    (`the steering note changed`). In a Claude Code session, ask it to make the wiki focus on
-   something: it calls `brain_set_note`, and the note is set once you confirm (proposed in the
-   desktop app, then `note eshop --confirm`).
+   something: it shows you the note, and calls `brain_set_note` once you agree.
 7. **Technical-plan questions.** In a new session ask *"Plan adding a delivery date to eShop
    orders, shown to the buyer"*. The answer should come from the overview, the ordering area page,
    a flow page and the data model, with citations and at most a couple of code reads to confirm.
@@ -490,3 +486,24 @@ repo); later syncs cost nothing unless a chain's code changes.
 4. **Nothing changed costs nothing.** Run `sync eshop --only links` again: no trace line, no AI.
 5. **In a session.** Ask *"What would changing how orders are created in eShop set off?"* It
    should call `brain_find_consumers` with `follow` and answer without reading code.
+
+## Part G: everything from the conversation (B5)
+
+Run it in the Code tab of the desktop app, as a PO would, on a copy of your store
+(`$env:BRAIN_DB`). No terminal after setup. Nothing runs Claude Code in the background.
+
+1. **Confirm a fact.** *"For RealWorld, articles can have at most 10 tags. Record that."* It
+   shows the fact and asks; say yes, then allow the prompt. `brain_record_fact` answers
+   `confirmed by …`.
+2. **What's waiting.** Have one fact proposed first (say *"record it, but I'll confirm later"*).
+   Then: *"What facts are waiting for me to confirm?"* It calls `brain_review`, with no
+   permission prompt (it only reads). Confirm it, and retire another (*"the 10-tag rule is gone"*). Both need
+   your yes; it shouldn't confirm without asking.
+3. **Reword one.** *"Change fact #N to say 12 tags"*, and when it asks, say *"don't confirm it
+   yet"*: the fact is proposed again. Agree, and it's confirmed with your words.
+4. **Systems.** Move a repo between systems, or confirm a suggested one (`brain_systems`); it
+   asks first.
+5. **Gaps.** *"What do people ask that the brain can't answer?"* (`brain_review`).
+6. **Headless can't write.** In a terminal, run `claude -p "Record in the brain that RealWorld
+   articles can have at most 10 tags; I confirm it."`. It must fail to write: no new fact in
+   `npm run brain -- facts`.

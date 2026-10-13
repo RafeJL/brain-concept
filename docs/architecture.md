@@ -44,7 +44,7 @@ Every fact records how it was made, and every answer carries that label.
 | Tier | Built by | Holds | Agent should |
 |---|---|---|---|
 | **index** | git only: the committed tree at the tracked ref. No LLM. | File inventory, languages, freshness | Rely on it |
-| **human-reviewed** | People: a fact a person stated and confirmed in their agent's dialog, or with `brain facts` (B3a); hosted, also curated content merged through a PR | Business rules, terms, purposes, decisions and answers, on a repo or a system | Treat as the team's stated intent; check the code when one matters, and re-confirm a stale one |
+| **human-reviewed** | People: a fact a person stated and agreed to in the conversation with their agent, or with `brain facts` (B3a, B5); hosted, also curated content merged through a PR | Business rules, terms, purposes, decisions and answers, on a repo or a system | Treat as the team's stated intent; check the code when one matters, and re-confirm a stale one |
 | **llm-generated** | Claude Code (headless, isolated, read-only) from the code at the indexed commit, with a citation on every claim | Wiki pages (W1), including a product page (B2a); routes and calls in any language (W4), and events, gRPC methods and shared packages (B2b), from which the seam graph and cross-repo links are built; suggested systems (B2a); checks of facts from people against the code (B3b) | Every citation is checked automatically (W2, W4); use as a map, and confirm at the citation before relying on a claim |
 
 Why: generated context files lowered agent success in a controlled study, and public
@@ -115,7 +115,7 @@ grepping, and five fixed pages can't hold that for a repo of twenty projects.
   runs side by side, each given the whole plan so pages refer to each other rather than repeat.
   A run that fails costs only its own pages.
 - **Steering note.** A person sets what the wiki should stress (`brain note`, or
-  `brain_set_note` with a confirm dialog; a proposed note steers nothing). It goes to the
+  `brain_set_note` once the person agrees; a proposed note steers nothing). It goes to the
   planning run and every page run as guidance under the checking rules. It is never read from
   the repo, whose text is untrusted.
 - **Diagrams.** The overview has a Mermaid flowchart and each flow page a sequence diagram. A
@@ -164,7 +164,7 @@ serves and calls an endpoint, but not which calls or events a handler goes on to
 
 ## MCP tools
 
-A few broad tools, all read-only but `brain_record_fact`. Short answers by default, `format: "detailed"` on request,
+A few broad tools: six read, four record what a person says. Short answers by default, `format: "detailed"` on request,
 paginated lists, pointers rather than pasted code. No free-text "ask" tool.
 
 | Tool | Answers | Harness stage | Status |
@@ -174,7 +174,15 @@ paginated lists, pointers rather than pasted code. No free-text "ask" tool.
 | `brain_repo_card` | What a repo is: what it is for (product line), its system, freshness, languages, neighbours, seam counts, where its wiki is | Product brief, technical planning | Built |
 | `brain_search` | Facts from people, systems, then ranked wiki sections and endpoints for keywords, across every readable repo | Any, when you don't know which repo holds the answer | Built; logs searches that find nothing as gaps |
 | `brain_get` | One item in full (page, system overview, glossary entry, ADR, symbol map) with citations | Product brief, feature planning, development | Built for wiki pages and system overviews; the product page and overviews open with facts from people |
-| `brain_record_fact` | Records a fact a person stated, after they confirm it in an elicitation dialog | Product brief (the loop back from the PO) | Built (B3a) |
+| `brain_record_fact` | Records a fact a person stated; confirmed with their words agreeing, proposed without | Product brief (the loop back from the PO) | Built (B3a; B5 confirms in the conversation) |
+| `brain_set_note` | Sets the note that steers a repo's wiki | Product brief, technical planning | Built (B4a, B5) |
+| `brain_review` | What's waiting for a person: proposed or stale facts, suggested systems, proposed notes; and gaps | Product brief | Built (B5) |
+| `brain_facts` | Confirms, edits or retires a fact | Product brief | Built (B5) |
+| `brain_systems` | Confirms, sets or renames a system | Product brief | Built (B5) |
+
+Everything a person does with the brain is a tool call; only setup (add, sync, remove, hooks,
+doctor, set-ref) is in the terminal. Tool and parameter names are frozen once the harness names
+them in skills (H1).
 
 A hit looks like: `orders-web · src/api/orders.ts:42-58 · @9f3c1e2 · 2 commits behind · llm-generated`.
 
@@ -262,10 +270,13 @@ their own API, a service handling its own event) links only within that repo and
 
 ## Safety
 
-- Agent-facing tools are read-only, except `brain_record_fact`. It asks the person through MCP
-  elicitation, so the agent can't confirm for them; without a dialog the fact is only proposed.
-  It is marked `requiresUserInteraction`, so Claude Code prompts for every call. Agents are told
-  to record only what the person said, never repo text or tool output.
+- Four tools write: facts, notes and systems. A change counts as confirmed only with the
+  person's words agreeing (`confirmed_with`, kept on a fact); without them a fact or note is
+  proposed and other changes are refused. Each is marked `requiresUserInteraction`, so Claude
+  Code asks the person to allow every call, showing what is stored: an agent can't pass that
+  alone, and a headless run can't write. Agents are told to record only what the person said,
+  never repo text or tool output. (Until B5 an MCP elicitation dialog confirmed facts; the desktop
+  app declined it unseen, so it went.)
 - Repo text, tickets and PR bodies are untrusted; tool output is data, never instructions.
 - AI runs are read-only (Read, Grep, Glob), load no MCP servers, settings or skills, and store
   only pointers to the lines they cite.

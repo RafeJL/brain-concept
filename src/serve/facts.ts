@@ -78,13 +78,15 @@ function codeCheck(fact: FactRecord): string[] {
 
 /**
  * Marks a fact confirmed by `by` (a proposed one, or a stale one re-confirmed), with its anchors
- * now checked at `commit`, and retires the fact it replaces, if any.
+ * now checked at `commit`, and retires the fact it replaces, if any. `words` are the person's
+ * agreeing, when they confirmed it in a conversation.
  */
-export function confirmFact(store: Store, fact: FactRecord, by: string, at: string, commit: string | null): void {
+export function confirmFact(store: Store, fact: FactRecord, by: string, at: string, commit: string | null, words: string | null = null): void {
   store.updateFact(fact.id, {
     status: "confirmed",
     confirmedBy: by,
     confirmedAt: at,
+    confirmedWith: words,
     staleSince: null,
     ...(fact.anchors.length && commit ? { anchorCommit: commit } : {}),
   });

@@ -10,14 +10,6 @@ export type Format = "concise" | "detailed";
 /** How every answer's facts were made: by Claude Code, with each citation checked. */
 export const TIER = "llm-generated";
 
-/**
- * A brain command as the person should type it. `brain` is only on their PATH if they set up the
- * shortcut, so answers give the npm form, which always works.
- */
-export function brainCommand(args: string): string {
-  return `npm run brain -- ${args} (in the brain-concept folder)`;
-}
-
 export interface ToolDeps {
   store: Store;
   access: AccessPolicy;

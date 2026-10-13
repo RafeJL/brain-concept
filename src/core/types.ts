@@ -19,6 +19,8 @@ export interface RepoNote {
   text: string;
   by: string;
   at: string;
+  /** The person's words agreeing to it, when they set it in a conversation with an agent. */
+  with?: string;
 }
 
 /** The commit a repo's facts currently describe. */

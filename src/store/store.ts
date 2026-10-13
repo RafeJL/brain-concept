@@ -64,7 +64,7 @@ export interface FactFilter {
 }
 
 /** What `updateFact` may change. Anchors change together with the commit they were checked at. */
-export type FactChange = Partial<Pick<FactRecord, "text" | "status" | "confirmedBy" | "confirmedAt" | "staleSince" | "anchors" | "anchorCommit" | "anchorsFound">>;
+export type FactChange = Partial<Pick<FactRecord, "text" | "status" | "confirmedBy" | "confirmedAt" | "confirmedWith" | "staleSince" | "anchors" | "anchorCommit" | "anchorsFound">>;
 
 export interface SearchPage<T> {
   /** How many rows match in all, for paging. */
@@ -152,8 +152,11 @@ export interface Store {
   searchFacts(filter: FactFilter & { match: string; limit: number }): FactRecord[];
 
   logGap(gap: Gap): void;
-  /** Logged gaps grouped by question (ignoring case), most asked first. */
-  gaps(limit: number): GapSummary[];
+  /**
+   * Logged gaps grouped by question (ignoring case), most asked first. Given the repos a caller can
+   * read, a search limited to a repo they can't read is left out.
+   */
+  gaps(limit: number, readable?: readonly string[]): GapSummary[];
 
   close(): void;
 }
