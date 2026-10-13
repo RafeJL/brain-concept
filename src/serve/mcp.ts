@@ -53,6 +53,8 @@ export const INSTRUCTIONS =
   "brain_impact with work for which systems a piece of work touches. Don't read technical pages or " +
   "code unless asked. Systems labelled suggested haven't been confirmed by a person yet. " +
   "Facts labelled human-reviewed were stated and confirmed by a person; prefer them over AI-written text. " +
+  "A fact may also say what the code does about it: \"code agrees\", \"code contradicts it\", or \"not in the " +
+  "code\" (agreed, but not built, or not a code matter). Say so when it matters to the question. " +
   "When the person you're working with states a product rule, term, purpose or decision that the brain " +
   "lacks or contradicts, or answers a question the brain couldn't, ask whether they want it recorded and, " +
   "if so, call brain_record_fact. When it changes a fact the brain already records (\"fact #N\"), offer to " +

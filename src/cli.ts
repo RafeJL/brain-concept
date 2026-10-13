@@ -4,7 +4,8 @@ import { parseArgs } from "node:util";
 import { localPerson, resolveDbPath } from "./config.js";
 import type { FactKind, FactRecord } from "./core/facts.js";
 import { anchorProblems, parseAnchor } from "./ingest/facts.js";
-import { confirmFact, factLine, visibleFacts } from "./serve/facts.js";
+import { confirmFact, factLine, factsAbout, visibleFacts } from "./serve/facts.js";
+import { checkFacts, type FactChecksResult } from "./ai/fact-checks.js";
 import { findSystem } from "./serve/systems.js";
 import { recordFact } from "./serve/tools/record-fact.js";
 import { runQueued } from "./core/queue.js";
@@ -40,9 +41,9 @@ Get started:
                                                            map its routes and calls, and keep it up to date
 
 Keep repos up to date:
-  brain sync [<name>] [--full] [--only links|wiki] [--no-ai] [--model <m>]
+  brain sync [<name>] [--full] [--only links|wiki|facts] [--no-ai] [--model <m>]
                                                            bring repos up to their tracked branch (all if no name);
-                                                           --full redoes everything, --only links or --only wiki
+                                                           --full redoes everything, --only links, wiki or facts
                                                            just that step, --no-ai indexes only
   brain hooks install|remove|status [<name>]               re-sync automatically whenever the tracked branch moves
   brain repo list                                          repos and how up to date each is
@@ -77,6 +78,8 @@ Facts from people (agents record them with brain_record_fact; you confirm them):
                                                            record a fact yourself, confirmed (kinds: rule, term,
                                                            purpose, decision, answer)
   brain facts confirm <id>                                 confirm a proposed fact, or re-confirm a stale one
+  brain facts check [<repo or system>] [--full]            have Claude Code check facts against the code now (cents);
+                                                           sync does this for new and changed ones
   brain facts edit <id> [--text "<fact>"] [--anchor <file:lines>]...
                                                            reword a fact or re-anchor it at the current commit
   brain facts retire <id>                                  mark a fact no longer true (kept for history)
@@ -218,12 +221,12 @@ async function main(argv: string[]): Promise<void> {
   }
 }
 
-/** `--only links` maps routes, calls and other links without touching the wiki; `--only wiki` the reverse. */
-type Step = "links" | "wiki";
+/** `--only links` maps routes, calls and other links; `--only wiki` writes the wiki; `--only facts` checks facts against the code. */
+type Step = "links" | "wiki" | "facts";
 
 function onlyStep(value: string | undefined): Step | undefined {
-  if (value === undefined || value === "links" || value === "wiki") return value;
-  throw new BrainError(`--only takes links or wiki, not "${value}".`);
+  if (value === undefined || value === "links" || value === "wiki" || value === "facts") return value;
+  throw new BrainError(`--only takes links, wiki or facts, not "${value}".`);
 }
 
 /**
@@ -235,11 +238,15 @@ async function syncAndRefresh(store: Store, name: string, options: { model?: str
   let full = options.full;
   const outcome = await runQueued(join(dirname(resolveDbPath()), "locks"), name, async () => {
     printSync(await syncRepo(store, name));
-    if (options.only !== "wiki") {
+    const runs = (step: Step) => !options.only || options.only === step;
+    if (runs("links")) {
       await reported(name, "routes and calls", async () => printSeams(await updateSeams(store, claudeRunner, name, { model: options.model, full })));
     }
-    if (options.only !== "links") {
+    if (runs("wiki")) {
       await reported(name, "wiki", async () => printWiki(await generateWiki(store, claudeRunner, name, { model: options.model, full })));
+    }
+    if (runs("facts")) {
+      await reported(name, "fact checks", async () => printChecks(await checkFacts(store, claudeRunner, name, { model: options.model, full })));
     }
     full = false;
   });
@@ -480,7 +487,7 @@ async function facts(
   tools: ToolDeps,
   action: string | undefined,
   arg: string | undefined,
-  options: { all: boolean; kind?: string; text?: string; quote?: string; ticket?: string; anchor?: string[] },
+  options: { all: boolean; full: boolean; model?: string; kind?: string; text?: string; quote?: string; ticket?: string; anchor?: string[] },
 ): Promise<void> {
   const readable = store.listRepos().map((r) => r.name);
   const filter = (target?: string) => {
@@ -546,6 +553,17 @@ async function facts(
       console.log(`Retired fact #${fact.id}. Agents no longer see it; brain facts --all still lists it.`);
       return;
     }
+    case "check": {
+      // The repos to check in: the one named, a system's members, or every repo with a fact.
+      const repos = arg
+        ? store.getRepo(arg)
+          ? [arg]
+          : findSystem(store, arg, readable)?.repos ?? fail(`No repo or system named "${arg}". See: brain repo list, brain systems`)
+        : readable.filter((repo) => factsAbout(store, repo, readable).length > 0);
+      if (repos.length === 0) console.log("No facts to check yet.");
+      for (const repo of repos) printChecks(await checkFacts(store, claudeRunner, repo, { model: options.model, full: options.full }), true);
+      return;
+    }
     case "export": {
       const all = store.facts({ ...visibleFacts(store, readable), retired: true });
       if (all.length === 0) {
@@ -580,6 +598,28 @@ async function facts(
 
 function fail(message: string): never {
   throw new BrainError(message);
+}
+
+/**
+ * One line per repo whose facts were checked: how many, and what the code does about them, then
+ * the facts it contradicts or couldn't settle. Nothing when no fact needed a check, unless asked.
+ */
+function printChecks(result: FactChecksResult, asked = false): void {
+  const at = `@${result.commit.slice(0, 7)}`;
+  if (result.checked.length === 0) {
+    if (asked) console.log(`${result.repo}: facts already checked at ${at}, and nothing they rest on changed (no AI run; --full checks again)`);
+    return;
+  }
+  const words: Record<string, string> = { agrees: "agrees", contradicts: "contradicts", absent: "not in the code", unclear: "unclear" };
+  const tally = Object.entries(words)
+    .map(([verdict, word]) => [result.checked.filter((c) => c.verdict === verdict).length, word] as const)
+    .filter(([n]) => n > 0)
+    .map(([n, word]) => `${n} ${word}`)
+    .join(", ");
+  console.log(`${result.repo}: ${count(result.checked.length, "fact")} checked against the code at ${at} · ${tally} · $${result.costUsd.toFixed(2)} · ${Math.round(result.durationMs / 1000)}s`);
+  for (const check of result.checked.filter((c) => c.verdict === "contradicts" || c.verdict === "unclear")) {
+    console.log(`    fact #${check.fact} ${check.verdict}: ${check.summary}`);
+  }
 }
 
 /** `brain gaps`: what agents searched for and the brain couldn't answer. */

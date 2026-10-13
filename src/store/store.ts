@@ -1,4 +1,4 @@
-import type { FactRecord, Gap, GapSummary, NewFact } from "../core/facts.js";
+import type { FactCheck, FactRecord, Gap, GapSummary, NewFact } from "../core/facts.js";
 import type { Seam, SeamCoverage, SeamKind } from "../core/seams.js";
 import type { SystemRecord } from "../core/systems.js";
 import type { FileRecord, LanguageShare, RepoRecord, RepoState, WikiPage } from "../core/types.js";
@@ -63,7 +63,7 @@ export interface FactFilter {
 }
 
 /** What `updateFact` may change. Anchors change together with the commit they were checked at. */
-export type FactChange = Partial<Pick<FactRecord, "text" | "status" | "confirmedBy" | "confirmedAt" | "staleSince" | "anchors" | "anchorCommit">>;
+export type FactChange = Partial<Pick<FactRecord, "text" | "status" | "confirmedBy" | "confirmedAt" | "staleSince" | "anchors" | "anchorCommit" | "anchorsFound">>;
 
 export interface SearchPage<T> {
   /** How many rows match in all, for paging. */
@@ -132,6 +132,8 @@ export interface Store {
   facts(filter: FactFilter): FactRecord[];
   /** False when there is no such fact. */
   updateFact(id: number, change: FactChange): boolean;
+  /** Stores checks, replacing any earlier check of the same fact in the same repo. */
+  saveFactChecks(checks: readonly FactCheck[]): void;
   /** Facts matching an FTS5 expression: confirmed and current ones first, then best match. */
   searchFacts(filter: FactFilter & { match: string; limit: number }): FactRecord[];
 

@@ -2,7 +2,7 @@ import type { FactRecord } from "../../core/facts.js";
 import { firstSentence } from "../../core/sections.js";
 import type { SystemRecord } from "../../core/systems.js";
 import type { Caller } from "../access.js";
-import { factLine } from "../facts.js";
+import { factLine, readableChecks } from "../facts.js";
 import { linkSummary, neighbours, type Neighbour, type Neighbours } from "../neighbours.js";
 import { findSystem, quoted, visibleSystems } from "../systems.js";
 import { count, indexedAt, readableRepos, type ToolDeps, type ToolResult } from "./common.js";
@@ -75,7 +75,7 @@ export async function systemOverview(deps: ToolDeps, caller: Caller, name: strin
     within,
     outgoing,
     incoming: [...incoming].sort(([a], [b]) => a.localeCompare(b)).map(([from, to]) => ({ from, to })),
-    facts: deps.store.facts({ repos: system.repos, systems: [system.name] }),
+    facts: readableChecks(deps.store.facts({ repos: system.repos, systems: [system.name] }), readable),
   };
   return { ok: true, data, text: await render(deps, data) };
 }

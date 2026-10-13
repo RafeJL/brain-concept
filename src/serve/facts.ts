@@ -1,4 +1,5 @@
-import { HUMAN_TIER, type FactRecord } from "../core/facts.js";
+import type { Citation } from "../core/citations.js";
+import { HUMAN_TIER, type FactCheck, type FactRecord, type Verdict } from "../core/facts.js";
 import type { FactFilter, Store } from "../store/store.js";
 import { systemOf, visibleSystems } from "./systems.js";
 
@@ -10,7 +11,12 @@ export function visibleFacts(store: Store, readable: readonly string[]): FactFil
 /** Live facts on a repo and on the system it belongs to, newest first. */
 export function factsAbout(store: Store, repo: string, readable: readonly string[]): FactRecord[] {
   const system = systemOf(store, repo, readable);
-  return store.facts({ repos: [repo], systems: system ? [system.name] : [] });
+  return readableChecks(store.facts({ repos: [repo], systems: system ? [system.name] : [] }), readable);
+}
+
+/** The facts with only the checks made in repos the caller can read: a system's other repos stay hidden. */
+export function readableChecks(facts: readonly FactRecord[], readable: readonly string[]): FactRecord[] {
+  return facts.map((fact) => ({ ...fact, checks: fact.checks.filter((c) => readable.includes(c.repo)) }));
 }
 
 /**
@@ -26,12 +32,48 @@ export function factLine(fact: FactRecord): string {
     fact.kind,
     who,
     ...(fact.ticket ? [`ticket ${fact.ticket}`] : []),
-    ...(fact.anchors.length ? [`enforced at ${fact.anchors.map((a) => `${a.path}:${a.start === a.end ? a.start : `${a.start}-${a.end}`}`).join(", ")}`] : []),
+    ...(fact.anchors.length ? [`enforced at ${fact.anchors.map(at).join(", ")}${fact.anchorsFound ? " (found by Claude Code)" : ""}`] : []),
     ...(fact.staleSince ? [`stale: that code changed at @${fact.staleSince.slice(0, 7)}, so re-confirm before relying on it`] : []),
+    ...codeCheck(fact),
     ...(fact.replaces ? [`${fact.status === "proposed" ? "would replace" : "replaces"} fact #${fact.replaces}`] : []),
     `fact #${fact.id}`,
   ];
   return `${fact.text} (${parts.join(" · ")})`;
+}
+
+function at(cite: Citation): string {
+  return `${cite.path}:${cite.start === cite.end ? cite.start : `${cite.start}-${cite.end}`}`;
+}
+
+/**
+ * What Claude Code found the code does about the fact. A repo fact has one check: "code agrees at
+ * …", "code contradicts it: …", "not in the code: …". A system fact has one per member repo,
+ * summed up by verdict.
+ */
+function codeCheck(fact: FactRecord): string[] {
+  const { checks } = fact;
+  if (checks.length === 0) return [];
+  if (fact.repo && checks.length === 1) {
+    const [check] = checks as [FactCheck];
+    const cite = check.cites[0] && (fact.anchorsFound ? "" : ` at ${at(check.cites[0])}`);
+    const said: Record<Verdict, string> = {
+      agrees: `code agrees${cite}`,
+      contradicts: `code contradicts it${cite}: ${check.summary}`,
+      absent: `not in the code: ${check.summary}`,
+      unclear: "the code check was unclear",
+    };
+    return [`${said[check.verdict]} (checked @${check.commit.slice(0, 7)})`];
+  }
+  const by = (verdict: Verdict) => checks.filter((c) => c.verdict === verdict);
+  const where = (c: FactCheck) => `${c.repo}${c.cites[0] ? ` (${at(c.cites[0])})` : ""}`;
+  return [
+    [
+      ...(by("agrees").length ? [`code agrees in ${by("agrees").map(where).join(", ")}`] : []),
+      ...by("contradicts").map((c) => `contradicts it in ${where(c)}: ${c.summary.replace(/\.$/, "")}`),
+      ...(by("absent").length ? [`not in the code of ${by("absent").map((c) => c.repo).join(", ")}`] : []),
+      ...(by("unclear").length ? [`unclear in ${by("unclear").map((c) => c.repo).join(", ")}`] : []),
+    ].join("; "),
+  ];
 }
 
 /**

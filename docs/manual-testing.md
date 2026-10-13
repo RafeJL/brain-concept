@@ -433,9 +433,13 @@ None of this runs Claude Code in the background, so it costs nothing beyond the 
    point out the recorded 500 rule and offer to replace it. Say yes: the dialog (or, in the
    desktop app, a proposal) says it replaces fact #1. After confirming, `facts` lists only the
    1000 rule, and `facts --all` shows the 500 one as retired.
-7. **Gaps.** Search for something no repo covers (`search "refund policy"`), then run `gaps`. It
+7. **Checked against the code.** `facts check RealWorld` runs one Claude Code check per repo
+   (cents each). Then `facts`: a rule the code enforces says `code agrees`, the follow cap says
+   `not in the code of …` for the APIs, and a rule the code breaks says `code contradicts it`
+   with the lines. Run it again: it says nothing changed and runs no AI.
+8. **Gaps.** Search for something no repo covers (`search "refund policy"`), then run `gaps`. It
    should list the search with a count.
-8. **The desktop app.** In the Code tab of the desktop app (tried 2026-10-12), the permission
+9. **The desktop app.** In the Code tab of the desktop app (tried 2026-10-12), the permission
    prompt appears but the confirm dialog doesn't: it comes back declined at once. The agent
    should say the dialog was most likely never shown, and offer to save it as proposed. Say yes;
    `facts` lists it as proposed, and `facts confirm <id>` confirms it.

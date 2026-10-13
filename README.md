@@ -188,6 +188,14 @@ first: at the top of the product page, on the card, in search and in system over
 - **Anchored facts go stale.** A fact can point at the lines that enforce it. When those lines
   change, the next sync marks it stale ("re-confirm before relying on it"); lines moving around
   it don't.
+- **Checked against the code.** On the next sync, Claude Code reads each new or changed fact
+  against the code of the repo it's about (or each repo of its system) and says whether the code
+  **agrees**, **contradicts** it, or has **nothing for it** (agreed but not built, or not a code
+  matter). The answer must cite lines that pass the usual check, and it never changes the fact:
+  `(… · code agrees (checked @e45c37c) · fact #4)`, or `not in the code of aspnet-api,
+  express-api, …`. Where the code agrees with a fact nobody anchored, those lines become its
+  anchors, so it goes stale when they change. Checks run again only when the fact or the code
+  they read changes: cents each, nothing otherwise.
 - **Gaps:** searches the brain couldn't answer are logged on your machine. `brain gaps` lists
   the most asked, which is what is worth writing down.
 
@@ -230,7 +238,7 @@ gets.
 |---|---|
 | `doctor` | Checks Node, git, Claude Code, the store, the MCP registration and each repo's hook, and says how to fix anything missing. |
 | `add <path> [--name n] [--no-hook] [--no-ai]` | Adds a repo: indexes it, has Claude Code map it and write its wiki, and installs its hook. `--no-ai` indexes only. |
-| `sync [<name>] [--full] [--only links\|wiki] [--no-ai] [--model m]` | Brings repos up to their tracked branch, redoing only what changed. All repos if no name is given. `--full` redoes everything. `--only links` maps only the routes, calls, events, gRPC and packages, leaving the wiki alone; `--only wiki` the reverse. This is what the hook runs. |
+| `sync [<name>] [--full] [--only links\|wiki\|facts] [--no-ai] [--model m]` | Brings repos up to their tracked branch, redoing only what changed: links, wiki, then facts from people checked against the code. All repos if no name is given. `--full` redoes everything. `--only` runs one of those steps. This is what the hook runs. |
 | `hooks install\|remove\|status [<name>]` | Turns automatic updates on or off, or shows which repos have them. |
 | `repo list` | Lists repos and how up to date each is. |
 | `repo add <path> [--name n] [--ref r]` | Enrols a repo only, with no AI, for when you want to sync later. |
@@ -251,6 +259,7 @@ gets.
 | `facts [<repo or system>] [--all]` | Lists facts from people; proposed and stale ones are marked. `--all` adds retired ones. |
 | `facts add <repo or system> --kind <k> --text "<fact>" [--quote ...] [--anchor file:lines]... [--ticket t]` | Records a fact yourself, confirmed. Kinds: rule, term, purpose, decision, answer. |
 | `facts confirm <id>` / `facts edit <id> [--text ...] [--anchor ...]` / `facts retire <id>` | Confirms a proposed or stale fact, rewords or re-anchors one, or marks one no longer true. |
+| `facts check [<repo or system>] [--full]` | Checks facts against the code now rather than at the next sync. `--full` checks them again even if nothing changed. |
 | `facts export` | Every fact as Markdown, by repo and system. |
 | `gaps` | Searches the brain couldn't answer, most asked first. |
 
@@ -283,8 +292,6 @@ merged, and a fetch is enough to update it. The store is `%USERPROFILE%\.brain\b
   "login security".
 - **Re-planning a wiki:** updates keep the same pages. After a big restructure, run
   `brain sync <name> --full`.
-- **Checking a person's fact against the code:** the dialog shows what the wiki says nearby, but
-  nothing yet checks whether the code contradicts a fact (planned, B3b).
 - **Hosting:** today it runs on your machine. A hosted version with GitHub permissions is phase 6.
 
 ## Working on the brain

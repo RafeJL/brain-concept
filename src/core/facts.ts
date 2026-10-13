@@ -38,9 +38,38 @@ export interface FactRecord {
   staleSince: string | null;
   /** The earlier fact this one replaces, retired once this one is confirmed. */
   replaces: number | null;
+  /** True when the anchors came from a check that found the code agreeing, not from a person. */
+  anchorsFound: boolean;
+  /** What Claude Code found the code does about it, per repo checked. */
+  checks: FactCheck[];
 }
 
-export type NewFact = Omit<FactRecord, "id" | "staleSince">;
+export type NewFact = Omit<FactRecord, "id" | "staleSince" | "anchorsFound" | "checks">;
+
+/**
+ * What the code does about a fact, in one repo: enforces it ("agrees"), does something else
+ * ("contradicts"), or has nothing for it ("absent": not built, or not a code matter). "unclear"
+ * when the run's answer didn't hold up against the code.
+ */
+export type Verdict = "agrees" | "contradicts" | "absent" | "unclear";
+
+export interface FactCheck {
+  fact: number;
+  repo: string;
+  /** The commit the check read. */
+  commit: string;
+  verdict: Verdict;
+  /** One sentence on what the code does about it, or why the check is unclear. */
+  summary: string;
+  /** The lines that show it (agrees, contradicts). */
+  cites: Citation[];
+  /** The files the run read to decide. */
+  lookedAt: string[];
+  /** The fact's text when it was checked, so an edit is checked again. */
+  factText: string;
+  checkedAt: string;
+  costUsd: number;
+}
 
 /** A search the brain couldn't answer, logged so owners know what is worth writing down. */
 export interface Gap {

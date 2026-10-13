@@ -678,3 +678,40 @@ person actually makes still stores nothing.
 and confirmed in a terminal. They need a confirm step there before the loop is really theirs:
 `brain web` (B5) with a confirm button is the likely place. Hosted, confirmation moves to owners, and facts may export to the curated-content
 repo (`brain facts export` gives its shape).
+
+## 2026-10-13: facts from people are checked against the code (B3b)
+
+A confirmed fact says what people agreed, not what the code does. A PO's agent should tell "the
+code enforces it" from "agreed but not built" and "the code does otherwise". Rafe chose checks
+on every sync, and lines that agree becoming anchors.
+
+- **One Claude Code run per repo** with facts due, all in one prompt (`prompts/check-facts.md`).
+  A repo fact is checked in its repo; a system fact in each member repo. Verdicts: **agrees**,
+  **contradicts** (the code actively does otherwise), **absent** (no such rule in this repo: not
+  built, or not a code matter), each with one sentence.
+- **Verified without AI:** agrees and contradicts must cite lines that exist (at most 80, and
+  names in backticks must appear there, through the wiki checker's `claimProblem`); absent must
+  name files it looked at that exist. A failed answer is stored as **unclear**, with the reason,
+  and isn't retried until the fact or the code changes, so a bad answer can't cost money on every
+  sync.
+- **Checked again** when a fact has never been checked in that repo, its text changed, or a file
+  the last check cited or read changed. Stored in `fact_checks` (migration 14).
+- **Found anchors:** a repo fact nobody anchored takes the agreeing lines (up to 3) as anchors,
+  marked found. A change to them marks it stale as before; the re-check in the same sync clears
+  the mark if the code still agrees and moves the anchors. A person's anchors are never changed.
+- **Never changes a fact or its status:** people decide what's agreed. The line shows the
+  verdict (`code agrees`, `code contradicts it at … : …`, `not in the code of …`), only for repos
+  the caller can read.
+- **Sync** gains a fourth step (`--only facts`); `brain facts check` runs it now.
+
+**Gate** (a snapshot of the real store, three facts across the five RealWorld repos, $0.36 for
+the first pass, about 10s a repo):
+- "Only an article's author can delete it" (laravel-api): agrees, citing `DeleteArticle.php` and
+  `ArticleController.php`, which became its anchors.
+- "Anyone signed in can delete any comment" (aspnet-api): contradicts: "Deleting a comment is
+  refused with Forbidden unless the signed-in user is the comment's author" (`Delete.cs:38-41`).
+- The 1000-follow cap (RealWorld): absent in four repos, but flask-api said contradicts ("no cap:
+  a user can follow any number"). Both readings are defensible, but a PO needs one: the prompt
+  now says code that simply lacks a rule is absent, and contradicts means the code actively does
+  otherwise. Re-checked, flask-api says absent and the comment rule still contradicts.
+- A second `facts check` with nothing changed ran no AI.

@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { FactRecord, Gap, GapSummary, NewFact } from "../core/facts.js";
+import type { FactCheck, FactRecord, Gap, GapSummary, NewFact } from "../core/facts.js";
 import type { Seam, SeamCoverage, SeamKind } from "../core/seams.js";
 import type { SystemRecord } from "../core/systems.js";
 import { BrainError, type FileRecord, type LanguageShare, type RepoRecord, type RepoState, type WikiPage } from "../core/types.js";
@@ -386,12 +386,48 @@ export class SqliteStore implements Store {
 
   getFact(id: number): FactRecord | undefined {
     const row = this.db.prepare(`${FACT_SELECT} WHERE facts.id = ?`).get(id) as Row | undefined;
-    return row && toFact(row);
+    return row && this.withChecks([row])[0];
   }
 
   facts(filter: FactFilter): FactRecord[] {
     const { where, params } = factWhere(filter);
-    return (this.db.prepare(`${FACT_SELECT} WHERE ${where} ORDER BY facts.recorded_at DESC, facts.id DESC`).all(...params) as Row[]).map(toFact);
+    return this.withChecks(this.db.prepare(`${FACT_SELECT} WHERE ${where} ORDER BY facts.recorded_at DESC, facts.id DESC`).all(...params) as Row[]);
+  }
+
+  saveFactChecks(checks: readonly FactCheck[]): void {
+    const upsert = this.db.prepare(
+      `INSERT OR REPLACE INTO fact_checks (fact, repo, commit_sha, verdict, summary, cites, looked_at, fact_text, checked_at, cost_usd)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    this.transaction(() => {
+      for (const c of checks) {
+        upsert.run(c.fact, c.repo, c.commit, c.verdict, c.summary, JSON.stringify(c.cites), JSON.stringify(c.lookedAt), c.factText, c.checkedAt, c.costUsd);
+      }
+    });
+  }
+
+  /** Facts from rows, each with its checks. */
+  private withChecks(rows: readonly Row[]): FactRecord[] {
+    if (rows.length === 0) return [];
+    const ids = rows.map((row) => Number(row.id));
+    const checks = new Map<number, FactCheck[]>();
+    const found = this.db.prepare(`SELECT * FROM fact_checks WHERE fact IN (${ids.map(() => "?").join(", ")}) ORDER BY repo`).all(...ids) as Row[];
+    for (const row of found) {
+      const check: FactCheck = {
+        fact: Number(row.fact),
+        repo: String(row.repo),
+        commit: String(row.commit_sha),
+        verdict: String(row.verdict) as FactCheck["verdict"],
+        summary: String(row.summary),
+        cites: JSON.parse(String(row.cites)) as FactCheck["cites"],
+        lookedAt: JSON.parse(String(row.looked_at)) as string[],
+        factText: String(row.fact_text),
+        checkedAt: String(row.checked_at),
+        costUsd: Number(row.cost_usd),
+      };
+      checks.set(check.fact, [...(checks.get(check.fact) ?? []), check]);
+    }
+    return rows.map((row) => ({ ...toFact(row), checks: checks.get(Number(row.id)) ?? [] }));
   }
 
   updateFact(id: number, change: FactChange): boolean {
@@ -403,21 +439,24 @@ export class SqliteStore implements Store {
       staleSince: "stale_since",
       anchors: "anchors",
       anchorCommit: "anchor_commit",
+      anchorsFound: "anchors_found",
     };
     const keys = (Object.keys(change) as (keyof FactChange)[]).filter((key) => change[key] !== undefined);
     if (keys.length === 0) return this.getFact(id) !== undefined;
-    const values = keys.map((key) => (key === "anchors" ? JSON.stringify(change.anchors) : (change[key] as string | null)));
+    const values = keys.map((key) =>
+      key === "anchors" ? JSON.stringify(change.anchors) : key === "anchorsFound" ? Number(change.anchorsFound) : (change[key] as string | null),
+    );
     const set = keys.map((key) => `${columns[key]} = ?`).join(", ");
     return Number(this.db.prepare(`UPDATE facts SET ${set} WHERE id = ?`).run(...values, id).changes) > 0;
   }
 
   searchFacts(filter: FactFilter & { match: string; limit: number }): FactRecord[] {
     const { where, params } = factWhere(filter);
-    return (
+    return this.withChecks(
       this.db
         .prepare(`${FACT_SELECT} JOIN fact_search ON fact_search.rowid = facts.id WHERE fact_search MATCH ? AND ${where} ORDER BY facts.status <> 'confirmed', facts.stale_since IS NOT NULL, bm25(fact_search) LIMIT ?`)
         .all(filter.match, ...params, filter.limit) as Row[]
-    ).map(toFact);
+    );
   }
 
   logGap(gap: Gap): void {
@@ -461,7 +500,7 @@ function factWhere(filter: FactFilter): { where: string; params: string[] } {
   return { where: filter.retired ? where : `${where} AND facts.status <> 'retired'`, params: [...filter.repos, ...filter.systems] };
 }
 
-function toFact(row: Row): FactRecord {
+function toFact(row: Row): Omit<FactRecord, "checks"> {
   const optional = (value: unknown) => (value === null ? null : String(value));
   return {
     id: Number(row.id),
@@ -480,6 +519,7 @@ function toFact(row: Row): FactRecord {
     confirmedAt: optional(row.confirmed_at),
     staleSince: optional(row.stale_since),
     replaces: row.replaces === null ? null : Number(row.replaces),
+    anchorsFound: Number(row.anchors_found) === 1,
   };
 }
 
