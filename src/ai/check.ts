@@ -141,7 +141,14 @@ function unsupported(text: string, root: string, linesOf: (path: string) => stri
     const unreadable = unreadableCitation(text);
     return unreadable ? `no citation it can read: ${unreadable.slice(0, 80)}` : "no citation";
   }
+  return claimProblem(text, cites, root, linesOf);
+}
 
+/**
+ * Why `cites` don't support `text`, or null: each must name lines that exist (at most 80), and
+ * every name in backticks must appear in them. Shared by wiki claims and fact checks.
+ */
+export function claimProblem(text: string, cites: readonly Citation[], root: string, linesOf: (path: string) => string[] | null): string | null {
   const spans: string[] = [];
   for (const cite of cites) {
     const lines = linesOf(cite.path);

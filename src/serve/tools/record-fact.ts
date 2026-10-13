@@ -3,7 +3,7 @@ import { FACT_KINDS, HUMAN_TIER, type FactKind, type FactRecord } from "../../co
 import { anchorProblems, parseAnchor } from "../../ingest/facts.js";
 import type { SectionHit } from "../../store/store.js";
 import type { Caller } from "../access.js";
-import { factLine, visibleFacts } from "../facts.js";
+import { factLine, readableChecks, visibleFacts } from "../facts.js";
 import { findSystem } from "../systems.js";
 import { readableRepos, requireSyncedRepo, type Failure, type ToolDeps, type ToolResult } from "./common.js";
 import { matchExpression } from "./search.js";
@@ -79,7 +79,7 @@ export async function recordFact(
 
   const match = matchExpression(text);
   const nearby = match ? deps.store.searchSections({ repos: members, match, limit: NEARBY, snippetWords: 24 }).hits : [];
-  const related = match ? deps.store.searchFacts({ ...visibleFacts(deps.store, target.readable), match, limit: NEARBY }) : [];
+  const related = match ? readableChecks(deps.store.searchFacts({ ...visibleFacts(deps.store, target.readable), match, limit: NEARBY }), target.readable) : [];
   const statedBy = input.statedBy?.trim() || options.person;
   const message = [
     `Record this as a fact about ${label}?`,

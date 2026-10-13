@@ -190,4 +190,22 @@ export const MIGRATIONS: (string | ((db: DatabaseSync) => void))[] = [
   `
   ALTER TABLE facts ADD COLUMN replaces INTEGER REFERENCES facts(id) ON DELETE SET NULL;
   `,
+  // B3b: what Claude Code found the code does about each fact, per repo, and whether a fact's
+  // anchors came from such a check rather than from a person.
+  `
+  CREATE TABLE fact_checks (
+    fact       INTEGER NOT NULL REFERENCES facts(id) ON DELETE CASCADE,
+    repo       TEXT NOT NULL REFERENCES repos(name) ON DELETE CASCADE,
+    commit_sha TEXT NOT NULL,
+    verdict    TEXT NOT NULL CHECK (verdict IN ('agrees', 'contradicts', 'absent', 'unclear')),
+    summary    TEXT NOT NULL,
+    cites      TEXT NOT NULL,
+    looked_at  TEXT NOT NULL,
+    fact_text  TEXT NOT NULL,
+    checked_at TEXT NOT NULL,
+    cost_usd   REAL NOT NULL,
+    PRIMARY KEY (fact, repo)
+  );
+  ALTER TABLE facts ADD COLUMN anchors_found INTEGER NOT NULL DEFAULT 0;
+  `,
 ];

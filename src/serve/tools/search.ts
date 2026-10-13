@@ -3,7 +3,7 @@ import { KIND_LABEL, type Seam } from "../../core/seams.js";
 import type { SystemRecord } from "../../core/systems.js";
 import type { FactFilter, SectionHit } from "../../store/store.js";
 import type { Caller } from "../access.js";
-import { factLine, visibleFacts } from "../facts.js";
+import { factLine, readableChecks, visibleFacts } from "../facts.js";
 import { visibleSystems } from "../systems.js";
 import { builtFrom, count, indexedAt, PAGE_SIZE, pointer, readableRepos, TIER, type Format, type ToolDeps, type ToolResult } from "./common.js";
 
@@ -80,7 +80,7 @@ export async function search(deps: ToolDeps, caller: Caller, input: SearchInput)
   const visible = visibleSystems(deps.store, scope);
   const systems = offset === 0 ? deps.store.searchSystems(match).flatMap((name) => visible.filter((s) => s.name === name)) : [];
   const factFilter = visibleFacts(deps.store, scope);
-  const facts = offset === 0 ? deps.store.searchFacts({ ...factFilter, match, limit: FACTS }) : [];
+  const facts = offset === 0 ? readableChecks(deps.store.searchFacts({ ...factFilter, match, limit: FACTS }), readable) : [];
   if (offset === 0 && !answers(deps, scope, factFilter, input.query)) {
     // Worth an owner writing down (brain gaps).
     deps.store.logGap({ tool: "brain_search", query: input.query, repos: input.repos ?? [], askedAt: new Date().toISOString() });

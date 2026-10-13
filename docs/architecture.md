@@ -45,7 +45,7 @@ Every fact records how it was made, and every answer carries that label.
 |---|---|---|---|
 | **index** | git only: the committed tree at the tracked ref. No LLM. | File inventory, languages, freshness | Rely on it |
 | **human-reviewed** | People: a fact a person stated and confirmed in their agent's dialog, or with `brain facts` (B3a); hosted, also curated content merged through a PR | Business rules, terms, purposes, decisions and answers, on a repo or a system | Treat as the team's stated intent; check the code when one matters, and re-confirm a stale one |
-| **llm-generated** | Claude Code (headless, isolated, read-only) from the code at the indexed commit, with a citation on every claim | Wiki pages (W1), including a product page (B2a); routes and calls in any language (W4), and events, gRPC methods and shared packages (B2b), from which the seam graph and cross-repo links are built; suggested systems (B2a) | Every citation is checked automatically (W2, W4); use as a map, and confirm at the citation before relying on a claim |
+| **llm-generated** | Claude Code (headless, isolated, read-only) from the code at the indexed commit, with a citation on every claim | Wiki pages (W1), including a product page (B2a); routes and calls in any language (W4), and events, gRPC methods and shared packages (B2b), from which the seam graph and cross-repo links are built; suggested systems (B2a); checks of facts from people against the code (B3b) | Every citation is checked automatically (W2, W4); use as a map, and confirm at the citation before relying on a claim |
 
 Why: generated context files lowered agent success in a controlled study, and public
 DeepWiki pages were often wrong, while code-derived structure helped (see `research.md`). The
@@ -87,6 +87,10 @@ Two halves share only the store:
    describes a different commit from them.
 6. Facts from people anchored to changed lines are marked stale, never rewritten; lines moving
    around them move their anchors. A person re-confirms a stale fact (`brain facts confirm`).
+7. Facts that are new, edited, or whose last check read a changed file are checked against the
+   code in one Claude Code run per repo: agrees, contradicts, or absent, verified against the
+   lines cited. A re-check that still agrees clears the stale mark on anchors it found itself;
+   it never touches a fact's text or status.
 
 ## MCP tools
 
