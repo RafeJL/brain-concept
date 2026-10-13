@@ -123,6 +123,22 @@ server and callers, and `consumers "package @citation/ui"` the repo that publish
 the repos that depend on it. Names match exactly, ignoring case and package versions. Shared
 databases aren't linked: table names like `users` repeat across unrelated databases.
 
+**Following a flow.** `consumers "POST /api/orders" --follow` (or `follow: true` over MCP) also
+shows what starts it (the UI actions and jobs that lead to it, such as the web and mobile checkouts),
+then what handling it sets off, hop by hop, until the flow ends:
+- **Between repos:** the calls it makes and events it publishes, then who serves or handles those.
+- **Through tables:** the tables it reads and writes. Within a repo, the trace continues from a
+  table's writer to whatever reads it, such as a job that polls it. Between repos, a table is only
+  named, never linked.
+
+Each hop is a chain of cited steps from the handler to the line that makes the call, checked
+without AI. A step that reaches nothing says "ends here", and one not yet mapped says so.
+
+The chains come from a third run in the links step. It covers every route, handler and gRPC method
+a repo serves, and the jobs and UI actions it finds. Sync keeps them current: lines that only move
+cost nothing, and only chains whose code changed are followed again. Sync also reports the calls
+and events nothing was found to trigger, as a sign of what the run may have missed.
+
 ### For product owners
 
 Every wiki has a **product page** in product language: who uses it, what they can do, its
@@ -283,7 +299,7 @@ gets.
 | `search "<query>" [--repo n]... [--detailed]` | `brain_search`. |
 | `card <name> [--detailed]` | `brain_repo_card`. Given a system's name, it shows that system's overview. |
 | `page <name> [<page>]` | `brain_get`: the page list, or one page (`product` for the product page). |
-| `consumers "<METHOD /path>" [--detailed]` | `brain_find_consumers`. Takes `:id` and `{id}` style paths, or full URLs; or `"event <name>"`, `"grpc <Service/Method>"`, `"package <name>"`. |
+| `consumers "<METHOD /path>" [--detailed] [--follow]` | `brain_find_consumers`. Takes `:id` and `{id}` style paths, or full URLs; or `"event <name>"`, `"grpc <Service/Method>"`, `"package <name>"`. `--follow` traces what handling it sets off, across repos. |
 | `impact <repo> [--path file] [--route "<METHOD /path>"]` | `brain_impact`. `--route` also takes an event, gRPC method or package. |
 | `impact --work "<description>"` | `brain_impact` with `work`: which systems, repos and endpoints a piece of work would most likely touch. |
 | `systems` | Lists systems, whether each is suggested or confirmed, and repos in none. |

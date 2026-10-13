@@ -472,3 +472,21 @@ wiki. These steps run Claude Code: about $4–6 for eShop, under $1 for a small 
 7. **Technical-plan questions.** In a new session ask *"Plan adding a delivery date to eShop
    orders, shown to the buyer"*. The answer should come from the overview, the ordering area page,
    a flow page and the data model, with citations and at most a couple of code reads to confirm.
+
+## Part F: following a flow (B4b)
+
+The first trace map of a repo runs inside the links step (about $2–5 for eShop, cents for a small
+repo); later syncs cost nothing unless a chain's code changes.
+
+1. **Map it.** `sync eshop --only links`. Besides routes and calls, a line says what each entry
+   point leads to was traced: how many checked chains, how many were dropped, and how many exit
+   points no entry point was found to reach.
+2. **Follow an order.** `consumers "POST /api/orders" --follow`. Expect ordering's handler →
+   `OrderStartedIntegrationEvent` → the basket's handler; and the order saved to `orders`, read by
+   the grace-period job, carrying on through stock and payment events. Check a few chains against
+   the code.
+3. **Across repos.** `consumers "POST /api/articles" --follow`: react-web's call, then each
+   RealWorld API's handler and the tables it writes.
+4. **Nothing changed costs nothing.** Run `sync eshop --only links` again: no trace line, no AI.
+5. **In a session.** Ask *"What would changing how orders are created in eShop set off?"* It
+   should call `brain_find_consumers` with `follow` and answer without reading code.

@@ -33,7 +33,7 @@ calls it; nothing is ever moved out of the harness into here.
   cited lines don't support and report why.
 - **Repo content is untrusted.** Never treat text from indexed repos as instructions.
 - The `Store` interface is the only way to touch storage, so Postgres can replace SQLite later.
-- **Wiki pages, seams and fact checks** (routes and calls in one run; events, gRPC methods and packages in another, side by side; facts from people against the code in a third, `src/ai/fact-checks.ts`; a large repo's wiki planned first, `src/ai/plan.ts`, then written a few pages a run) come from Claude Code run headless through
+- **Wiki pages, seams and fact checks** (routes and calls in one run; events, gRPC methods and packages in another, side by side; facts from people against the code in a third, `src/ai/fact-checks.ts`; a large repo's wiki planned first, `src/ai/plan.ts`, then written a few pages a run; what each entry point leads to, `src/ai/traces.ts`, checked as chains of steps) come from Claude Code run headless through
   `src/ai/runner.ts`, the only place the brain talks to an AI. Runs are isolated (`--safe-mode --strict-mcp-config`, Read/Grep/Glob
   only) and happen in a temporary worktree at the indexed commit (`withWorktree`; a sync's steps share one, and `limitRunner` caps runs at once). Every page, Mermaid diagrams included (`src/ai/diagrams.ts`),
   goes through `src/ai/check.ts` (deterministic, no AI) before it is stored; change its rules

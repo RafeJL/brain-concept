@@ -195,7 +195,7 @@ async function render(deps: ToolDeps, { work, groups, weaker }: WorkImpact, read
   out.push(
     "",
     "Suggested from the wiki and route map; confirm with the owning team.",
-    'Read a section with brain_get (repo and page, e.g. page "product"); see every caller of an endpoint with brain_find_consumers.',
+    'Read a section with brain_get (repo and page, e.g. page "product"); see every caller of an endpoint with brain_find_consumers, and what it sets off downstream with follow true.',
   );
   if (noWikiNote) out.push(noWikiNote);
   out.push(`Indexed: ${(await indexedAt(deps, [...new Set(repos.map((r) => r.repo))].sort())).join("; ")}`);

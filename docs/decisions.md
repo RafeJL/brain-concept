@@ -807,3 +807,75 @@ sentence. And sync said "no AI run" after a planning run; it now gives the plann
 
 (Found while building journey pages across repos, which were dropped: see the B4b plan. Tracing
 flows from the link map on demand replaces them.)
+
+## 2026-10-13: following a flow across repos (B4b)
+
+**Why:** a planner asking "what does changing this set off?" asks a downstream question. The
+link map knew who serves and calls an endpoint, not which calls, events and tables a handler
+goes on to reach.
+
+**Rejected first:** five pre-written journey pages per system. A web UI has many flows, each
+hitting several APIs that run their own logic against their own databases, so five pages cover a
+small slice, and nothing shows what's missing. Neither DeepWiki nor Google Code Wiki writes
+journeys across repos; tools that handle flows across services map the links and trace them when
+asked.
+
+**What was built:**
+- A third run in the links step. For each entry point (route, event handler, gRPC method served),
+  and each job or UI action it finds, it answers what handling reaches: exit points, tables read
+  or written, or nothing. Each answer is a chain of steps, checked without AI.
+- The trace is worked out when asked (`follow`), with no AI: exits to whoever serves or handles
+  them, and table writes to the same repo's jobs that poll the table.
+- Exit points nothing reaches are counted on every sync, as a measure of what the run may have
+  missed.
+
+**Design calls, from evidence:**
+- **No depth limit.** A visited set stops loops. Alibaba's production traces peak at depth 3,
+  with more than 4% of call graphs deeper than 10. On eShop the order flow is 9 deep, so a limit
+  of 8 would have cut off the most important flow in the repo.
+- **Width is folded in the output instead:** up to 5 things per step in concise answers. Fan-out
+  measured median 2, 90th percentile 5 on eShop (the production median is 4).
+- **A table write continues only to jobs** that poll the table. A route reading the same table is
+  set off by its own callers. The first version continued to every reader, and the trace became
+  noise.
+- **Tables are matched within a repo** whatever their schema, quotes or case (`ordering.orders`
+  is `Orders`), and are named but not linked between repos (B2b).
+
+**Gate** (a snapshot of the real store; about $9 in all, more than the $5 estimate, because eShop
+was traced twice while the check was fixed):
+- **eShop:** 189 checked chains, 3 dropped, and no exit point left without a trigger ($2.89,
+  280s). The first run left 8 without one: the grace-period job was dropped for a line a few off,
+  and UI actions were named by description. A found job is now taken at the line naming it, names
+  must be code names, and a second look asks about any exit point nothing reaches.
+- **The order trace** (`POST /api/orders --follow`), reading each hop's cited lines:
+  - the order is saved to `orders`;
+  - the grace-period job polls it and publishes `GracePeriodConfirmed`;
+  - Ordering sets awaiting validation;
+  - Catalog confirms or rejects stock;
+  - payment succeeds or fails;
+  - the order is paid and Catalog removes stock, or it is cancelled.
+
+  That matches the place-order page a person checked. Nine hops were spot-checked against the
+  code, all right. "Started from" names the web and mobile checkouts.
+- **RealWorld:** `POST /api/articles` shows all four APIs with the tables each writes, started
+  from react-web's `Editor`. laravel-api first kept 1 chain of 22: its routes are declared in
+  `routes/api.php` and handled in controllers, and the check required the chain to start in the
+  declaring file. A chain may now start in a file the declaration names (`'AuthController@login'`).
+  23 chains after the fix.
+- **An entry point no chain holds for** was asked again on every sync ($0.22 a time on eShop). It
+  is now recorded with why, and asked again only when its code changes.
+- **A fresh session** asked what changing order creation would set off. It called
+  `brain_find_consumers` with follow, read no code, cost $0.09, and named the databases touched.
+  It started from the `OrderStarted` event rather than the endpoint, so it missed the chain behind
+  the orders table. Agents choosing where to start is a matter for H1.
+
+**From Rafe's run on the real store** (about $4 for all seven repos; the order trace and a fresh
+session matched the gate): laravel-api dropped 8 table chains, because Eloquent writes `users`
+through the `User` model, so the table's name never appears. The singular now counts too, as in
+Rails and Django. react-web listed 11 components that call nothing; a found UI action that reaches
+nothing is now skipped quietly.
+
+**Still open:**
+- Chains through a mediator or service are dropped when the run skips the step that defines the
+  linking name (aspnet-api 27 of 103, express-api 4).
+- Calls whose URL is only known at run time can't be linked.

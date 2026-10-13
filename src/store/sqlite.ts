@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { FactCheck, FactRecord, Gap, GapSummary, NewFact } from "../core/facts.js";
 import type { Seam, SeamCoverage, SeamKind } from "../core/seams.js";
 import type { SystemRecord } from "../core/systems.js";
+import type { TraceLink, TraceTarget } from "../core/traces.js";
 import { BrainError, type FileRecord, type LanguageShare, type PageKind, type PlannedPage, type RepoNote, type RepoRecord, type RepoState, type WikiPage } from "../core/types.js";
 import { MIGRATIONS } from "./migrations.js";
 import { indexPage, indexSeam, SEARCH_WEIGHTS } from "./search-index.js";
@@ -307,6 +308,49 @@ export class SqliteStore implements Store {
   private searchCounts(where: string, params: string[]): { total: number; repos: string[] } {
     const rows = this.db.prepare(`SELECT repo, COUNT(*) AS n FROM search WHERE ${where} GROUP BY repo ORDER BY repo`).all(...params) as Row[];
     return { total: rows.reduce((sum, row) => sum + Number(row.n), 0), repos: rows.map((row) => String(row.repo)) };
+  }
+
+  traceLinks(repo: string): TraceLink[] {
+    const rows = this.db.prepare("SELECT * FROM trace_links WHERE repo = ? ORDER BY id").all(repo) as Row[];
+    return rows.map((row): TraceLink => {
+      const type = String(row.target_type) as TraceTarget["type"];
+      const target: TraceTarget =
+        type === "exit"
+          ? { type, ref: String(row.target) }
+          : type === "table"
+            ? { type, name: String(row.target), access: String(row.access) as "read" | "write" }
+            : type === "unmapped"
+              ? { type, reason: String(row.target) }
+              : { type: "none" };
+      return {
+        repo: String(row.repo),
+        entry: String(row.entry),
+        entryKind: String(row.entry_kind) as TraceLink["entryKind"],
+        entryLabel: String(row.entry_label),
+        entryPath: String(row.entry_path),
+        entryLine: Number(row.entry_line),
+        target,
+        steps: JSON.parse(String(row.steps)) as TraceLink["steps"],
+        commit: String(row.commit_sha),
+      };
+    });
+  }
+
+  replaceTraceLinks(repo: string, entries: readonly string[] | null, links: readonly TraceLink[]): void {
+    const insert = this.db.prepare(
+      `INSERT INTO trace_links (repo, entry, entry_kind, entry_label, entry_path, entry_line, target_type, target, access, steps, commit_sha)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const remove = this.db.prepare("DELETE FROM trace_links WHERE repo = ? AND entry = ?");
+    this.transaction(() => {
+      if (entries === null) this.db.prepare("DELETE FROM trace_links WHERE repo = ?").run(repo);
+      else for (const entry of entries) remove.run(repo, entry);
+      for (const l of links) {
+        const target = l.target.type === "exit" ? l.target.ref : l.target.type === "table" ? l.target.name : l.target.type === "unmapped" ? l.target.reason : null;
+        const access = l.target.type === "table" ? l.target.access : null;
+        insert.run(repo, l.entry, l.entryKind, l.entryLabel, l.entryPath, l.entryLine, l.target.type, target, access, JSON.stringify(l.steps), l.commit);
+      }
+    });
   }
 
   systems(): SystemRecord[] {

@@ -130,6 +130,38 @@ grepping, and five fixed pages can't hold that for a repo of twenty projects.
   once; `brain add` and `brain sync` take three repos at a time; one cap of four Claude Code runs
   covers everything a command does.
 
+## Following a flow (B4b)
+
+A planner's question "what does changing this set off?" is downstream: the link map knew who
+serves and calls an endpoint, but not which calls or events a handler goes on to make.
+
+- **A third run in the links step** (`src/ai/traces.ts`, `prompts/list-traces.md`) gets the
+  repo's entry points (routes, event handlers, gRPC methods served) and exit points (calls, events
+  published, gRPC calls), all already verified. For each entry point, and each job or UI action it
+  finds, it answers what handling reaches: exit points, tables read or written, or nothing.
+- **Each answer is a chain of steps, checked without AI** (`chainProblem`):
+  - every step's lines exist, at most 80;
+  - the first is in the entry point's file;
+  - each step's linking name (the function called, or the command or type a mediator or bus
+    dispatches) appears in it and in the next;
+  - the last covers the exit point's own line, or names the table.
+
+  A chain that fails is dropped, and an entry point left with none is asked once more. An entry
+  point that reaches nothing is stored as a cited fact, so "ends here" is never a guess.
+- **Stored** in `trace_links` (migration 16) by refs, not row ids, so re-mapping links doesn't
+  orphan them. Updates move chains through diffs when only lines around them changed; an entry
+  point is followed again only when lines its chains cite change; jobs and UI actions are looked
+  for in added files and in files whose jobs changed. Exit points no chain reaches are reported.
+- **The trace** (`src/serve/trace.ts`) is built when asked, with no AI:
+  - an exit point leads to whoever serves or handles it, in any readable repo or the same one;
+  - a table write in a repo leads to that repo's entry points that read the table;
+  - tables aren't followed between repos.
+
+  There's no depth limit: a visited set stops loops, and loops show as loops. Concise output shows
+  up to five things reached per step (the median fan-out in Alibaba's and Meta's production traces
+  is four) and counts the rest; detailed shows all. Repos the caller can't read are counted, not
+  named.
+
 ## MCP tools
 
 A few broad tools, all read-only but `brain_record_fact`. Short answers by default, `format: "detailed"` on request,
