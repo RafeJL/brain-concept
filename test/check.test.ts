@@ -57,6 +57,11 @@ describe("parseCitations", () => {
 });
 
 describe("checkPage", () => {
+  it("counts the folder of a cited file as named in it", () => {
+    const checked = checkPage("# T\n\nThe routes live in `src` [src/articles.ts:3].\n\nThe API is in `lib` [src/articles.ts:3].\n", repo());
+    expect(checked.removed.map((r) => r.reason)).toEqual(["`lib` isn't in the cited lines"]);
+  });
+
   it("keeps supported claims, removes the rest, and says why", () => {
     const checked = checkPage(PAGE, repo());
 
