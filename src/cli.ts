@@ -1,7 +1,8 @@
-import { dirname, join, resolve } from "node:path";
+import { existsSync, rmSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { localPerson, resolveDbPath } from "./config.js";
+import { clonesDir, locksDir, localPerson, resolveDbPath } from "./config.js";
 import type { FactKind, FactRecord } from "./core/facts.js";
 import { anchorProblems, parseAnchor } from "./ingest/facts.js";
 import { confirmFact, factLine, factsAbout, visibleFacts } from "./serve/facts.js";
@@ -9,12 +10,26 @@ import { checkFacts, type FactChecksResult } from "./ai/fact-checks.js";
 import { findSystem } from "./serve/systems.js";
 import { recordFact } from "./serve/tools/record-fact.js";
 import { runQueued } from "./core/queue.js";
-import { listTree, resolveCommit, withWorktree } from "./core/git.js";
+import { stripCredentials, withWorktree } from "./core/git.js";
 import { familyOf } from "./core/seams.js";
 import { BrainError, type RepoNote, type RepoRecord } from "./core/types.js";
 import { doctor, execProgram, formatChecks } from "./doctor.js";
-import { hookStatus, installHook, removeHook, type HookCommand } from "./ingest/hooks.js";
-import { confirmProposedNote, enrolRepo, removeRepo, requireRepo, setRepoNote, setRepoRef } from "./ingest/registry.js";
+import {
+  checkCanEnrol,
+  costText,
+  enrolSource,
+  estimateEnrolment,
+  estimateText,
+  fileCount,
+  isBrainClone,
+  liveStatus,
+  parseRemote,
+  resolveSource,
+  trackEnrolment,
+  type EnrolmentProgress,
+} from "./ingest/enrol.js";
+import { brainCommand, hookStatus, installHook, removeHook } from "./ingest/hooks.js";
+import { confirmProposedNote, removeRepo, requireRepo, setRepoNote, setRepoRef } from "./ingest/registry.js";
 import { syncRepo, type SyncResult } from "./ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy } from "./serve/access.js";
 import { describeFreshness, freshnessOf } from "./serve/freshness.js";
@@ -39,9 +54,11 @@ const HELP = `brain: organisation-wide context for coding agents
 
 Get started:
   brain doctor                                             check Node, git, Claude Code and the MCP registration
-  brain add <path> [<path>...] [--name <name>] [--note "<focus>"] [--no-hook] [--no-ai]
-                                                           add repos: index them, have Claude Code write their wikis
-                                                           and map their links (3 at a time), and keep them up to date
+  brain add <repo> [<repo>...] [--name <name>] [--note "<focus>"] [--no-hook] [--no-ai]
+                                                           add repos: a local clone, a GitHub URL or owner/repo (cloned
+                                                           into ${clonesDir()}); index them, have Claude Code write
+                                                           their wikis and map their links (3 at a time), and keep
+                                                           them up to date
 
 Keep repos up to date:
   brain sync [<name>] [--full] [--only links|wiki|facts] [--no-ai] [--model <m>]
@@ -53,9 +70,10 @@ Keep repos up to date:
   brain note <name> ["<focus>" | --clear | --confirm]      what a repo's wiki should focus on, e.g. "Ordering matters
                                                            most"; --confirm applies one an agent proposed
   brain wiki plan <name>                                   a large repo's page plan: its areas, flows and what's written
-  brain repo add <path> [--name <name>] [--ref <branch>]   enrol only (no AI); then brain sync <name>
+  brain repo add <repo> [--name <name>] [--ref <branch>]   enrol only (no AI); then brain sync <name>
   brain repo set-ref <name> <ref>                          track a different branch, e.g. origin/release
-  brain repo remove <name>                                 remove a repo, everything held about it, and its hook
+  brain repo remove <name>                                 remove a repo, everything held about it, its hook, and
+                                                           the brain's clone of it if it made one
 
 See what an agent gets:
   brain search "<query>" [--repo <name>]... [--detailed]   search every repo's wiki and endpoints
@@ -141,7 +159,10 @@ async function main(argv: string[]): Promise<void> {
     switch (command) {
       case "repo":
         if (sub === "add" && arg) {
-          const repo = await enrolRepo(store, { path: arg, name: values.name, ref: values.ref });
+          const source = await resolveSource(arg, { name: values.name });
+          checkCanEnrol(store, source.name);
+          if (source.url && !store.getRepo(source.name)) console.log(`Cloning ${stripCredentials(source.url)} into ${source.path}`);
+          const repo = await enrolSource(store, source, { ref: values.ref });
           console.log(`Enrolled ${repo.name} (tracking ${repo.ref}) from ${repo.path}`);
           console.log(`Next: brain sync ${repo.name}`);
         } else if (sub === "list") {
@@ -150,15 +171,13 @@ async function main(argv: string[]): Promise<void> {
           await setRepoRef(store, arg, extra);
           console.log(`${arg} now tracks ${extra}. Next: brain sync ${arg}`);
           if ((await hookStatus(store, arg)).installed) {
-            await installHook(store, arg, hookCommand());
+            await installHook(store, arg, brainCommand());
             console.log(`Its hook now watches ${extra}.`);
           }
         } else if (sub === "remove" && arg) {
-          if (store.getRepo(arg)) await removeHook(store, arg);
-          removeRepo(store, arg);
-          console.log(`Removed ${arg}, everything the brain held about it, and its hook.`);
+          await removeEverything(store, arg);
         } else {
-          throw new BrainError("Usage: brain repo add <path> | list | set-ref <name> <ref> | remove <name>");
+          throw new BrainError("Usage: brain repo add <path, GitHub URL or owner/repo> | list | set-ref <name> <ref> | remove <name>");
         }
         break;
       case "sync": {
@@ -172,11 +191,11 @@ async function main(argv: string[]): Promise<void> {
         break;
       }
       case "add": {
-        const paths = positionals.slice(1);
-        if (paths.length === 0) throw new BrainError('Usage: brain add <path> [<path>...] [--name <name>] [--note "<focus>"] [--no-hook] [--no-ai]');
-        if (paths.length > 1 && (values.name || values.note)) throw new BrainError("--name and --note apply to one repo; add it on its own.");
+        const sources = positionals.slice(1);
+        if (sources.length === 0) throw new BrainError('Usage: brain add <path, GitHub URL or owner/repo> [...] [--name <name>] [--note "<focus>"] [--no-hook] [--no-ai]');
+        if (sources.length > 1 && (values.name || values.note)) throw new BrainError("--name and --note apply to one repo; add it on its own.");
         const note = values.note ? { text: values.note, by: await localPerson(), at: new Date().toISOString() } : undefined;
-        await addRepos(store, paths, { name: values.name, ref: values.ref, note, model: values.model, ai: !values["no-ai"], hook: !values["no-hook"] });
+        await addRepos(store, sources, { name: values.name, ref: values.ref, note, model: values.model, ai: !values["no-ai"], hook: !values["no-hook"] });
         break;
       }
       case "note":
@@ -192,7 +211,7 @@ async function main(argv: string[]): Promise<void> {
           dbPath: resolve(resolveDbPath()),
           nodeVersion: process.versions.node,
           exec: execProgram,
-          hook: hookCommand(),
+          hook: brainCommand(),
           mcpEntry: fileURLToPath(new URL("../bin/brain-mcp.mjs", import.meta.url)),
         });
         console.log(formatChecks(checks, store.listRepos().length > 0));
@@ -260,37 +279,73 @@ const MAX_RUNS = 4;
 const MAX_REPOS = 3;
 const runner = limitRunner(claudeRunner, MAX_RUNS);
 
+/** A step of a sync that failed while the others carried on: what it was doing, and why it failed. */
+interface StepFailure {
+  doing: string;
+  error: string;
+}
+
 /**
  * Syncs a repo, then has Claude Code bring its links, its wiki and its fact checks up to the new
  * commit. The three read the same commit and don't depend on each other, so they go side by side
  * in one worktree, and the sync takes as long as the slowest. One sync per repo at a time: a hook
  * firing mid-run is folded into one more pass when this one finishes. A failed step is reported
- * and the others still finish.
+ * and returned, and the others still finish. An enrolment's `progress` hears each step as it goes.
  */
-async function syncAndRefresh(store: Store, name: string, options: { model?: string; full?: boolean; only?: Step }): Promise<void> {
+async function syncAndRefresh(store: Store, name: string, options: { model?: string; full?: boolean; only?: Step; progress?: EnrolmentProgress }): Promise<StepFailure[]> {
   let full = options.full;
-  const outcome = await runQueued(join(dirname(resolveDbPath()), "locks"), name, async () => {
+  const { progress } = options;
+  let failures: StepFailure[] = [];
+  const outcome = await runQueued(locksDir(), name, async () => {
+    progress?.step("indexing it");
     const synced = await syncRepo(store, name);
     printSync(synced);
-    const steps: Record<Step, [string, (cwd: string) => Promise<void>]> = {
+    failures = [];
+    const spent = <T extends { costUsd: number }>(result: T): T => {
+      progress?.spent(result.costUsd);
+      return result;
+    };
+    const steps: Record<Step, [string, string, (cwd: string) => Promise<void>]> = {
       // What each entry point leads to depends on the links just mapped, so it follows them in the same step.
       links: [
         "routes and calls",
+        "mapping its links",
         async (cwd) => {
-          printSeams(await updateSeams(store, runner, name, { model: options.model, full, cwd }));
-          printTraces(await updateTraces(store, runner, name, { model: options.model, full, cwd }));
+          printSeams(spent(await updateSeams(store, runner, name, { model: options.model, full, cwd })));
+          progress?.part("links", "tracing what each entry point leads to");
+          printTraces(spent(await updateTraces(store, runner, name, { model: options.model, full, cwd })));
         },
       ],
-      wiki: ["wiki", async (cwd) => printWiki(await generateWiki(store, runner, name, { model: options.model, full, cwd }))],
-      facts: ["fact checks", async (cwd) => printChecks(await checkFacts(store, runner, name, { model: options.model, full, cwd }))],
+      wiki: [
+        "wiki",
+        "writing the wiki",
+        async (cwd) => {
+          const onPages = (done: number, total: number) => progress?.part("wiki", `writing the wiki (${done} of ${count(total, "page")})`);
+          printWiki(spent(await generateWiki(store, runner, name, { model: options.model, full, cwd, onPages })));
+        },
+      ],
+      facts: [
+        "fact checks",
+        "checking facts from people against the code",
+        async (cwd) => printChecks(spent(await checkFacts(store, runner, name, { model: options.model, full, cwd }))),
+      ],
     };
     const chosen = (Object.keys(steps) as Step[]).filter((step) => !options.only || options.only === step);
     await withWorktree(requireRepo(store, name).path, synced.commit, (cwd) =>
-      Promise.all(chosen.map((step) => reported(name, steps[step][0], () => steps[step][1](cwd)))),
+      Promise.all(
+        chosen.map(async (step) => {
+          const [label, doing, work] = steps[step];
+          progress?.part(step, doing);
+          const error = await reported(name, label, () => work(cwd));
+          progress?.part(step, null);
+          if (error) failures.push({ doing, error });
+        }),
+      ),
     );
     full = false;
   });
   if (outcome === "queued") console.log(`${name}: already being synced; that run will go again to pick this up.`);
+  return failures;
 }
 
 /** Runs `work` on each item, at most `max` at once. One item's BrainError is reported and the rest carry on. */
@@ -311,12 +366,15 @@ async function eachAtOnce<T>(items: readonly T[], max: number, label: (item: T) 
   await Promise.all(Array.from({ length: Math.min(max, items.length) }, worker));
 }
 
-async function reported(name: string, step: string, work: () => Promise<void>): Promise<void> {
+/** Runs one step of a sync; a BrainError is reported and returned rather than thrown, so the others finish. */
+async function reported(name: string, step: string, work: () => Promise<void>): Promise<string | null> {
   try {
     await work();
+    return null;
   } catch (error) {
     if (!(error instanceof BrainError)) throw error;
     console.error(`${name}: ${step} not updated: ${error.message}`);
+    return error.message;
   }
 }
 
@@ -388,16 +446,6 @@ function printTraces(result: TracesResult): void {
   if (result.dropped.length > 3) console.log(`    … and ${result.dropped.length - 3} more`);
 }
 
-/** How the hook should run this CLI: absolute paths, since hooks get no predictable PATH. */
-function hookCommand(): HookCommand {
-  return {
-    node: process.execPath,
-    brain: fileURLToPath(new URL("../bin/brain.mjs", import.meta.url)),
-    dbPath: process.env.BRAIN_DB,
-    logPath: join(dirname(resolveDbPath()), "hooks.log"),
-  };
-}
-
 async function hooks(store: Store, action: string | undefined, name: string | undefined): Promise<void> {
   const names = name ? [name] : store.listRepos().map((repo) => repo.name);
   if (action === "status") {
@@ -408,10 +456,10 @@ async function hooks(store: Store, action: string | undefined, name: string | un
     }
   } else if (action === "install") {
     for (const repoName of names) {
-      const path = await installHook(store, repoName, hookCommand());
+      const path = await installHook(store, repoName, brainCommand());
       console.log(`${repoName}: installed ${path}`);
     }
-    console.log(`Background syncs log to ${hookCommand().logPath}`);
+    console.log(`Background syncs log to ${brainCommand().logPath}`);
   } else if (action === "remove") {
     for (const repoName of names) console.log(`${repoName}: ${(await removeHook(store, repoName)) ? "removed" : "no hook installed"}`);
   } else {
@@ -419,81 +467,138 @@ async function hooks(store: Store, action: string | undefined, name: string | un
   }
 }
 
+/** "being enrolled: writing the wiki (2 of 6 pages)", or how an enrolment ended badly; null once it's done. */
+function enrolmentState(store: Store, name: string): string | null {
+  const enrolment = store.enrolment(name);
+  if (!enrolment) return null;
+  const status = liveStatus(enrolment);
+  if (status === "done") return null;
+  return status === "running" ? `being enrolled: ${enrolment.step}` : `enrolment ${status} while ${enrolment.step}`;
+}
+
 async function listRepos(store: Store): Promise<void> {
   const repos = store.listRepos();
-  if (repos.length === 0) {
-    console.log("No repos enrolled. Add one with: brain add <path>");
+  // Being cloned, or failed before it was enrolled.
+  const pending = store.enrolments().filter((e) => !store.getRepo(e.repo) && enrolmentState(store, e.repo));
+  if (repos.length === 0 && pending.length === 0) {
+    console.log("No repos enrolled. Add one with: brain add <path, GitHub URL or owner/repo>");
     return;
   }
   for (const repo of repos) {
     const state = store.getState(repo.name);
-    const status = state ? describeFreshness(await freshnessOf(repo, state), repo.ref) : "not synced";
+    const status = enrolmentState(store, repo.name) ?? (state ? describeFreshness(await freshnessOf(repo, state), repo.ref) : "not synced");
     console.log(`${repo.name.padEnd(32)} ${status.padEnd(34)} ${repo.path}`);
   }
+  for (const enrolment of pending) console.log(`${enrolment.repo.padEnd(32)} ${enrolmentState(store, enrolment.repo)!.padEnd(34)} ${enrolment.source}`);
 }
 
 /**
- * Everything a person trying the brain needs for some repos: enrol them, index them, have Claude
- * Code write their wikis and map their links, and install the hooks that keep them current. Says
- * roughly what the AI step costs before it starts. Repos go side by side, and each is answerable
- * (its card, its files) as soon as it's indexed, before its wiki is written.
+ * `brain repo remove`: everything the brain holds about a repo, its hook, and the clone the brain
+ * made of it, if it made one. An enrolment that failed before the repo was enrolled is forgotten
+ * the same way. Refuses while another process is enrolling it.
+ */
+async function removeEverything(store: Store, name: string): Promise<void> {
+  const enrolment = store.enrolment(name);
+  if (enrolment && liveStatus(enrolment) === "running") {
+    throw new BrainError(`${name} is being enrolled (${enrolment.step}). Wait for it to finish, or stop it first: Stop-Process -Id ${enrolment.pid ?? "?"}`);
+  }
+  const repo = store.getRepo(name);
+  if (repo) {
+    await removeHook(store, name);
+    removeRepo(store, name);
+  } else if (!store.removeEnrolment(name)) {
+    throw new BrainError(`No repo named "${name}" is enrolled.`);
+  }
+  const clone = repo?.path ?? (enrolment && parseRemote(enrolment.source) ? join(clonesDir(), name) : null);
+  const ours = clone !== null && isBrainClone(clone) && existsSync(clone);
+  if (ours) rmSync(clone, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  console.log(`Removed ${name}, everything the brain held about it, ${ours ? `its hook, and the brain's clone of it (${clone})` : "and its hook"}.`);
+}
+
+/**
+ * Everything a person trying the brain needs for some repos: clone the ones given as GitHub URLs,
+ * enrol them, index them, have Claude Code write their wikis and map their links, and install the
+ * hooks that keep them current. Says roughly what the AI step costs before it starts. Repos go side
+ * by side, and each is answerable (its card, its files) as soon as it's indexed, before its wiki is
+ * written. Each records how far it has got, so a card read meanwhile (in a terminal or in Claude
+ * Code) says, and a repo whose enrolment failed or stopped can be added again to finish it.
  */
 async function addRepos(
   store: Store,
-  paths: readonly string[],
+  sources: readonly string[],
   options: { name?: string; ref?: string; note?: RepoNote; model?: string; ai: boolean; hook: boolean },
 ): Promise<void> {
-  const repos: RepoRecord[] = [];
-  for (const path of paths) {
+  const added: { repo: RepoRecord; progress: EnrolmentProgress }[] = [];
+  for (const given of sources) {
+    let progress: EnrolmentProgress | undefined;
     try {
-      const repo = await enrolRepo(store, { path, name: options.name, ref: options.ref, note: options.note });
-      console.log(`Added ${repo.name}, tracking ${repo.ref}, from ${repo.path}`);
-      repos.push(repo);
+      const source = await resolveSource(given, { name: options.name });
+      checkCanEnrol(store, source.name);
+      progress = trackEnrolment(store, source);
+      const again = store.getRepo(source.name) !== undefined;
+      if (source.url && !again) console.log(`Cloning ${stripCredentials(source.url)} into ${source.path}`);
+      const repo = await enrolSource(store, source, { ref: options.ref, note: options.note, progress });
+      console.log(`${again ? "Finishing enrolling" : "Added"} ${repo.name}, tracking ${repo.ref}, from ${repo.path}`);
+      added.push({ repo, progress });
     } catch (error) {
-      if (!(error instanceof BrainError) || paths.length === 1) throw error;
-      console.error(`${path}: not added: ${error.message}`);
+      if (error instanceof BrainError) progress?.fail(error.message);
+      if (!(error instanceof BrainError) || sources.length === 1) throw error;
+      console.error(`${given}: not added: ${error.message}`);
       process.exitCode = 1;
     }
   }
-  if (options.ai) {
-    const estimates = await Promise.all(repos.map(estimate));
-    for (const e of estimates) console.log(`${e.repo}: ${e.files} files, roughly $${e.cost[0]}–${e.cost[1]} and ${e.minutes[0]}–${e.minutes[1]} minutes`);
-    const most = Math.max(...estimates.map((e) => e.minutes[1]));
-    const total = (i: 0 | 1) => estimates.reduce((sum, e) => sum + e.cost[i], 0);
+  // Each repo's size goes on its enrolment either way, for later estimates to go by.
+  const sized = await Promise.all(
+    added.map(async ({ repo, progress }) => {
+      const files = await fileCount(repo.path, repo.ref);
+      const estimate = estimateEnrolment(store, files);
+      progress.sized(files, options.ai ? estimate : null);
+      return { repo: repo.name, estimate };
+    }),
+  );
+  if (options.ai && added.length) {
+    for (const { repo, estimate } of sized) console.log(`${repo}: ${estimateText(estimate)}`);
+    const most = Math.max(...sized.map((s) => s.estimate.minutes[1]));
+    const total = (i: 0 | 1) => sized.reduce((sum, s) => sum + s.estimate.costUsd[i], 0);
     console.log(
-      `Claude Code will now read ${repos.length === 1 ? "it" : `them, ${Math.min(MAX_REPOS, repos.length)} at a time`} to map links and write wikis: ` +
-        `roughly $${total(0)}–${total(1)} of your Claude Code allowance${repos.length > 1 ? `, finishing in about ${most}+ minutes` : ""}. Later updates cost cents.`,
+      `Claude Code will now read ${added.length === 1 ? "it" : `them, ${Math.min(MAX_REPOS, added.length)} at a time`} to map links and write wikis: ` +
+        `roughly ${costText([total(0), total(1)])} of your Claude Code allowance${added.length > 1 ? `, finishing in about ${most}+ minutes` : ""}. Later updates cost cents.`,
     );
   }
-  await eachAtOnce(repos, MAX_REPOS, (repo) => repo.name, async (repo) => {
-    if (options.ai) await syncAndRefresh(store, repo.name, { model: options.model });
-    else printSync(await syncRepo(store, repo.name));
-    if (!options.hook) return;
+  await eachAtOnce(added, MAX_REPOS, ({ repo }) => repo.name, async ({ repo, progress }) => {
     try {
-      await installHook(store, repo.name, hookCommand());
-      console.log(`${repo.name}: will re-sync in the background whenever ${repo.ref} moves (log: ${hookCommand().logPath})`);
+      let failures: StepFailure[] = [];
+      if (options.ai) failures = await syncAndRefresh(store, repo.name, { model: options.model, progress });
+      else {
+        progress.step("indexing it");
+        printSync(await syncRepo(store, repo.name));
+      }
+      if (options.hook) {
+        progress.step("installing its hook");
+        try {
+          await installHook(store, repo.name, brainCommand());
+          console.log(`${repo.name}: will re-sync in the background whenever ${repo.ref} moves (log: ${brainCommand().logPath})`);
+        } catch (error) {
+          if (!(error instanceof BrainError)) throw error;
+          console.log(`${repo.name}: no hook installed (${error.message}). Run brain sync ${repo.name} after pulling.`);
+        }
+      }
+      if (failures.length) progress.fail(failures.map((f) => f.error).join("; "), failures.map((f) => f.doing).join(" and "));
+      else progress.done();
     } catch (error) {
-      if (!(error instanceof BrainError)) throw error;
-      console.log(`${repo.name}: no hook installed (${error.message}). Run brain sync ${repo.name} after pulling.`);
+      if (error instanceof BrainError) progress.fail(error.message);
+      throw error;
     }
   });
-  for (const repo of repos) {
+  for (const { repo } of added) {
     const hint = joinHint(store, repo.name);
     if (hint) console.log(hint);
   }
-  if (repos.length === 0) return;
-  const first = repos[0]!.name;
+  if (added.length === 0) return;
+  const first = added[0]!.repo.name;
   console.log("");
-  const later = repos.length === 1 ? `Next: brain sync ${first} to have Claude Code write its wiki` : "Next: brain sync to have Claude Code write their wikis";
+  const later = added.length === 1 ? `Next: brain sync ${first} to have Claude Code write its wiki` : "Next: brain sync to have Claude Code write their wikis";
   console.log(options.ai ? `Next: ask Claude Code "what does ${first} do?", or run: brain card ${first}` : later);
-}
-
-/** Rough first-sync cost and time from a repo's size, measured on the trial repos. */
-async function estimate(repo: RepoRecord): Promise<{ repo: string; files: number; cost: [number, number]; minutes: [number, number] }> {
-  const files = (await listTree(repo.path, await resolveCommit(repo.path, repo.ref))).length;
-  const [cost, minutes]: [[number, number], [number, number]] =
-    files <= 300 ? [[0.5, 2], [2, 5]] : files <= 1000 ? [[1, 4], [5, 10]] : [[8, 12], [15, 25]];
-  return { repo: repo.name, files, cost, minutes };
 }
 
 /** `brain note <repo> ["<text>" | --clear | --confirm]`: the note that steers a repo's wiki. */

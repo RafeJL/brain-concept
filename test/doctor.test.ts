@@ -35,7 +35,7 @@ describe("brain doctor", () => {
 
     expect(checks.every((check) => check.ok)).toBe(true);
     expect(text).toContain("✓ MCP server");
-    expect(text).toContain("All set. Next: brain add <path to a git repo>");
+    expect(text).toContain('All set. Next: ask Claude Code to "add <GitHub URL or folder> to the brain", or run: brain add <path or GitHub URL>');
   });
 
   it("says how to fix a missing git or Claude Code, and skips the MCP check without Claude Code", async () => {
@@ -81,5 +81,25 @@ describe("brain doctor", () => {
       "Hook: none": "not installed, so it only updates when you run brain sync",
       "Hook: old": "installed by an older brain",
     });
+  });
+
+  it("shows enrolments under way, and says how to finish one that failed", async () => {
+    const store = new SqliteStore(":memory:");
+    await enrolRepo(store, { path: makeRepo({ "a.ts": "1" }), name: "busy" });
+    const at = new Date().toISOString();
+    const base = { error: null, files: null, estimate: null, costUsd: 0, startedAt: at, updatedAt: at, finishedAt: null };
+    // This test's own process stands in for the one enrolling "busy", whose hook comes at the end.
+    store.saveEnrolment({ ...base, repo: "busy", source: "acme/busy", status: "running", step: "writing the wiki (2 of 6 pages)", pid: process.pid });
+    store.saveEnrolment({ ...base, repo: "gone", source: "acme/gone", status: "failed", step: "cloning it", pid: null, error: "git clone failed: Repository not found." });
+
+    const { checks } = await run(machine(["git", "claude"], { "claude mcp get citation-brain": REGISTERED }), store);
+
+    expect(checks.find((c) => c.label === "Enrolling: busy")).toMatchObject({ ok: true, detail: "writing the wiki (2 of 6 pages) (brain card busy shows how far it has got)" });
+    expect(checks.find((c) => c.label === "Enrolling: gone")).toMatchObject({
+      ok: false,
+      detail: "failed while cloning it: git clone failed: Repository not found.",
+      fix: 'Run: brain add "acme/gone" to finish it (it redoes only what\'s missing), or brain repo remove gone',
+    });
+    expect(checks.some((c) => c.label === "Hook: busy")).toBe(false);
   });
 });

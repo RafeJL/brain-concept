@@ -5,7 +5,7 @@ import type { FactCheck, FactRecord, Gap, GapSummary, NewFact } from "../core/fa
 import type { Seam, SeamCoverage, SeamKind } from "../core/seams.js";
 import type { SystemRecord } from "../core/systems.js";
 import type { TraceLink, TraceTarget } from "../core/traces.js";
-import { BrainError, type FileRecord, type LanguageShare, type PageKind, type PlannedPage, type RepoNote, type RepoRecord, type RepoState, type WikiPage } from "../core/types.js";
+import { BrainError, type Enrolment, type EnrolmentEstimate, type FileRecord, type LanguageShare, type PageKind, type PlannedPage, type RepoNote, type RepoRecord, type RepoState, type WikiPage } from "../core/types.js";
 import { MIGRATIONS } from "./migrations.js";
 import { indexPage, indexSeam, SEARCH_WEIGHTS } from "./search-index.js";
 import type { FactChange, FactFilter, SearchFilter, SearchPage, SeamFilter, SeamUpdate, SectionHit, Store, SyncUpdate } from "./store.js";
@@ -76,7 +76,34 @@ export class SqliteStore implements Store {
   }
 
   removeRepo(name: string): boolean {
-    return Number(this.db.prepare("DELETE FROM repos WHERE name = ?").run(name).changes) > 0;
+    let removed = false;
+    this.transaction(() => {
+      removed = Number(this.db.prepare("DELETE FROM repos WHERE name = ?").run(name).changes) > 0;
+      this.db.prepare("DELETE FROM enrolments WHERE repo = ?").run(name);
+    });
+    return removed;
+  }
+
+  enrolment(repo: string): Enrolment | undefined {
+    const row = this.db.prepare("SELECT * FROM enrolments WHERE repo = ?").get(repo) as Row | undefined;
+    return row && toEnrolment(row);
+  }
+
+  enrolments(): Enrolment[] {
+    return (this.db.prepare("SELECT * FROM enrolments ORDER BY started_at DESC").all() as Row[]).map(toEnrolment);
+  }
+
+  saveEnrolment(e: Enrolment): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO enrolments (repo, source, status, step, error, pid, files, estimate, cost_usd, started_at, updated_at, finished_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(e.repo, e.source, e.status, e.step, e.error, e.pid, e.files, e.estimate && JSON.stringify(e.estimate), e.costUsd, e.startedAt, e.updatedAt, e.finishedAt);
+  }
+
+  removeEnrolment(repo: string): boolean {
+    return Number(this.db.prepare("DELETE FROM enrolments WHERE repo = ?").run(repo).changes) > 0;
   }
 
   getState(repo: string): RepoState | undefined {
@@ -629,6 +656,24 @@ function toSeam(row: Row): Seam {
     endLine: Number(row.end_line),
     cites: JSON.parse(String(row.cites)) as Seam["cites"],
     commit: String(row.commit_sha),
+  };
+}
+
+function toEnrolment(row: Row): Enrolment {
+  const optional = (value: unknown) => (value === null ? null : String(value));
+  return {
+    repo: String(row.repo),
+    source: String(row.source),
+    status: String(row.status) as Enrolment["status"],
+    step: String(row.step),
+    error: optional(row.error),
+    pid: row.pid === null ? null : Number(row.pid),
+    files: row.files === null ? null : Number(row.files),
+    estimate: row.estimate === null ? null : (JSON.parse(String(row.estimate)) as EnrolmentEstimate),
+    costUsd: Number(row.cost_usd),
+    startedAt: String(row.started_at),
+    updatedAt: String(row.updated_at),
+    finishedAt: optional(row.finished_at),
   };
 }
 

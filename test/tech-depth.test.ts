@@ -172,6 +172,18 @@ describe("a large repo's wiki", () => {
     expect(store.getState("shop")?.planCommit).toBe(wiki.commit);
   });
 
+  it("says how many of its pages are written as each run finishes, for an enrolment's progress", async () => {
+    const { store } = await shop();
+    const seen: string[] = [];
+
+    await generateWiki(store, shopRunner().runner, "shop", { onPages: (done, total) => seen.push(`${done}/${total}`) });
+
+    // The plan's 10 pages, then three runs of at most four, finishing in any order.
+    expect(seen[0]).toBe("0/10");
+    expect(seen).toHaveLength(4);
+    expect(seen.at(-1)).toBe("10/10");
+  });
+
   it("keeps the pages of the runs that worked when one run fails", async () => {
     const { store } = await shop();
     const { runner } = shopRunner(PLAN, { fail: "ordering" });

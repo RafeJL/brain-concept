@@ -155,6 +155,8 @@ export interface WikiOptions {
   full?: boolean;
   /** A worktree of the indexed commit, shared with sync's other steps; one is made if not given. */
   cwd?: string;
+  /** Told how many of the pages being written are done, once the number to write is known. */
+  onPages?: (done: number, total: number) => void;
 }
 
 export interface WikiResult {
@@ -210,11 +212,18 @@ export async function generateWiki(store: Store, runner: Runner, name: string, o
     modelUsed = result.model;
     return validPages(result.output, slugs);
   };
+  // Pages written so far out of those this run writes, for anyone watching (retries aren't counted).
+  const progress = { done: 0, total: 0 };
+  const tally = (pages: number, more = 0) => {
+    progress.done += pages;
+    progress.total += more;
+    if (progress.total) options.onPages?.(progress.done, progress.total);
+  };
   /**
    * Runs of at most BATCH_PAGES pages, side by side. A run that fails counts its pages as failed
    * (empty), so they're retried or keep their old versions; the other runs' pages stand.
    */
-  const inBatches = async <T extends { slug: string }>(cwd: string, items: readonly T[], ask: (batch: readonly T[]) => string): Promise<DraftPage[]> => {
+  const inBatches = async <T extends { slug: string }>(cwd: string, items: readonly T[], ask: (batch: readonly T[]) => string, counted = true): Promise<DraftPage[]> => {
     const batches: T[][] = [];
     for (let i = 0; i < items.length; i += BATCH_PAGES) batches.push(items.slice(i, i + BATCH_PAGES));
     const drafts = await Promise.all(
@@ -226,6 +235,7 @@ export async function generateWiki(store: Store, runner: Runner, name: string, o
         } catch (error) {
           if (!(error instanceof BrainError)) throw error;
         }
+        if (counted) tally(slugs.length);
         return slugs.map((slug) => got.find((d) => d.slug === slug) ?? { slug, title: slug, markdown: "" });
       }),
     );
@@ -261,11 +271,16 @@ export async function generateWiki(store: Store, runner: Runner, name: string, o
     const carried = new Map<string, WikiPage>();
     let drafts: DraftPage[] = [];
     if (mode === "full") {
-      drafts = planned
-        ? await inBatches(cwd, plan, (batch) => plannedPrompt(plan, batch, note))
-        : await write(cwd, prompt("write-pages", { pages: prompt("pages"), guide: guide([PRODUCT], note) }));
+      if (planned) {
+        tally(0, plan.length);
+        drafts = await inBatches(cwd, plan, (batch) => plannedPrompt(plan, batch, note));
+      } else {
+        // One run picks and writes a small repo's pages, so how many is known once it returns.
+        drafts = await write(cwd, prompt("write-pages", { pages: prompt("pages"), guide: guide([PRODUCT], note) }));
+      }
       // A run that left out pages every wiki has is asked for them on their own, as an update would.
       const left = planned ? [] : [...requiredPages().keys()].filter((slug) => !drafts.some((d) => d.slug === slug));
+      if (!planned) tally(drafts.length, drafts.length + left.length);
       drafts.push(...(await inBatches(cwd, left.map((slug) => ({ slug })), (batch) => addPrompt(batch.map((b) => b.slug), note))));
     } else {
       const stale: WikiPage[] = [];
@@ -284,6 +299,7 @@ export async function generateWiki(store: Store, runner: Runner, name: string, o
       const has = (slug: string) => previous.some((p) => p.slug === slug);
       const newPlanned = retry && planned ? plan.filter((p) => !has(p.slug)) : [];
       const newRequired = retry && !planned ? [...requiredPages().keys()].filter((slug) => !has(slug)).map((slug) => ({ slug })) : [];
+      tally(0, stale.length + newPlanned.length + newRequired.length);
       const written = await Promise.all([
         inBatches(cwd, stale, (batch) => updatePrompt(batch, unionOf(batch.map((p) => changesSince.get(p.commit)!)), note)),
         inBatches(cwd, newPlanned, (batch) => plannedPrompt(plan, batch, note)),
@@ -294,7 +310,7 @@ export async function generateWiki(store: Store, runner: Runner, name: string, o
 
     const checked: Checked[] = drafts.map((draft) => ({ draft, check: checkPage(draft.markdown, cwd), attempts: 1 }));
     const failed = checked.filter((c) => !c.check.publishable).map((c) => ({ ...c, slug: c.draft.slug }));
-    for (const draft of await inBatches(cwd, failed, (batch) => retryPrompt(batch, note))) {
+    for (const draft of await inBatches(cwd, failed, (batch) => retryPrompt(batch, note), false)) {
       // A retry that failed leaves the first attempt's result standing.
       if (!draft.markdown) continue;
       const index = checked.findIndex((c) => c.draft.slug === draft.slug);

@@ -253,4 +253,23 @@ export const MIGRATIONS: (string | ((db: DatabaseSync) => void))[] = [
   `
   ALTER TABLE facts ADD COLUMN confirmed_with TEXT;
   `,
+  // B7: where each enrolment has got to, written by the process doing it (often in the background)
+  // and read by the MCP server. Not tied to repos: a repo being cloned isn't enrolled yet. Finished
+  // ones stay, so the next estimate can go by how long earlier ones took.
+  `
+  CREATE TABLE enrolments (
+    repo        TEXT PRIMARY KEY,
+    source      TEXT NOT NULL,
+    status      TEXT NOT NULL CHECK (status IN ('running', 'failed', 'done')),
+    step        TEXT NOT NULL,
+    error       TEXT,
+    pid         INTEGER,
+    files       INTEGER,
+    estimate    TEXT,
+    cost_usd    REAL NOT NULL DEFAULT 0,
+    started_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    finished_at TEXT
+  );
+  `,
 ];

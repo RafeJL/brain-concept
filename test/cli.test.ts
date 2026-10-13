@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SqliteStore } from "../src/store/sqlite.js";
 import { repoFromFixture, tempDir } from "./helpers.js";
@@ -40,6 +40,30 @@ describe("brain add", () => {
 
     expect(out.match(/^Added /gm)).toHaveLength(2);
     expect(out).toContain("Next: brain sync to have Claude Code write their wikis");
+  }, 60_000);
+
+  it("clones a GitHub URL into the brain's folder and enrols it; repo remove deletes the clone", () => {
+    const dir = tempDir();
+    const dbPath = join(dir, "brain.db");
+    const remotes = join(dir, "remotes");
+    execFileSync("git", ["clone", "--quiet", "--bare", repoFromFixture("articles-api"), join(remotes, "acme", "articles-api.git")]);
+    // git sends https://github.com/ to the bare repos instead, so nothing reaches the network.
+    const env = { ...process.env, BRAIN_DB: dbPath, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: `url.${pathToFileURL(remotes).href}/.insteadOf`, GIT_CONFIG_VALUE_0: "https://github.com/" };
+    const run = (...args: string[]) => execFileSync(process.execPath, [BRAIN, ...args], { encoding: "utf8", env });
+
+    const out = run("add", "https://github.com/acme/articles-api.git", "--no-ai", "--no-hook");
+    const store = new SqliteStore(dbPath);
+    const repo = store.getRepo("articles-api");
+    const enrolment = store.enrolment("articles-api");
+    store.close();
+    const removed = run("repo", "remove", "articles-api");
+
+    expect(out).toContain(`Cloning https://github.com/acme/articles-api.git into ${join(dir, "repos", "articles-api")}`);
+    expect(out).toContain("Added articles-api, tracking origin/main");
+    expect(repo).toMatchObject({ remote: "https://github.com/acme/articles-api.git" });
+    expect(enrolment).toMatchObject({ status: "done", source: "https://github.com/acme/articles-api.git" });
+    expect(removed).toContain("and the brain's clone of it");
+    expect(existsSync(join(dir, "repos", "articles-api"))).toBe(false);
   }, 60_000);
 
   it("leaves hooks alone with --no-hook", () => {

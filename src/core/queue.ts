@@ -52,6 +52,11 @@ function holderAlive(lock: string): boolean {
   const pid = Number(readFileSync(lock, "utf8").trim());
   // No pid yet: just created and being written, unless it was left like that long ago.
   if (!pid) return Date.now() - statSync(lock).mtimeMs < 10_000;
+  return processAlive(pid);
+}
+
+/** Whether a process is still running: how a lock, or a running enrolment, tells it wasn't left by a crash. */
+export function processAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;

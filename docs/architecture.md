@@ -34,8 +34,9 @@ GitHub repos ──on merge─────────────────�
 Curated content repo ──PR merged─────────────────▶ (registry, index, AI runs, checks, gardener)
 ```
 
-Agents only read. The only writes come from merges to main in enrolled repos and merged PRs to
-the curated content repo.
+Agents mostly read. Code facts come only from merges to main in enrolled repos; an agent writes
+only what a person agrees to (facts, notes, systems) and adds a repo only when the person allows it
+(see "Safety"). Hosted, curated content also arrives as merged PRs to the curated content repo.
 
 ## Three kinds of fact
 
@@ -164,7 +165,7 @@ serves and calls an endpoint, but not which calls or events a handler goes on to
 
 ## MCP tools
 
-A few broad tools: six read, four record what a person says. Short answers by default, `format: "detailed"` on request,
+A few broad tools: six read, four record what a person says, and one adds a repo. Short answers by default, `format: "detailed"` on request,
 paginated lists, pointers rather than pasted code. No free-text "ask" tool.
 
 | Tool | Answers | Harness stage | Status |
@@ -179,10 +180,33 @@ paginated lists, pointers rather than pasted code. No free-text "ask" tool.
 | `brain_review` | What's waiting for a person: proposed or stale facts, suggested systems, proposed notes; and gaps | Product brief | Built (B5) |
 | `brain_facts` | Confirms, edits or retires a fact | Product brief | Built (B5) |
 | `brain_systems` | Confirms, sets or renames a system | Product brief | Built (B5) |
+| `brain_add_repo` | Adds a repo (a GitHub URL, owner/repo or a local folder) in the background; its card then shows how far it has got | Any, when the brain lacks a repo | Built (B7) |
 
-Everything a person does with the brain is a tool call; only setup (add, sync, remove, hooks,
-doctor, set-ref) is in the terminal. Tool and parameter names are frozen once the harness names
-them in skills (H1).
+Everything a person does with the brain is a tool call, adding a repo included; only setup and
+tidying (sync, remove, hooks, doctor, set-ref) is in the terminal. Tool and parameter names are
+frozen once the harness names them in skills (H1).
+
+### Adding a repo from Claude Code (B7)
+
+A tool call can't run for the half hour a large repo takes, and MCP shows no progress between
+calls. So:
+- **`brain_add_repo` answers at once.** It records the enrolment, starts the ordinary `brain add`
+  as a detached process (logging to `hooks.log`, syncing under the per-repo lock, as hooks do) and
+  returns an estimate. The process carries on after the session ends.
+- **Progress is in the store** (`enrolments`, migration 18): source, step, error, pid, file
+  count, estimate, cost, times. The process doing it writes it; the MCP server reads it. A running
+  row whose pid is gone reads as stopped.
+- **People ask for it.** The card shows the step (cloning, indexing, mapping links, tracing,
+  writing the wiki k of n pages, the hook) and the estimate; read tools that reach a repo not yet
+  indexed say the same instead of answering; a failure says what failed and that adding again
+  finishes it. The instructions tell agents not to plan from a repo being enrolled.
+- **Sources.** A local folder is enrolled in place. A GitHub URL, `owner/repo` or another git URL
+  is cloned with plain `git` and the person's credentials into `clonesDir()` (`~/.brain/repos`,
+  or `BRAIN_REPOS`). `brain add` takes the same sources through the same code.
+- **Estimates** go by the nearest earlier enrolments of a similar size that ran Claude Code, or
+  else by size bands measured on the trial repos, labelled rough.
+- **Clones nobody pulls** are fetched in the background when an MCP session starts, at most hourly
+  and never prompting; their hooks sync them.
 
 A hit looks like: `orders-web · src/api/orders.ts:42-58 · @9f3c1e2 · 2 commits behind · llm-generated`.
 
@@ -256,7 +280,7 @@ their own API, a service handling its own event) links only within that repo and
 | Trigger | `reference-transaction` git hook (fires on fetch, pull, merge) or `brain sync` | GitHub App webhook → Azure Service Bus |
 | Workers | In the CLI process | Azure Container Apps jobs |
 | MCP transport | stdio | Streamable HTTP behind Entra ID |
-| Source code | Existing local clones | Shallow clones cached per repo |
+| Source code | Existing local clones, or the brain's own clones of GitHub repos | Shallow clones cached per repo |
 | Permissions | Local policy: every enrolled repo | GitHub App + caller identity per request |
 | Curated content | Local folder | GitHub repo, changed through PRs |
 
@@ -270,11 +294,12 @@ their own API, a service handling its own event) links only within that repo and
 
 ## Safety
 
-- Four tools write: facts, notes and systems. A change counts as confirmed only with the
-  person's words agreeing (`confirmed_with`, kept on a fact); without them a fact or note is
-  proposed and other changes are refused. Each is marked `requiresUserInteraction`, so Claude
-  Code asks the person to allow every call, showing what is stored: an agent can't pass that
-  alone, and a headless run can't write. Agents are told to record only what the person said,
+- Five tools write: facts, notes and systems, and adding a repo. A change to facts, notes or
+  systems counts as confirmed only with the person's words agreeing (`confirmed_with`, kept on a
+  fact); without them a fact or note is proposed and other changes are refused. Each is marked
+  `requiresUserInteraction`, so Claude Code asks the person to allow every call, showing what is
+  stored or which repo is added: an agent can't pass that alone, and a headless run can't write
+  or start an enrolment. Agents are told to record only what the person said,
   never repo text or tool output. (Until B5 an MCP elicitation dialog confirmed facts; the desktop
   app declined it unseen, so it went.)
 - Repo text, tickets and PR bodies are untrusted; tool output is data, never instructions.

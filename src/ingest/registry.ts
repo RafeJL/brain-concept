@@ -13,13 +13,16 @@ export interface EnrolOptions {
   note?: RepoNote;
 }
 
+/** Throws unless `name` can name a repo: it is also a folder name and goes into hook scripts. */
+export function checkRepoName(name: string): string {
+  if (!NAME.test(name)) throw new BrainError(`"${name}" is not a valid repo name. Use letters, digits, ".", "_" or "-".`);
+  return name;
+}
+
 /** Adds a repo to the registry. Enrolling is all it takes for a repo to join; no code changes. */
 export async function enrolRepo(store: Store, options: EnrolOptions): Promise<RepoRecord> {
   const path = await repoRoot(options.path);
-  const name = options.name ?? basename(path);
-  if (!NAME.test(name)) {
-    throw new BrainError(`"${name}" is not a valid repo name. Use letters, digits, ".", "_" or "-".`);
-  }
+  const name = checkRepoName(options.name ?? basename(path));
   if (store.getRepo(name)) throw new BrainError(`A repo named "${name}" is already enrolled.`);
 
   const ref = options.ref ?? (await defaultRef(path));

@@ -12,6 +12,7 @@ import {
   FAMILY_LABEL,
   footer,
   groupRoutes,
+  NO_REPOS,
   PAGE_SIZE,
   pointer,
   readableRepos,
@@ -61,7 +62,7 @@ export async function findConsumers(deps: ToolDeps, caller: Caller, input: Consu
   }
   const readable = await readableRepos(deps, caller);
   const scope = input.repos?.length ? readable.filter((name) => input.repos!.includes(name)) : readable;
-  if (readable.length === 0) return { ok: false, text: "No repos are enrolled yet. Add one with: brain add <path>" };
+  if (readable.length === 0) return { ok: false, text: NO_REPOS };
   if (scope.length === 0) return { ok: false, text: `None of the requested repos are enrolled or readable. Repos you can read: ${readable.join(", ")}.` };
 
   const matches = deps.store.seams({ repos: scope }).flatMap((seam) => {

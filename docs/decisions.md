@@ -938,3 +938,92 @@ doctor, set-ref) stays in the terminal.
 
 **What would change it:** hosted (H2), confirmed facts may go to owners for review. The export
 shape exists, and `confirmed_with` shows what each person agreed to.
+
+## 2026-10-13: adding a repo from Claude Code, and a README for setting up (B7)
+
+**Why:**
+- Only a terminal could add a repo. People use the brain through the harness in Claude Code,
+  often the desktop app, and should be able to say "add github.com/… to the brain".
+- Enrolling takes minutes for a small repo and up to half an hour for a large one. A tool call
+  can't wait that long, and MCP shows no progress between calls.
+- While a repo enrols, nobody should plan from it, and people need a way to tell when it's done.
+- The README walked a harness user through terminal commands they don't need.
+
+**What:**
+- **`brain_add_repo`**, the eleventh tool: `source` (a local path, a GitHub URL or
+  `owner/repo`), `name`, `note`. It answers at once with an estimate and starts the ordinary
+  `brain add` as a detached process, which outlives the session. It asks the person to allow every
+  call, and its description says it costs time and money.
+- **GitHub sources** are cloned with plain `git clone` and the person's own credentials into
+  `~/.brain/repos/<name>` (`BRAIN_REPOS`). `brain add` and `brain repo add` take the same sources
+  through the same code (`src/ingest/enrol.ts`). A local path is enrolled in place, as before.
+- **Status** is recorded step by step (migration 18, `enrolments`): cloning, indexing, mapping
+  links, tracing, writing the wiki (k of n pages once the number is known), the hook. The card
+  shows it with the estimate. Read tools that reach a repo not yet indexed say it instead of "Run:
+  brain sync". A failure says what failed and that adding again finishes it. The catalogue marks a
+  repo being enrolled; `doctor` and `repo list` show running and failed ones.
+- **Instructions:** offer `brain_add_repo` for a repo the brain lacks, saying how long it takes;
+  don't plan from a repo being enrolled; the catalogue is per session, but the card finds a new
+  repo at once.
+- **The README** is now for someone setting up: what it is, setup as numbered commands, adding
+  repos and telling when they're ready, what to ask by harness stage, updates, troubleshooting,
+  removing. Every command moved to `docs/cli.md`; trust, facts, the wiki, links and limits to
+  `docs/how-it-works.md`.
+
+**Design calls:**
+- **One new tool, not an action on an existing one.** Reads and writes stay apart (B5): adding
+  prompts on every call, so it can't sit on the card, which must not prompt. Status needs no tool
+  of its own: it's on the card, which agents already call first.
+- **The background process is the CLI.** The same pipeline, log, lock and hook as a terminal
+  `brain add`, so there is one enrolment path. A sync or hook firing during an enrolment is folded
+  into one more pass by the existing per-repo lock.
+- **Status in the store, not a file next to the lock.**
+  - Both processes already share the store: hooks' background syncs write it while the server
+    reads it (WAL, with a busy timeout).
+  - It keeps the history the estimate needs. A file would need its own format, its own history
+    and a second read path.
+  - It goes through `Store`, so hosted Postgres carries it; a file wouldn't reach other workers.
+  - Tests read it from `:memory:`. The cost is one table and four `Store` methods.
+- **Liveness from the pid,** with the same check locks use (`processAlive`, shared with the
+  queue). A running row whose process is gone reads as stopped, so a crash or a closed terminal
+  never looks like progress.
+- **Estimates:** the store kept page costs but no durations, so past syncs couldn't be timed.
+  Enrolments now record time, files and cost. The estimate goes by the nearest earlier enrolments
+  within three times the size that ran Claude Code; until there are some, the size bands from
+  2026-10-07, labelled rough. A GitHub repo is sized once it's cloned, so its card has the
+  estimate, not the first answer.
+- **Retry is the same call.** A failed or stopped enrolment, or a repo enrolled but never indexed,
+  is taken as it stands, and the sync redoes only what's missing.
+- **Clones nobody pulls.** A hook fires on a fetch, but nobody fetches the brain's own clones. So
+  the MCP server fetches them in the background when a session starts, at most hourly, with
+  credential prompts off; their hooks do the rest. `repo remove` deletes a clone only inside the
+  brain's clone folder.
+- **No `confirmed_with`.** The person asks for the repo and allows the call, which shows the
+  source. There is no wording of theirs to keep.
+- **Wider than asked:** any git URL is accepted, not only GitHub (Azure DevOps, say). It costs
+  nothing: the name is the last part of the path, and git does the rest.
+
+**Gate:**
+- 250 tests pass (231 before). New: source parsing (https, `.git`, browser URLs, `owner/repo`,
+  SSH); a background enrolment through the MCP tool, the card going from being enrolled to done;
+  a failed clone, with git's reason and how to retry; read tools on a repo being enrolled;
+  `brain add <GitHub URL>`, cloned from a local bare repo through git's `insteadOf`; the tool list
+  (11, `brain_add_repo` asking); estimates from history; wiki progress; fetching clones.
+- **End to end, on a copy of the real store:** a stdio MCP session against this checkout called
+  `brain_add_repo` with `gothinkster/flask-realworld-example-app` (named flask-gate). It answered
+  in 27 ms, and the session closed straight away, taking its server with it. Fresh sessions then
+  read the card every 15 seconds:
+  - `being enrolled · not ready yet`, then `mapping its links; writing the wiki`, with
+    `Wiki: being written` and `Seams: being mapped`;
+  - `tracing what each entry point leads to` once the 19 routes were in;
+  - `Enrolled just now, in 1 min for $0.49: ready.`, with 7 pages and `Called by: react-web`,
+    about 90 seconds after the call.
+  The clone came from GitHub with plain git, its hook points at the copy, and the next session
+  start fetched it. `repo remove` deleted the clone.
+
+**What would change it:**
+- Hosted (phase 6): enrolment becomes a queued job on a worker. The table stays; the detached
+  process goes.
+- If Claude Code shows progress for long-running MCP tasks, the card could give way to it.
+- If people enrol many large repos at once from several sessions, a cap on Claude Code runs across
+  processes (today it's per command).

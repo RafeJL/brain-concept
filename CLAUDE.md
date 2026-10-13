@@ -19,16 +19,24 @@ calls it; nothing is ever moved out of the harness into here.
   never the working copy.
 - **Every answer carries its tier** (`llm-generated` for what Claude Code wrote, `human-reviewed` for facts a person confirmed) and its
   freshness (commit, commits behind the ref).
-- **Agent-facing tools read, except four that record what a person says.** `brain_record_fact`,
-  `brain_set_note`, `brain_facts` and `brain_systems` count a change as confirmed only with the
-  person's words agreeing (`confirmed_with`); otherwise it is proposed, or refused. All four are
-  marked to prompt for permission on every call, so headless runs can't write. Reads may log gaps (searches that found
-  nothing). Otherwise only ingest writes to the store.
+- **Agent-facing tools read, except four that record what a person says, and `brain_add_repo`.**
+  `brain_record_fact`, `brain_set_note`, `brain_facts` and `brain_systems` count a change as
+  confirmed only with the person's words agreeing (`confirmed_with`); otherwise it is proposed, or
+  refused. `brain_add_repo` starts an enrolment, which costs time and money. All five are marked to
+  prompt for permission on every call, so headless runs can't write. Reads may log gaps (searches
+  that found nothing). Otherwise only ingest writes to the store.
+- **Enrolling runs in the background.** `brain_add_repo` starts the ordinary `brain add` as a
+  detached process (`enrolInBackground` in `src/ingest/enrol.ts`) and answers at once. Progress is
+  in the `enrolments` table, written by the process doing it (`trackEnrolment`); read tools show
+  it for a repo not yet indexed (`requireSyncedRepo`), and the card always. A running row whose pid
+  is dead reads as stopped. GitHub sources are cloned with plain `git` into `clonesDir()`; nothing
+  else is ever deleted by `repo remove`. Tests clone from local bare repos through git's `insteadOf`,
+  never the network.
 - **Permission checks go through `AccessPolicy`** before any query reads rows. Unknown and
   unreadable repos get the same answer.
 - **Few broad tools.** The set is `brain_find_consumers`, `brain_impact`, `brain_repo_card`,
-  `brain_search`, `brain_get`, `brain_review`, `brain_record_fact`, `brain_set_note`, `brain_facts` and
-  `brain_systems`, all built. Reads and writes stay in separate tools: a write tool prompts on every call,
+  `brain_search`, `brain_get`, `brain_review`, `brain_record_fact`, `brain_set_note`, `brain_facts`,
+  `brain_systems` and `brain_add_repo`: eleven, all built. Reads and writes stay in separate tools: a write tool prompts on every call,
   so a read inside one would prompt too and fail headless. Names and parameters are frozen: harness skills name them. Don't add tools outside the set
   without a decision entry; prefer an action on an existing tool. Default to concise output and return pointers, not pasted code.
 - **AI output is cited and checked deterministically before it is stored.** Wiki claims go
@@ -77,11 +85,15 @@ calls it; nothing is ever moved out of the harness into here.
   project code.
 - Changes to what the brain finds or answers also get a pass through
   `docs/manual-testing.md` (playground, real repos, a fresh Claude Code session). Keep its
-  expected outputs, and the README's examples and capability lists, in step with the code.
-- **The README is for people trying the brain**, and its "Try it in 10 minutes" path
-  (`brain doctor`, `brain add`, register the MCP server, ask Claude) must keep working. Developer
-  material goes in `docs/development.md`. When a new prerequisite or failure mode appears, add a
-  check to `brain doctor` (`src/doctor.ts`) rather than a paragraph to the README.
+  expected outputs, and the examples and tool lists in the README and `docs/how-it-works.md`, in
+  step with the code.
+- **The README is for someone setting the brain up to use with the harness**, on Windows. Keep it
+  short and task-ordered; its "Set it up" and "Add repos" paths (`npm install`, `brain doctor`,
+  register the MCP server, add a repo from Claude Code or with `brain add`, check its card) must
+  keep working. Every command goes in `docs/cli.md`; trust, facts, the wiki, links and limits in
+  `docs/how-it-works.md`; developer material in `docs/development.md`. When a new prerequisite or
+  failure mode appears, add a check to `brain doctor` (`src/doctor.ts`) rather than a paragraph to
+  the README.
 - The MCP server writes protocol frames only to stdout. Logs go to stderr.
 - On Citation laptops the `node_modules/.bin` shims are blocked by group policy. Run tools
   through `node` (see the npm scripts) and use TypeScript 6, because TypeScript 7 is a native binary.

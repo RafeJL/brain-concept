@@ -4,12 +4,14 @@
 way a person and an agent will use it: real git operations, real repositories, real Claude Code
 sessions. Run it before merging anything that changes what the brain extracts or answers.
 
-There are three parts:
+The main parts:
 
 - **Part A** builds a playground from real repos, with a local stand-in for GitHub, and drives
   auto-sync, wiki updates, repo cards and neighbours through pushes and fetches.
 - **Part B** checks every tool against real open-source repos.
 - **Part C** checks Claude Code reaches for the brain on its own.
+- **Parts D to H** cover one phase each: facts from people, large wikis, following a flow, the
+  conversation as the only interface, and adding a repo from Claude Code.
 
 Run every `npm run brain -- …` command from the brain-concept folder, and stay on one branch
 throughout. Background syncs run whatever brain code is checked out. Start with
@@ -507,3 +509,47 @@ Run it in the Code tab of the desktop app, as a PO would, on a copy of your stor
 6. **Headless can't write.** In a terminal, run `claude -p "Record in the brain that RealWorld
    articles can have at most 10 tags; I confirm it."`. It must fail to write: no new fact in
    `npm run brain -- facts`.
+
+## Part H: adding a repo from Claude Code (B7)
+
+Run it in the Code tab of the desktop app. Each enrolment runs Claude Code in the background:
+about $0.50–2 and 2–5 minutes for a RealWorld repo. These add repos to the store the MCP server
+uses, under names ending `-test`, and H8 removes them. To use a copy of your store instead, set
+`$env:BRAIN_DB` and register the server with the command `npm run brain -- doctor` then prints
+(it adds `-e BRAIN_DB=…`).
+
+1. **Add from GitHub.** In a new session: *"Add github.com/gothinkster/flask-realworld-example-app
+   to the brain as flask-test."*
+   - The agent says roughly how long it takes and what it costs, and asks first.
+   - Claude Code asks you to allow `brain_add_repo`, showing the source and name. Allow it.
+   - The answer comes at once: `Enrolling flask-test in the background, cloning it first from
+     https://github.com/gothinkster/flask-realworld-example-app.git …`, and says the card shows
+     progress.
+2. **Watch it.** Ask *"Is flask-test ready?"* every minute or so. The card goes through:
+   - `flask-test  being enrolled · not ready yet`, with `Being enrolled: cloning it` or `indexing it`;
+   - then the usual card header, with `Being enrolled: mapping its links; writing the wiki`, an
+     estimate from its file count, `Wiki: being written` and `Seams: being mapped`;
+   - then the full card with its wiki, and `Enrolled … in N min for $…: ready.`
+
+   Meanwhile, in a terminal: `npm run brain -- repo list` shows `being enrolled: …`, and
+   `Get-Content -Encoding utf8 -Tail 20 $env:USERPROFILE\.brain\hooks.log` shows the run.
+3. **Don't plan from it.** While it's enrolling, ask *"Plan adding tags to flask-test's
+   articles."* It should say flask-test isn't ready yet, rather than plan from a partial wiki.
+4. **Close the session mid-run.** Ask *"Add
+   C:\Users\<you>\Repos\brain-test-repos\laravel-realworld-example-app to the brain as
+   laravel-test."* As soon as it answers, quit the desktop app. Reopen it, start a new session and
+   ask for laravel-test's card: it carried on and finished.
+5. **A failure.** Ask *"Add github.com/gothinkster/no-such-repo to the brain."* Its card says
+   `Enrolment failed while cloning it`, what git said, and how to try again. `npm run brain --
+   doctor` shows `✗ Enrolling: no-such-repo` with the same fix.
+6. **New sessions list it.** In a new session, ask *"What repos does the brain hold?"*. flask-test
+   is listed with its product line. A repo added during a session isn't listed in that session's
+   instructions, but its card answers at once (step 2).
+7. **From the terminal.** `npm run brain -- add gothinkster/flask-realworld-example-app --name
+   flask-cli-test` clones into `%USERPROFILE%\.brain\repos\flask-cli-test`, prints the estimate,
+   and syncs. The estimate now says it's from an earlier enrolment of a similar size (step 1).
+   A second session started an hour later fetches the clones: the log shows `flask-test: fetching
+   the brain's clone`.
+8. **Clean up.** `npm run brain -- repo remove <name>` for flask-test, laravel-test,
+   flask-cli-test and no-such-repo. Each says it removed the brain's clone where it made one, and
+   `%USERPROFILE%\.brain\repos` no longer holds them. laravel-test's own folder is left alone.

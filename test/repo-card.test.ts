@@ -45,14 +45,14 @@ describe("repo card", () => {
     expect(result.text).toMatch(/TypeScript\s+1 files\s+5 B/);
   });
 
-  it("asks for a sync when a repo is enrolled but not indexed", async () => {
+  it("says how to finish a repo that is enrolled but not indexed", async () => {
     const store = new SqliteStore(":memory:");
     await enrolRepo(store, { path: makeRepo({ "a.ts": "1" }), name: "orders" });
 
     const result = await repoCard({ store, access: local }, LOCAL_CALLER, "orders", "concise");
 
     expect(result).toMatchObject({ ok: false });
-    expect(result.text).toContain("brain sync orders");
+    expect(result.text).toContain("hasn't been indexed yet. Adding it again with brain_add_repo indexes it.");
   });
 
   it("answers the same way for unreadable and unknown repos, listing only readable ones", async () => {

@@ -2,7 +2,7 @@ import type { FactCheck, FactRecord, Gap, GapSummary, NewFact } from "../core/fa
 import type { Seam, SeamCoverage, SeamKind } from "../core/seams.js";
 import type { SystemRecord } from "../core/systems.js";
 import type { TraceLink } from "../core/traces.js";
-import type { FileRecord, LanguageShare, PlannedPage, RepoNote, RepoRecord, RepoState, WikiPage } from "../core/types.js";
+import type { Enrolment, FileRecord, LanguageShare, PlannedPage, RepoNote, RepoRecord, RepoState, WikiPage } from "../core/types.js";
 
 /** Everything one sync changes, applied atomically. Removing a file removes its seams. */
 export interface SyncUpdate {
@@ -88,8 +88,17 @@ export interface Store {
   setRepoNote(name: string, note: RepoNote | null): void;
   /** Sets or clears a note waiting for a person to confirm it. */
   setProposedNote(name: string, note: RepoNote | null): void;
-  /** Deletes the repo and every row that belongs to it. */
+  /** Deletes the repo and every row that belongs to it, its enrolment included. */
   removeRepo(name: string): boolean;
+
+  /** Where enrolling a repo has got to, whether or not it is enrolled yet. */
+  enrolment(repo: string): Enrolment | undefined;
+  /** Every enrolment, newest first: running, failed and finished. */
+  enrolments(): Enrolment[];
+  /** Records an enrolment, replacing what was recorded for that name. */
+  saveEnrolment(enrolment: Enrolment): void;
+  /** Forgets an enrolment, e.g. a failed clone of a repo that was never enrolled. */
+  removeEnrolment(repo: string): boolean;
 
   getState(repo: string): RepoState | undefined;
   getFiles(repo: string): FileRecord[];

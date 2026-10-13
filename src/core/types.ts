@@ -99,6 +99,40 @@ export interface LanguageShare {
   bytes: number;
 }
 
+/**
+ * Where enrolling a repo has got to. Enrolling runs in the background for minutes or longer, so it
+ * is kept where both the process doing it and the MCP server can read it.
+ */
+export interface Enrolment {
+  /** The name the repo is, or will be, enrolled under. */
+  repo: string;
+  /** What the person gave: a local path, a GitHub URL or owner/repo. */
+  source: string;
+  status: "running" | "failed" | "done";
+  /** What it is doing now, in words ("cloning it", "writing the wiki (4 of 18 pages)"); when failed, the step that failed. */
+  step: string;
+  /** Why it failed. */
+  error: string | null;
+  /** The process doing it. A running enrolment whose process has gone stopped without finishing. */
+  pid: number | null;
+  /** Files in the repo's tree, once known. */
+  files: number | null;
+  /** How long and how much the whole enrolment should take, once its size is known. */
+  estimate: EnrolmentEstimate | null;
+  /** What Claude Code cost so far. */
+  costUsd: number;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt: string | null;
+}
+
+export interface EnrolmentEstimate {
+  minutes: [number, number];
+  costUsd: [number, number];
+  /** What it is based on: earlier enrolments of repos of a similar size, or the size alone ("rough"). */
+  basis: string;
+}
+
 export interface Freshness {
   commit: string;
   /** Commits on the tracked ref since the indexed commit; null when that can't be worked out. */

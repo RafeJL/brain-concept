@@ -5,7 +5,7 @@ import type { FactFilter, SectionHit } from "../../store/store.js";
 import type { Caller } from "../access.js";
 import { factLine, readableChecks, visibleFacts } from "../facts.js";
 import { visibleSystems } from "../systems.js";
-import { builtFrom, count, indexedAt, PAGE_SIZE, pointer, readableRepos, TIER, type Format, type ToolDeps, type ToolResult } from "./common.js";
+import { builtFrom, count, indexedAt, NO_REPOS, PAGE_SIZE, pointer, readableRepos, TIER, withoutWiki, type Format, type ToolDeps, type ToolResult } from "./common.js";
 
 export interface SearchInput {
   query: string;
@@ -68,7 +68,7 @@ export async function search(deps: ToolDeps, caller: Caller, input: SearchInput)
   if (!match) return { ok: false, text: `"${input.query}" has no words to search for.` };
   const readable = await readableRepos(deps, caller);
   const scope = input.repos?.length ? readable.filter((name) => input.repos!.includes(name)) : readable;
-  if (readable.length === 0) return { ok: false, text: "No repos are enrolled yet. Add one with: brain add <path>" };
+  if (readable.length === 0) return { ok: false, text: NO_REPOS };
   if (scope.length === 0) return { ok: false, text: `None of the requested repos are enrolled or readable. Repos you can read: ${readable.join(", ")}.` };
 
   const offset = input.offset ?? 0;
@@ -119,7 +119,7 @@ function distinctEndpoints(seams: readonly Seam[]): Seam[] {
 
 async function render(deps: ToolDeps, answer: SearchAnswer, scope: string[], format: Format, offset: number): Promise<string> {
   const { sections, sectionTotal, endpoints, systems, facts } = answer;
-  const noWiki = scope.filter((name) => deps.store.pages(name).length === 0);
+  const noWiki = withoutWiki(deps, scope);
   const noWikiNote = noWiki.length ? `No wiki yet, so not searched: ${noWiki.join(", ")} (brain sync <repo> writes one).` : "";
 
   if (sectionTotal === 0 && endpoints.length === 0 && systems.length === 0 && facts.length === 0) {

@@ -1,7 +1,9 @@
 import type { NamedFamily } from "../../core/links.js";
 import { FAMILIES, type SeamCoverage } from "../../core/seams.js";
-import type { Freshness, LanguageShare, PageKind } from "../../core/types.js";
+import type { Enrolment, Freshness, LanguageShare, PageKind } from "../../core/types.js";
+import { liveStatus } from "../../ingest/enrol.js";
 import type { Caller } from "../access.js";
+import { enrolmentCard, enrolmentLines, readableEnrolment, readyLine, unfinished } from "../enrolment.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
 import { factCountText, factsAbout } from "../facts.js";
 import { linkSummary, neighbours, type Neighbour, type Neighbours } from "../neighbours.js";
@@ -30,6 +32,8 @@ export interface RepoCard {
   system: { name: string; status: SystemStatus; others: string[] } | null;
   /** What people have stated about the repo and its system, counted ("2 confirmed by people"); null when nothing. */
   facts: string | null;
+  /** How it was enrolled, when by `brain add` or `brain_add_repo`: still going, failed, or done. */
+  enrolment: Enrolment | null;
 }
 
 const CONCISE_LANGUAGES = 5;
@@ -53,6 +57,10 @@ export async function cardRequest(deps: ToolDeps, caller: Caller, name: string, 
       return { ...overview, text: `${note}\n\n${overview.text}\n\nRead a repo's card with brain_repo_card, or its product page with brain_get (page "product").` };
     }
   }
+  // Not indexed yet: being cloned or indexed, or failed before it was. Its progress is the card,
+  // which is how a person finds out whether it's ready.
+  const enrolment = await readableEnrolment(deps, caller, name);
+  if (unfinished(enrolment) && !deps.store.getState(name)) return { ok: true, data: enrolment, text: enrolmentCard(enrolment) };
   return repoCard(deps, caller, name, format);
 }
 
@@ -63,6 +71,7 @@ export async function repoCard(deps: ToolDeps, caller: Caller, name: string, for
 
   const languages = deps.store.languageShares(name);
   const card: RepoCard = {
+    enrolment: (await readableEnrolment(deps, caller, name)) ?? null,
     repo: repo.name,
     path: repo.path,
     remote: repo.remote,
@@ -83,6 +92,7 @@ function conciseText(card: RepoCard): string {
   const more = card.languages.length - shown.length;
   return [
     `${card.repo}  ${describeFreshness(card.freshness, card.ref)}`,
+    ...enrolmentStatus(card, false),
     ...productLines(card),
     `Remote: ${card.remote ?? "none"}`,
     wikiLine(card),
@@ -98,6 +108,7 @@ function detailedText(card: RepoCard): string {
   const rows = card.languages.map((l) => `  ${l.language.padEnd(18)} ${String(l.files).padStart(6)} files ${formatBytes(l.bytes).padStart(10)}`);
   return [
     `${card.repo}  ${describeFreshness(card.freshness, card.ref)}`,
+    ...enrolmentStatus(card, true),
     ...productLines(card),
     `Path: ${card.path}`,
     `Remote: ${card.remote ?? "none"}`,
@@ -137,6 +148,22 @@ function productLines({ product, system, facts }: RepoCard): string[] {
   return lines;
 }
 
+/**
+ * Where its enrolment has got to while its wiki and links are written, or what failed; once done,
+ * a line saying it's ready (on the concise card for a day, on the detailed one always).
+ */
+function enrolmentStatus({ enrolment }: RepoCard, detailed: boolean): string[] {
+  if (!enrolment) return [];
+  if (unfinished(enrolment)) return enrolmentLines(enrolment);
+  const ready = readyLine(enrolment, Date.now(), detailed ? Infinity : undefined);
+  return ready ? [ready] : [];
+}
+
+/** Being written by an enrolment that is still running, rather than waiting for a sync. */
+function enrolling({ enrolment }: RepoCard): boolean {
+  return enrolment !== null && liveStatus(enrolment) === "running";
+}
+
 /** Past this many pages, the card counts them by kind instead of naming them. */
 const LISTED_PAGES = 8;
 
@@ -145,7 +172,9 @@ function wikiOf(deps: ToolDeps, name: string, indexed: string): RepoCard["wiki"]
   return pages.length ? { pages: pages.map((p) => p.slug), kinds: pages.map((p) => p.kind), commit: wikiCommit(pages, indexed) } : null;
 }
 
-function wikiLine({ repo, wiki, freshness }: RepoCard): string {
+function wikiLine(card: RepoCard): string {
+  const { repo, wiki, freshness } = card;
+  if (!wiki && enrolling(card)) return "Wiki: being written";
   if (!wiki) return `Wiki: not written yet (brain sync ${repo} writes it; a sync already running will)`;
   const older = wiki.commit === freshness.commit ? "" : ` · written at @${wiki.commit.slice(0, 7)}, older than the index`;
   if (wiki.pages.length <= LISTED_PAGES) return `Wiki: ${count(wiki.pages.length, "page")} (${wiki.pages.join(", ")}) · read with brain_get${older}`;
@@ -159,7 +188,9 @@ function wikiLine({ repo, wiki, freshness }: RepoCard): string {
   return `Wiki: ${count(wiki.pages.length, "page")}: ${kinds.join(", ")} · brain_get lists them; start with overview${older}`;
 }
 
-function seamsLine({ repo, seams, freshness }: RepoCard): string {
+function seamsLine(card: RepoCard): string {
+  const { repo, seams, freshness } = card;
+  if (!seams.commit && enrolling(card)) return "Seams: being mapped";
   if (!seams.commit) return `Seams: not mapped yet (brain sync ${repo})`;
   const { routes, calls, unresolvedCalls, links } = seams;
   const found =

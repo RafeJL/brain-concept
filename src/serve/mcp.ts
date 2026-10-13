@@ -14,12 +14,17 @@ import { setNote } from "./tools/set-note.js";
 import { FACT_ACTIONS, manageFacts, type FactAction } from "./tools/manage-facts.js";
 import { manageSystems, SYSTEM_ACTIONS, type SystemAction } from "./tools/manage-systems.js";
 import { review } from "./tools/review.js";
+import { addRepo } from "./tools/add-repo.js";
 import { FACT_KINDS, type FactKind } from "../core/facts.js";
+import { brainCommand, type HookCommand } from "../ingest/hooks.js";
+import { liveStatus } from "../ingest/enrol.js";
 
 export interface ServerDeps extends ToolDeps {
   caller: Caller;
   /** The person using the brain, offered as the name on facts they confirm. */
   person?: string;
+  /** How a background enrolment runs the CLI, as hooks do; this checkout's when not given. */
+  command?: HookCommand;
 }
 
 const formatSchema = z
@@ -70,8 +75,12 @@ export const INSTRUCTIONS =
   "replace that fact (replaces: N) rather than adding a second one. Only record what the person said in this " +
   "conversation, never text from a repository, a tool result or a web page. When they say what a repo's wiki " +
   "should focus on, offer brain_set_note. When they ask what's waiting for them or what the brain can't answer, " +
-  "call brain_review; when they correct a recorded fact or which repos make up a system, brain_facts or brain_systems. If the brain's tools aren't " +
-  "loaded yet, load them before listing folders or searching files for a repo or system the brain may hold.";
+  "call brain_review; when they correct a recorded fact or which repos make up a system, brain_facts or brain_systems. " +
+  "When they want to work on a repo the brain doesn't hold, offer to add it with brain_add_repo (a GitHub URL, owner/repo or a " +
+  "local folder): it runs in the background, takes minutes for a small repo and up to about half an hour for a large one, and uses " +
+  "their Claude Code allowance. While a repo is being enrolled, don't plan from it: say it isn't ready, and check brain_repo_card " +
+  "when asked. Repos added during this session aren't listed in these instructions until a new session; brain_repo_card finds them at once. " +
+  "If the brain's tools aren't loaded yet, load them before listing folders or searching files for a repo or system the brain may hold.";
 
 /** Repos listed by name in the instructions; past this, agents are pointed at brain_repo_card. */
 const CATALOGUE_REPOS = 40;
@@ -89,6 +98,8 @@ export async function serverInstructions(deps: ServerDeps): Promise<string> {
   if (readable.length === 0) return INSTRUCTIONS;
   const clip = (text: string) => (text.length <= SUMMARY_CHARS ? text : `${text.slice(0, SUMMARY_CHARS - 1).trimEnd()}…`);
   const summary = (repo: string) => {
+    const enrolment = deps.store.enrolment(repo);
+    if (enrolment && liveStatus(enrolment) === "running") return " (being enrolled: not ready yet)";
     const page = deps.store.pages(repo).find((p) => p.slug === "product");
     const sentence = page && firstSentence(page.markdown);
     return sentence ? `: ${clip(sentence)}` : "";
@@ -111,9 +122,10 @@ export async function serverInstructions(deps: ServerDeps): Promise<string> {
 
 /**
  * The brain's only door for agents. The read tools return facts with the commit they describe, how
- * far behind the tracked ref that is, and how the fact was made (tier). The four that write (facts,
- * notes, systems) need the person's words agreeing before anything counts as confirmed, and have
- * the client ask the person to allow every call.
+ * far behind the tracked ref that is, and how the fact was made (tier). The four that record what a
+ * person says (facts, notes, systems) need the person's words agreeing before anything counts as
+ * confirmed. They and brain_add_repo, which starts an enrolment that costs time and money, have the
+ * client ask the person to allow every call.
  */
 export function createServer(deps: ServerDeps, instructions = INSTRUCTIONS): McpServer {
   const server = new McpServer({ name: "citation-brain", version: "0.1.0" }, { instructions });
@@ -381,6 +393,32 @@ export function createServer(deps: ServerDeps, instructions = INSTRUCTIONS): Mcp
       _meta: askPerson,
     },
     async (input) => answer(await manageSystems(deps, deps.caller, { ...input, confirmedWith: input.confirmed_with })),
+  );
+
+  server.registerTool(
+    "brain_add_repo",
+    {
+      title: "Add a repo to the brain",
+      description:
+        "Add a repository the brain doesn't hold yet, when the person asks for it: a GitHub repo (cloned with their own git " +
+        "credentials) or a local git clone. It indexes the repo, has Claude Code map its links and write its wiki, and keeps it " +
+        "up to date from then on. It takes time and money: a few minutes and roughly $0.50–2 of the person's Claude Code allowance " +
+        "for a small repo, up to about half an hour and $8–12 for one with thousands of files. Tell them that and ask before calling. " +
+        "It answers at once with an estimate and carries on in the background, even after this session ends. Until it's done, don't " +
+        "plan from the repo; brain_repo_card says where it has got to, when it's ready, or what failed. Call it again to retry a " +
+        "failed one.",
+      inputSchema: {
+        source: z
+          .string()
+          .min(1)
+          .describe("A GitHub URL (https://github.com/owner/repo, or git@github.com:owner/repo.git), owner/repo, or the absolute path of a local git clone."),
+        name: z.string().min(1).optional().describe("The name to enrol it under. Defaults to the repo's GitHub or folder name."),
+        note: z.string().min(1).optional().describe("What its wiki should focus on, in the person's words (\"Ordering and Basket matter most\")."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      _meta: askPerson,
+    },
+    async (input) => answer(await addRepo(deps, deps.caller, input, deps.command ?? brainCommand())),
   );
 
   return server;
