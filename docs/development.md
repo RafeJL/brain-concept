@@ -102,5 +102,5 @@ The hook isn't installed if the repo already has its own `reference-transaction`
 | W0–W5 | The switch to AI-written wikis: Claude Code writes wikis and maps routes and calls in any language, every citation checked; the parsers removed; `brain_search` | ✅ |
 | 2 | Harness evals | Waiting on how the harness integrates |
 | 4 (B3) | Facts from people (`human-reviewed`): `brain_record_fact` with a confirm dialog, staleness, gaps; each fact checked against the code | ✅ |
-| 4 (B4) | Technical depth: page plans for large repos, area, flow, data-model and integrations pages, checked diagrams, a steering note, steps and repos side by side | B4a built; B4b (flows across repos) planned |
+| 4 (B4) | Technical depth: page plans for large repos, area, flow, data-model and integrations pages, checked diagrams, a steering note, steps and repos side by side; following a flow across repos | ✅ B4a; B4b built |
 | 6 | Hosting: Azure, cloud containers for the runs, GitHub permissions | Planned |

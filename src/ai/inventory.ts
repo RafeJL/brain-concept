@@ -29,6 +29,11 @@ export interface Inventory {
   text: string;
 }
 
+/** Whether a path is a test, spec or fixture. */
+export function isTestPath(path: string): boolean {
+  return TEST.test(path);
+}
+
 export function isSource(file: Pick<FileRecord, "path" | "language">): boolean {
   return file.language !== null && !NOT_CODE.has(file.language) && !TEST.test(file.path) && !VENDORED.test(file.path);
 }

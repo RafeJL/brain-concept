@@ -229,4 +229,24 @@ export const MIGRATIONS: (string | ((db: DatabaseSync) => void))[] = [
   ALTER TABLE repos ADD COLUMN note TEXT;
   ALTER TABLE repos ADD COLUMN proposed_note TEXT;
   `,
+  // B4b: what each entry point's handling reaches (an exit point, a table, or nothing), as
+  // checked chains, so a flow can be traced across repos. Entries and exits are named by their
+  // refs, not row ids, so re-mapping links doesn't orphan them.
+  `
+  CREATE TABLE trace_links (
+    id          INTEGER PRIMARY KEY,
+    repo        TEXT NOT NULL REFERENCES repos(name) ON DELETE CASCADE,
+    entry       TEXT NOT NULL,
+    entry_kind  TEXT NOT NULL,
+    entry_label TEXT NOT NULL,
+    entry_path  TEXT NOT NULL,
+    entry_line  INTEGER NOT NULL,
+    target_type TEXT NOT NULL CHECK (target_type IN ('exit', 'table', 'none', 'unmapped')),
+    target      TEXT,
+    access      TEXT,
+    steps       TEXT NOT NULL,
+    commit_sha  TEXT NOT NULL
+  );
+  CREATE INDEX trace_links_by_entry ON trace_links(repo, entry);
+  `,
 ];

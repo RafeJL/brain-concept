@@ -1,6 +1,7 @@
 import type { FactCheck, FactRecord, Gap, GapSummary, NewFact } from "../core/facts.js";
 import type { Seam, SeamCoverage, SeamKind } from "../core/seams.js";
 import type { SystemRecord } from "../core/systems.js";
+import type { TraceLink } from "../core/traces.js";
 import type { FileRecord, LanguageShare, PlannedPage, RepoNote, RepoRecord, RepoState, WikiPage } from "../core/types.js";
 
 /** Everything one sync changes, applied atomically. Removing a file removes its seams. */
@@ -115,6 +116,11 @@ export interface Store {
   searchSections(filter: SearchFilter): SearchPage<SectionHit>;
   /** Routes and calls matching a search, best first. Kept in step with seams by `replaceSeams`. */
   searchSeams(filter: SearchFilter): SearchPage<Seam>;
+
+  /** A repo's checked chains from entry points to what they reach. */
+  traceLinks(repo: string): TraceLink[];
+  /** Replaces the chains of these entry points (every entry point when null) with `links`, in one step. */
+  replaceTraceLinks(repo: string, entries: readonly string[] | null, links: readonly TraceLink[]): void;
 
   /** Every system with its member repos, by name. Callers filter members to the readable set. */
   systems(): SystemRecord[];

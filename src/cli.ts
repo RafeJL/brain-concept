@@ -32,6 +32,7 @@ import { SqliteStore } from "./store/sqlite.js";
 import { DEFAULT_MODEL, generateWiki, type PlanReport, type WikiResult } from "./ai/generate.js";
 import { claudeRunner, limitRunner } from "./ai/runner.js";
 import { updateSeams, type SeamsResult } from "./ai/seams.js";
+import { updateTraces, type TracesResult } from "./ai/traces.js";
 import type { Store } from "./store/store.js";
 
 const HELP = `brain: organisation-wide context for coding agents
@@ -60,8 +61,9 @@ See what an agent gets:
   brain search "<query>" [--repo <name>]... [--detailed]   search every repo's wiki and endpoints
   brain card <name> [--detailed]                           what a repo is, its wiki, what it calls and what calls it
   brain page <name> [<page>]                               a wiki page, or the list of pages
-  brain consumers "<METHOD /path>" [--detailed]            who serves and who calls an endpoint; also
-                                                           "event <name>", "grpc <Service/Method>", "package <name>"
+  brain consumers "<METHOD /path>" [--detailed] [--follow] who serves and who calls an endpoint; also
+                                                           "event <name>", "grpc <Service/Method>", "package <name>";
+                                                           --follow traces what handling it sets off, across repos
   brain impact <repo> [--path <file>] [--route "<METHOD /path>"] [--detailed]
                                                            routes, events, gRPC methods and packages a repo or
                                                            file provides, and who uses each
@@ -121,6 +123,7 @@ async function main(argv: string[]): Promise<void> {
       ticket: { type: "string" },
       anchor: { type: "string", multiple: true },
       detailed: { type: "boolean", default: false },
+      follow: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -209,7 +212,7 @@ async function main(argv: string[]): Promise<void> {
         break;
       case "consumers":
         if (!sub) throw new BrainError("Usage: brain consumers \"GET /api/orders/{id}\" [--detailed]");
-        print(await findConsumers(tools, LOCAL_CALLER, { target: sub, format }));
+        print(await findConsumers(tools, LOCAL_CALLER, { target: sub, format, follow: values.follow }));
         break;
       case "impact":
         if (!sub && !values.work) throw new BrainError('Usage: brain impact <repo> [--path <file>] [--route "GET /path"] [--detailed] | brain impact --work "<description>"');
@@ -270,7 +273,14 @@ async function syncAndRefresh(store: Store, name: string, options: { model?: str
     const synced = await syncRepo(store, name);
     printSync(synced);
     const steps: Record<Step, [string, (cwd: string) => Promise<void>]> = {
-      links: ["routes and calls", async (cwd) => printSeams(await updateSeams(store, runner, name, { model: options.model, full, cwd }))],
+      // What each entry point leads to depends on the links just mapped, so it follows them in the same step.
+      links: [
+        "routes and calls",
+        async (cwd) => {
+          printSeams(await updateSeams(store, runner, name, { model: options.model, full, cwd }));
+          printTraces(await updateTraces(store, runner, name, { model: options.model, full, cwd }));
+        },
+      ],
       wiki: ["wiki", async (cwd) => printWiki(await generateWiki(store, runner, name, { model: options.model, full, cwd }))],
       facts: ["fact checks", async (cwd) => printChecks(await checkFacts(store, runner, name, { model: options.model, full, cwd }))],
     };
@@ -367,6 +377,15 @@ function planText(plan: PlanReport): string {
     plan.retired.length ? `−${count(plan.retired.length, "page")} (${plan.retired.join(", ")})` : "",
   ].filter(Boolean);
   return `wiki planned (${plan.reason}): ${changes.join(", ") || "no pages added or dropped"}`;
+}
+
+function printTraces(result: TracesResult): void {
+  if (result.mode === "none") return;
+  const scope = result.mode === "full" ? "traced" : `traced again for ${count(result.followed, "entry point")}`;
+  const missing = result.untriggered.length ? ` · ${count(result.untriggered.length, "exit point")} no entry point was found to reach` : "";
+  console.log(`${result.repo}: what each entry point leads to ${scope} · ${count(result.kept, "checked chain")}${result.dropped.length ? `, ${result.dropped.length} dropped` : ""}${missing} · $${result.costUsd.toFixed(2)} · ${Math.round(result.durationMs / 1000)}s`);
+  for (const drop of result.dropped.slice(0, 3)) console.log(`    dropped: ${drop.entry}: ${drop.reason}`);
+  if (result.dropped.length > 3) console.log(`    … and ${result.dropped.length - 3} more`);
 }
 
 /** How the hook should run this CLI: absolute paths, since hooks get no predictable PATH. */

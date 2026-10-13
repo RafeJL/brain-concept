@@ -1,7 +1,9 @@
 import { matchEndpoints, type MatchQuality } from "../../core/http.js";
 import { parseTarget, type LinkTarget } from "../../core/links.js";
 import { familyOf, isProvider, type Seam } from "../../core/seams.js";
+import { seamRef } from "../../core/traces.js";
 import type { Caller } from "../access.js";
+import { renderTrace, traceFrom } from "../trace.js";
 import {
   alsoDeclared,
   builtFrom,
@@ -27,6 +29,8 @@ export interface ConsumersInput {
   repos?: string[];
   format: Format;
   offset?: number;
+  /** Also trace what handling it sets off, hop by hop across repos. */
+  follow?: boolean;
 }
 
 export interface Hit {
@@ -84,7 +88,36 @@ export async function findConsumers(deps: ToolDeps, caller: Caller, input: Consu
   );
 
   const data = { target, hits };
-  return { ok: true, data, text: await render(deps, data, scope, input.format, input.offset ?? 0) };
+  const text = await render(deps, data, scope, input.format, input.offset ?? 0);
+  return { ok: true, data, text: input.follow ? `${text}\n\n${followText(deps, data, readable, input.format)}` : text };
+}
+
+/**
+ * What handling the target sets off: from each server of an endpoint or gRPC method, or each
+ * handler of an event, every hop its checked chains reach, across repos.
+ */
+function followText(deps: ToolDeps, { target, hits }: Consumers, readable: readonly string[], format: Format): string {
+  if (target.family === "package") return "follow traces endpoints, events and gRPC methods, not packages.";
+  const starts = hits.filter((h) => (target.family === "event" ? h.role === "caller" : h.role === "server")).map((h) => h.seam);
+  if (starts.length === 0) return `What it sets off: nothing enrolled ${target.family === "event" ? "handles" : "serves"} it.`;
+  const lines = renderTrace(traceFrom(deps.store, readable, starts), format === "detailed", deps.store);
+  // What starts it: the UI actions, jobs and entry points whose chains lead to each call or publish of it.
+  const users = hits.filter((h) => (target.family === "event" ? h.role === "server" : h.role === "caller")).map((h) => h.seam);
+  const startedFrom = [
+    ...new Set(
+      users.flatMap((use) =>
+        deps.store
+          .traceLinks(use.repo)
+          .filter((l) => l.target.type === "exit" && l.target.ref === seamRef(use))
+          .map((l) => `${use.repo} ${l.entryKind === "ui" ? "UI action " : l.entryKind === "job" ? "job " : ""}${l.entryLabel} (${l.entryPath}:${l.entryLine})`),
+      ),
+    ),
+  ];
+  return [
+    ...(startedFrom.length ? [`Started from: ${startedFrom.slice(0, format === "detailed" ? undefined : 5).join("; ")}${format !== "detailed" && startedFrom.length > 5 ? `; +${startedFrom.length - 5} more` : ""}`, ""] : []),
+    `What handling it sets off (every hop is a checked chain of cited steps; tables are followed within a repo, not between repos):`,
+    ...lines,
+  ].join("\n");
 }
 
 async function render(deps: ToolDeps, { target, hits }: Consumers, scope: string[], format: Format, offset: number): Promise<string> {
