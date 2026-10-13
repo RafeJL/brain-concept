@@ -794,3 +794,16 @@ sentence. And sync said "no AI run" after a planning run; it now gives the plann
   are rewritten only when their own cited lines change. So the API page doesn't list a new
   service's routes, though `brain_find_consumers` and the new area page do.
 - **Flows across repos:** B4b.
+
+## 2026-10-13: two checker and prompt fixes
+
+- **A cited file's folder counts as named.** "The routes live in `src` [src/articles.ts:3]" was
+  removed because `src` isn't text in the cited lines, though the citation's own path shows it.
+  Seen on eShop's new Loyalty page at the B4a gate. A backticked term that is the folder of a
+  cited file is now supported, like the cited file itself.
+- **Prompts are read with `\n` line endings.** A Windows checkout gives the prompt files CRLF
+  endings (seen after pulling B4a), so prompts differed by machine and the steering-note test
+  failed on `main`.
+
+(Found while building journey pages across repos, which were dropped: see the B4b plan. Tracing
+flows from the link map on demand replaces them.)

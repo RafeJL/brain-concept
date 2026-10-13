@@ -17,5 +17,6 @@ export function prompt(name: string, values: Record<string, string> = {}): strin
 }
 
 function read(name: string): string {
-  return readFileSync(new URL(`./prompts/${name}.md`, import.meta.url), "utf8").trim();
+  // A Windows checkout gives the files CRLF line endings; prompts are the same whatever the checkout.
+  return readFileSync(new URL(`./prompts/${name}.md`, import.meta.url), "utf8").replace(/\r\n/g, "\n").trim();
 }

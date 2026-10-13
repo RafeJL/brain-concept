@@ -215,7 +215,8 @@ function elementProblem(label: string, cites: readonly Citation[], root: string,
 function supported(term: string, cites: readonly Citation[], root: string, spans: readonly string[]): boolean {
   if (term.length < 2) return true;
   const path = term.replace(/^\.?\//, "").replace(/\/\*{1,2}$/, "").replace(/\/$/, "");
-  if (cites.some((c) => c.path === path)) return true;
+  // A cited file, or the folder holding one (`src`).
+  if (cites.some((c) => c.path === path || c.path.startsWith(`${path}/`))) return true;
   if (/[/\\]|\.\w{1,6}$/.test(path) && !/\s/.test(path) && existsSync(join(root, path))) return true;
   // A route (`PATCH /articles/{slug}`, `GET articles`, a bare `PUT`) needs its method in the cited
   // lines too, as get, HttpGet, Route::get…, or a resource declaration there.
