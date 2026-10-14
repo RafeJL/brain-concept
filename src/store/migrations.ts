@@ -272,4 +272,21 @@ export const MIGRATIONS: (string | ((db: DatabaseSync) => void))[] = [
     finished_at TEXT
   );
   `,
+  // B6b: maps that say what they covered. Each piece of a file (the whole file, or a range of a
+  // long one) records what each mapping run made of it, so answers can tell "none" from "not
+  // mapped". Inherited routes are marked so each map can work them out again. The survey a full
+  // map was made with is kept for the updates after it.
+  `
+  CREATE TABLE seam_pieces (
+    repo       TEXT NOT NULL REFERENCES repos(name) ON DELETE CASCADE,
+    path       TEXT NOT NULL,
+    start_line INTEGER NOT NULL,
+    end_line   INTEGER NOT NULL,
+    http       TEXT NOT NULL CHECK (http IN ('unflagged', 'mapped', 'none', 'unmapped')),
+    links      TEXT NOT NULL CHECK (links IN ('unflagged', 'mapped', 'none', 'unmapped')),
+    PRIMARY KEY (repo, path, start_line)
+  );
+  ALTER TABLE seams ADD COLUMN derived INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE repo_state ADD COLUMN link_survey TEXT;
+  `,
 ];

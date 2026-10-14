@@ -121,6 +121,7 @@ never reach the network.
 | 4 (B3) | Facts from people (`human-reviewed`): `brain_record_fact`, staleness, gaps; each fact checked against the code | ✅ |
 | 4 (B4) | Technical depth: page plans for large repos, area, flow, data-model and integrations pages, checked diagrams, a steering note, steps and repos side by side; following a flow across repos | ✅ B4a; B4b built |
 | B5 | Everything a person does through MCP: confirming in the conversation, `brain_review`, `brain_facts`, `brain_systems` (replaces `brain web`, dropped) | Built |
-| B6 | Real Citation repos and the readiness gate | Next |
+| B6 | Real Citation repos and the readiness gate | Trial done (findings drove B6b) |
+| B6b | Maps that say what they covered: survey, screening, mapping in parts, inherited routes, coverage in answers, run-time exits in traces | Built |
 | B7 | Adding a repo from Claude Code (`brain_add_repo`, the eleventh tool), GitHub sources, enrolment status on the card; the README rewritten for setting up | Built |
 | 6 | Hosting: Azure, cloud containers for the runs, GitHub permissions | Planned |

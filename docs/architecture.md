@@ -73,10 +73,11 @@ Two halves share only the store:
 
 1. A merge to main queues a job for that repo: commit a → b.
 2. `git diff a..b` gives the changed files.
-3. Claude Code maps routes and calls, and in a second run alongside it (with a second look on a full map) the other links (events,
-   gRPC, packages), again in the changed files, and in files whose seams cite a changed file (a moved
-   prefix). Each is verified against its cited lines before it replaces the
-   old ones; Markdown and other files that can't declare an endpoint cost no run. Cross-repo
+3. The changed files, and files whose seams cite a changed file (a moved prefix), are screened and
+   the flagged ones mapped again (see Seams): routes and calls in one run, the other links (events,
+   gRPC, packages) in another. Each is verified against its cited lines before it replaces the old
+   ones; Markdown and other files that can't declare an endpoint cost no run. The survey is made
+   again only when a file it rests on changed; inherited routes are worked out again every time. Cross-repo
    links are worked out at query time, so nothing else is re-linked.
 4. Wiki pages whose cited lines changed, whose cited file grew by ten lines or more, or whose
    cited folder gained a file, are rewritten, four pages to a Claude Code run with the runs side by
@@ -256,9 +257,29 @@ systems a piece of work touches, without reading code or technical pages.
 ## Seams
 
 Every link is a pair: something a repo provides, and something that uses it. All kinds live in the
-one `seams` table, each in its existing columns. HTTP is mapped in one Claude Code run
+one `seams` table, each in its existing columns. HTTP is mapped in one kind of Claude Code run
 (`prompts/list-seams.md`) and the rest in another (`prompts/list-links.md`): asked for in one run,
 HTTP coverage fell (decisions, 2026-10-12).
+
+A full map (`src/ai/seams.ts`) splits the work itself, because one run stops after a sample of a
+large repo (decisions, 2026-10-14):
+1. **Survey** (`src/ai/link-survey.ts`, `prompts/survey-links.md`): route templates, base classes
+   whose public methods every derived class serves, settings files. Checked against its cites and
+   kept on `repo_state.link_survey`.
+2. **Screen** (`src/ai/screen.ts`, `prompts/screen-links.md`): every piece of the repo's own source
+   (files whole, or 600-line ranges; tests, vendored and generated code out, by
+   `src/ai/inventory.ts`), its text in the prompt, a fast model with no tools, about 250,000
+   characters a run. Unanswered pieces are asked again, then counted as flagged.
+3. **Map**: flagged pieces, a dozen at a time, numbered text in the prompt plus Read/Grep for
+   other files, the survey's rules given. Each run answers for every piece; dropped entries and
+   unanswered pieces are each asked for once more. Package manifests go to the links run unscreened.
+4. **Inherited routes**: subclasses of each surveyed base class (found by repeated search over class
+   declarations), each base route with `{controller}` filled in, citing the class, the base method
+   and the template; checked like any route, stored with `derived = 1`, worked out again every map.
+
+`seam_pieces` keeps each piece's outcome for both runs (unflagged, mapped, none, unmapped). Answers
+read it through `src/serve/coverage.ts`: "none" only where the map is complete; otherwise the
+pieces not mapped are named.
 
 | Family | Provides (kind) | Uses (kind) | `method` | `raw_path` | `route_key` (what must match) |
 |---|---|---|---|---|---|

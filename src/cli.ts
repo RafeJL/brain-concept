@@ -384,7 +384,7 @@ function printSeams(result: SeamsResult): void {
     console.log(`${result.repo}: routes and calls up to date at ${at}, no code changed (no AI run)`);
     return;
   }
-  const routes = result.kept.filter((s) => s.kind === "http-route").length;
+  const routes = result.kept.filter((s) => s.kind === "http-route").length + result.derived;
   const calls = result.kept.filter((s) => s.kind === "http-call");
   const runtime = calls.filter((s) => s.key === null).length;
   // Events, gRPC and packages by kind, e.g. ", event-publish 3, event-subscribe 5".
@@ -394,13 +394,18 @@ function printSeams(result: SeamsResult): void {
   const scope = result.mode === "full" ? "mapped" : `updated in ${result.redone.length} file${result.redone.length === 1 ? "" : "s"}`;
   const retried = result.retried ? `, ${result.retried} dropped and asked for again` : "";
   const dropped = result.dropped.length ? `, ${result.dropped.length} ${result.retried ? "still " : ""}dropped` : result.retried ? ", all recovered" : "";
-  const swept = result.swept ? `, ${result.swept} more found on a second look` : "";
+  const derived = result.derived ? ` (${result.derived} from base classes)` : "";
+  const screened = result.screened.pieces
+    ? ` · screened ${count(result.screened.pieces, "piece")} of its own code: ${result.screened.http} to map for HTTP, ${result.screened.links} for messages${result.unmapped.length ? `; ${result.unmapped.length} not mapped` : ""}`
+    : "";
   console.log(
-    `${result.repo}: routes and calls ${scope} at ${at} · ${count(routes, "route")}, ${count(calls.length - runtime, "call")}` +
-      `${runtime ? ` (+${runtime} run-time)` : ""}${links}${swept}${retried}${dropped} · $${result.costUsd.toFixed(2)} · ${Math.round(result.durationMs / 1000)}s`,
+    `${result.repo}: routes and calls ${scope} at ${at} · ${count(routes, "route")}${derived}, ${count(calls.length - runtime, "call")}` +
+      `${runtime ? ` (+${runtime} run-time)` : ""}${links}${retried}${dropped}${screened} · $${result.costUsd.toFixed(2)} · ${Math.round(result.durationMs / 1000)}s`,
   );
   for (const drop of result.dropped.slice(0, 3)) console.log(`    dropped: ${drop.reason} · ${drop.seam}`);
   if (result.dropped.length > 3) console.log(`    … and ${result.dropped.length - 3} more`);
+  for (const piece of result.unmapped.slice(0, 3)) console.log(`    not mapped (no run answered for it): ${piece.path}:${piece.start}-${piece.end}`);
+  if (result.unmapped.length > 3) console.log(`    … and ${result.unmapped.length - 3} more`);
 }
 
 function printWiki(wiki: WikiResult): void {

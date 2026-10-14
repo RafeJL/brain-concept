@@ -1,5 +1,5 @@
 import type { FactCheck, FactRecord, Gap, GapSummary, NewFact } from "../core/facts.js";
-import type { Seam, SeamCoverage, SeamKind } from "../core/seams.js";
+import type { LinkSurvey, Seam, SeamCoverage, SeamKind, SeamPiece } from "../core/seams.js";
 import type { SystemRecord } from "../core/systems.js";
 import type { TraceLink } from "../core/traces.js";
 import type { Enrolment, FileRecord, LanguageShare, PlannedPage, RepoNote, RepoRecord, RepoState, WikiPage } from "../core/types.js";
@@ -17,6 +17,12 @@ export interface SeamUpdate {
   commit: string;
   paths: readonly string[] | null;
   seams: readonly Seam[];
+  /** Pieces mapped this time, replacing those of the same files (or all of them when `paths` is null). */
+  pieces?: readonly SeamPiece[];
+  /** Every inherited route, replacing all earlier ones: worked out again on every map. */
+  derived?: readonly Seam[];
+  /** The survey the map was made with, kept for updates. */
+  survey?: LinkSurvey;
 }
 
 export interface SeamFilter {
@@ -109,6 +115,10 @@ export interface Store {
   seamCoverage(repo: string): SeamCoverage;
   /** Swaps in Claude Code's seams and records the commit they describe, in one step. */
   replaceSeams(repo: string, update: SeamUpdate): void;
+  /** What the last maps made of each piece of the repo's files; empty for a map made before pieces were kept. */
+  seamPieces(repo: string): SeamPiece[];
+  /** The survey the repo's last full map was made with. */
+  linkSurvey(repo: string): LinkSurvey | null;
 
   /** Records the commit at which a missing required page failed the check (null to clear it). */
   setPagesFailedAt(repo: string, commit: string | null): void;

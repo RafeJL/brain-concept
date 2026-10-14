@@ -5,6 +5,7 @@ import { liveStatus } from "../../ingest/enrol.js";
 import type { Store } from "../../store/store.js";
 import type { AccessPolicy, Caller } from "../access.js";
 import { enrolmentLines, readableEnrolment, unfinished } from "../enrolment.js";
+import { coverageNote } from "../coverage.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
 
 export type Format = "concise" | "detailed";
@@ -240,6 +241,8 @@ export async function footer(deps: ToolDeps, options: FooterOptions): Promise<st
   for (const family of options.families ?? ["http"]) {
     const gap = unresolvedNote(deps, options.unresolvedIn, options.relevantRepos, family);
     if (gap) lines.push(gap);
+    const unknown = coverageNote(deps.store, options.unresolvedIn, family);
+    if (unknown) lines.push(unknown);
   }
   lines.push(options.closing);
   return lines;

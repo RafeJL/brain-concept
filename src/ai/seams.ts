@@ -3,20 +3,25 @@ import { changedFiles, inWorktree } from "../core/git.js";
 import { normalisePath, PARAM } from "../core/http.js";
 import { detectLanguage } from "../core/languages.js";
 import { normaliseName, withoutVersion, type NamedFamily } from "../core/links.js";
-import { familyOf, type Seam, type SeamCite, type SeamKind } from "../core/seams.js";
+import { familyOf, type LinkSurvey, type PieceOutcome, type Seam, type SeamCite, type SeamKind, type SeamPiece } from "../core/seams.js";
 import { BrainError } from "../core/types.js";
 import { requireRepo } from "../ingest/registry.js";
 import type { Store } from "../store/store.js";
 import { citationProblem, fileReader, loose, methodShown, spanText } from "./check.js";
 import { DEFAULT_MODEL } from "./generate.js";
+import { isSource, isTestPath, isVendored, vendoredFolders } from "./inventory.js";
+import { inheritedRoutes, surveyLinks, surveyText } from "./link-survey.js";
 import { prompt } from "./prompts.js";
 import type { Runner } from "./runner.js";
+import { packPieces, pieceKey, piecesOf, pieceText, screenPieces, type Piece } from "./screen.js";
 
 const METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "*"]);
 /** Files in these languages never declare a route or make a call, so changing one costs no run. */
 const NEVER_SEAMS = new Set(["Markdown", "CSS", "SCSS", "Less"]);
 /** Package manifests with no known language, which can still publish or use a package. */
 const MANIFESTS = new Set(["requirements.txt", "go.mod", "Gemfile", "Pipfile", "setup.cfg", "packages.config"]);
+/** Every file that can publish a package or depend on one; the links run reads them all, unscreened. */
+const PACKAGE_FILES = /(^|\/)(package\.json|[^/]+\.(cs|fs|vb)proj|pyproject\.toml|setup\.py|setup\.cfg|requirements\.txt|Pipfile|composer\.json|Gemfile|go\.mod|pom\.xml|build\.gradle(\.kts)?|packages\.config)$/;
 /** Events, gRPC and packages: named, not a method and path. Their kinds are stored as given. */
 const NAMED_KINDS = new Set<string>(["event-publish", "event-subscribe", "grpc-serve", "grpc-call", "package-publish", "package-use"]);
 /** Kinds that declare something, so their name must be known; the rest may name it at run time. */
@@ -32,6 +37,7 @@ const CITES = {
   },
 };
 
+/** What a mapping run answers: the seams it found, and for each file or part it was given, whether it declares any. */
 function schema(fields: Record<string, unknown>): object {
   return {
     type: "object",
@@ -40,20 +46,24 @@ function schema(fields: Record<string, unknown>): object {
         type: "array",
         items: { type: "object", properties: { ...fields, runtime: { type: "boolean" }, cites: CITES }, required: [...Object.keys(fields), "runtime", "cites"] },
       },
+      files: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { file: { type: "string" }, from: { type: "integer" }, outcome: { type: "string", enum: ["entries", "none"] } },
+          required: ["file", "from", "outcome"],
+        },
+      },
     },
-    required: ["seams"],
+    required: ["seams", "files"],
   };
 }
 
-/** One Claude Code run, with its prompt, schema and the kinds it may list. */
+/** One kind of Claude Code run, with its prompt, schema and the kinds it may list. */
 interface Pass {
   prompt: string;
   schema: object;
   kinds: ReadonlySet<string>;
-  /** Whether a changed file could hold one of its kinds. */
-  covers: (path: string) => boolean;
-  /** Whether a full map asks once more for what the first run missed. */
-  sweep: boolean;
 }
 
 /**
@@ -65,19 +75,17 @@ const PASSES: readonly Pass[] = [
     prompt: "list-seams",
     schema: schema({ kind: { type: "string", enum: ["route", "call"] }, method: { type: "string" }, path: { type: "string" } }),
     kinds: new Set(["route", "call"]),
-    covers: (path) => detectLanguage(path) !== null,
-    sweep: false,
   },
   {
     prompt: "list-links",
     schema: schema({ kind: { type: "string", enum: [...NAMED_KINDS] }, name: { type: "string" } }),
     kinds: NAMED_KINDS,
-    covers: () => true,
-    // On eshop the links run stopped early, skipping whole files: the web app's event handlers and
-    // the mobile app's gRPC calls were missed in two runs of three.
-    sweep: true,
   },
 ];
+
+function isPackageManifest(path: string): boolean {
+  return PACKAGE_FILES.test(path);
+}
 
 /**
  * One entry of the AI's answer, before verification. A route or call has a method and path; the
@@ -111,8 +119,12 @@ export interface SeamsResult {
   dropped: DroppedSeam[];
   /** How many the first pass dropped and were asked for again; 0 when none were. */
   retried: number;
-  /** How many a full map's second look found that the first run had missed. */
-  swept: number;
+  /** Routes classes get from a base class, worked out by the brain from the survey. */
+  derived: number;
+  /** Pieces of own source read by screening, and how many it flagged for each run. */
+  screened: { pieces: number; http: number; links: number };
+  /** Flagged pieces no mapping run answered for, even when asked again: what they declare is unknown. */
+  unmapped: { path: string; start: number; end: number }[];
   costUsd: number;
   /** Time taken, start to finish; the runs go side by side, so less than their sum. */
   durationMs: number;
@@ -126,117 +138,218 @@ export interface SeamOptions {
   cwd?: string;
 }
 
+/** Characters of numbered file text per mapping run, and pieces at most: small enough that a run reads them all. */
+const EXTRACT_CHARS = 60_000;
+const EXTRACT_PIECES = 12;
+/** OpenAPI and Swagger specs declare routes though they aren't code. */
+const SPEC = /(^|\/)[^/]*(openapi|swagger)[^/]*\.(json|ya?ml)$/i;
+
 /**
  * Has Claude Code list the HTTP routes a repo serves and the calls it makes, the events it
  * publishes and handles, the gRPC methods it serves and calls, and the packages it publishes and
- * uses, at the commit the brain has indexed, verifies each against the lines it cites, and
- * stores what passes. The first run maps the whole repo. After that only files that changed are
- * mapped again, plus any file whose seams cite a changed file (a moved prefix or base URL), so a
- * change costs little and a Markdown-only change costs nothing.
+ * uses, at the commit the brain has indexed, verifies each against the lines it cites, and stores
+ * what passes, with what was covered.
+ *
+ * One run can't cover a large repo: it stops after a sample, different each time (atlas: 124, 13
+ * and 25 routes from one commit). So the work is split by the brain, not the AI:
+ * 1. A survey run finds what applies everywhere: route templates, base classes whose methods are
+ *    routes, where settings live.
+ * 2. A fast model screens every piece of the repo's own source (tests, vendored and generated code
+ *    left out), its text in the prompt so none is skipped, for routes, calls and messages.
+ * 3. Flagged pieces are mapped a few at a time, their text in the prompt, each answered for.
+ * 4. Inherited routes are worked out from the survey and checked like the rest.
+ * Each piece's outcome is stored, so answers can tell "none" from "not mapped". After the first
+ * map only changed files are screened and mapped again, plus any file whose seams cite one.
  */
 export async function updateSeams(store: Store, runner: Runner, name: string, options: SeamOptions = {}): Promise<SeamsResult> {
   const repo = requireRepo(store, name);
   const state = store.getState(name);
   if (!state) throw new BrainError(`"${name}" has not been synced yet. Run: brain sync ${name}`);
+  const model = options.model ?? DEFAULT_MODEL;
+  const commit = state.commit;
 
   const changes = !options.full && state.seamsCommit ? await changedFiles(repo.path, state.seamsCommit, state.commit) : null;
   let redo: string[] | null = null;
+  const changed = new Set((changes ?? []).map((c) => c.path));
   if (changes) {
-    const changed = new Set(changes.map((c) => c.path));
     const files = new Set(changes.filter((c) => c.status !== "D" && mayDeclareSeams(c.path)).map((c) => c.path));
     for (const seam of store.seams({ repos: [name], includeUnresolved: true })) {
       if (seam.cites.some((cite) => changed.has(cite.path))) files.add(seam.path);
     }
     redo = [...files].sort();
     if (redo.length === 0) {
-      store.replaceSeams(name, { commit: state.commit, paths: [], seams: [] });
-      return { repo: name, commit: state.commit, mode: "update", redone: [], kept: [], dropped: [], retried: 0, swept: 0, costUsd: 0, durationMs: 0 };
+      store.replaceSeams(name, { commit: state.commit, paths: changes.filter((c) => c.status === "D").map((c) => c.path), seams: [], pieces: [] });
+      return { repo: name, commit: state.commit, mode: "update", redone: [], kept: [], dropped: [], retried: 0, derived: 0, screened: { pieces: 0, http: 0, links: 0 }, unmapped: [], costUsd: 0, durationMs: 0 };
     }
   }
 
   const started = Date.now();
   let costUsd = 0;
-  const list = async (cwd: string, pass: Pass, scope: string): Promise<unknown[]> => {
-    const run = await runner.run<{ seams?: unknown }>({ cwd, prompt: prompt(pass.prompt, { scope }), schema: pass.schema, model: options.model ?? DEFAULT_MODEL });
-    costUsd += run.costUsd;
-    if (!Array.isArray(run.output?.seams)) throw new BrainError("The AI's seam list was malformed. Nothing was stored.");
-    return run.output.seams.filter((item) => pass.kinds.has((item as Partial<FoundSeam>)?.kind ?? ""));
-  };
-  type Mapped = { kept: Seam[]; dropped: DroppedSeam[]; retried: number };
-  const map = async (cwd: string, pass: Pass, scope: string): Promise<Mapped> => {
-    const first = verifySeams(await list(cwd, pass, scope), cwd, name, state.commit, redo);
-    if (first.dropped.length === 0) return { ...first, retried: 0 };
-    // Output varies between runs and a contributing line is easy to leave out; ask once more for
-    // just the dropped entries, with the reasons, before giving up on them.
-    try {
-      const second = verifySeams(await list(cwd, pass, retryScope(first.dropped, redo)), cwd, name, state.commit, redo);
-      return { kept: uniqueSeams([...first.kept, ...second.kept]), dropped: second.dropped, retried: first.dropped.length };
-    } catch (error) {
-      if (!(error instanceof BrainError)) throw error;
-      return { ...first, retried: 0 };
-    }
-  };
+  const all = store.getFiles(name).map((f) => f.path);
+  const vendored = vendoredFolders(all);
+  const own = all.filter((path) => isSource({ path, language: detectLanguage(path) }, vendored) || (SPEC.test(path) && !isVendored(path, vendored)));
+  const manifests = all.filter((path) => isPackageManifest(path) && !isTestPath(path) && !isVendored(path, vendored));
+  const inScope = (path: string) => !redo || redo.includes(path);
 
-  // A full map of a pass that sweeps then asks once more, with what was found, for anything missed.
-  // Its additions go through the same check. Updates cover only a few files, so they don't sweep.
-  const run = async (cwd: string, pass: Pass): Promise<Mapped & { swept: number }> => {
-    const found = await map(cwd, pass, scopeText(redo));
-    if (redo || !pass.sweep) return { ...found, swept: 0 };
-    try {
-      const more = await map(cwd, pass, sweepScope(found.kept));
-      const kept = uniqueSeams([...found.kept, ...more.kept]);
-      return { kept, dropped: [...found.dropped, ...more.dropped], retried: found.retried + more.retried, swept: kept.length - found.kept.length };
-    } catch (error) {
-      if (!(error instanceof BrainError)) throw error;
-      return { ...found, swept: 0 };
+  const outcome = await inWorktree(repo.path, state.commit, options.cwd, async (cwd) => {
+    const linesOf = fileReader(cwd);
+    let survey = store.linkSurvey(name);
+    // A full map surveys again; an update only when a file the survey rests on changed.
+    if (!redo || !survey || surveyFiles(survey).some((path) => changed.has(path))) {
+      const surveyed = await surveyLinks(runner, cwd, linesOf, model);
+      survey = surveyed.survey;
+      costUsd += surveyed.costUsd;
     }
-  };
 
-  const { kept, dropped, retried, swept } = await inWorktree(repo.path, state.commit, options.cwd, async (cwd) => {
-    // The runs are independent and only read the worktree, so they go side by side. An update
-    // runs one only when a file it's redoing could hold that run's kinds.
-    const results = await Promise.all(PASSES.filter((pass) => !redo || redo.some(pass.covers)).map((pass) => run(cwd, pass)));
-    const total = (key: "retried" | "swept") => results.reduce((sum, r) => sum + r[key], 0);
-    return { kept: results.flatMap((r) => r.kept), dropped: results.flatMap((r) => r.dropped), retried: total("retried"), swept: total("swept") };
+    const pieces = piecesOf(own.filter(inScope), linesOf);
+    const screened = await screenPieces(runner, cwd, pieces, linesOf);
+    costUsd += screened.costUsd;
+    const flagged = (p: Piece) => screened.flags.get(pieceKey(p))!;
+    const manifestPieces = piecesOf(manifests.filter((path) => inScope(path) && !own.includes(path)), linesOf);
+    const work = [
+      { pass: PASSES[0]!, pieces: pieces.filter((p) => flagged(p).route || flagged(p).call) },
+      { pass: PASSES[1]!, pieces: [...pieces.filter((p) => flagged(p).message), ...manifestPieces] },
+    ];
+    const results = await Promise.all(work.map(({ pass, pieces }) => mapPieces(pass, pieces)));
+
+    // Inherited routes, worked out again over the whole repo on every map: a changed base class
+    // changes them all. A derived class's own route for the same path wins.
+    const listed = new Set(results[0]!.kept.map(routeId));
+    const derived = verifySeams(inheritedRoutes(survey, own, linesOf), cwd, name, state.commit).kept
+      .filter((s) => !listed.has(routeId(s)))
+      .map((s) => ({ ...s, derived: true }));
+
+    const ledger: SeamPiece[] = [...pieces, ...manifestPieces].map((p) => {
+      const key = pieceKey(p);
+      const isManifest = manifests.includes(p.path);
+      return {
+        ...p,
+        http: isManifest ? "unflagged" : results[0]!.outcomes.get(key) ?? "unflagged",
+        links: results[1]!.outcomes.get(key) ?? "unflagged",
+      };
+    });
+    return {
+      survey,
+      kept: results.flatMap((r) => r.kept),
+      dropped: results.flatMap((r) => r.dropped),
+      retried: results.reduce((n, r) => n + r.retried, 0),
+      derived,
+      ledger,
+      screened: { pieces: pieces.length, http: work[0]!.pieces.length, links: work[1]!.pieces.length - manifestPieces.length },
+    };
+
+    /** Maps flagged pieces a few at a time, then asks again for any no run answered for. */
+    async function mapPieces(pass: Pass, todo: readonly Piece[]) {
+      const outcomes = new Map<string, PieceOutcome>();
+      const kept: Seam[] = [];
+      const dropped: DroppedSeam[] = [];
+      let retried = 0;
+      const round = async (batch: readonly Piece[]) => {
+        const files = [...new Set(batch.map((p) => p.path))];
+        const text = batch.map((p) => pieceText(p, linesOf(p.path) ?? [], true)).join("\n");
+        const ask = async (scope: string) => {
+          const run = await runner.run<{ seams?: unknown; files?: unknown }>({ cwd, prompt: prompt(pass.prompt, { scope, files: text }), schema: pass.schema, model });
+          costUsd += run.costUsd;
+          if (!Array.isArray(run.output?.seams)) throw new BrainError("The AI's seam list was malformed.");
+          return { found: run.output.seams.filter((item) => pass.kinds.has((item as Partial<FoundSeam>)?.kind ?? "")), answered: answeredPieces(run.output.files) };
+        };
+        try {
+          const first = await ask(batchScope(survey!));
+          let result = verifySeams(first.found, cwd, name, commit, files);
+          if (result.dropped.length) {
+            // Output varies between runs and a contributing line is easy to leave out; ask once
+            // more for just the dropped entries, with the reasons, before giving up on them.
+            retried += result.dropped.length;
+            try {
+              const second = verifySeams((await ask(retryScope(result.dropped))).found, cwd, name, commit, files);
+              result = { kept: uniqueSeams([...result.kept, ...second.kept]), dropped: second.dropped };
+            } catch (error) {
+              if (!(error instanceof BrainError)) throw error;
+            }
+          }
+          kept.push(...result.kept);
+          dropped.push(...result.dropped);
+          for (const p of batch) {
+            // A checked seam declared in the piece, or built from lines in it (a .proto a server implements).
+            const within = (c: { path: string; start: number }) => c.path === p.path && c.start >= p.start && c.start <= p.end;
+            const used = result.kept.some((s) => within({ path: s.path, start: s.startLine }) || s.cites.some(within));
+            if (used) outcomes.set(pieceKey(p), "mapped");
+            // The run read it: claims of its that failed the check are reported as dropped, not as a gap.
+            else if (first.answered.has(pieceKey(p))) outcomes.set(pieceKey(p), "none");
+          }
+        } catch (error) {
+          if (!(error instanceof BrainError)) throw error;
+        }
+      };
+      await Promise.all(packPieces(todo, linesOf, EXTRACT_CHARS, EXTRACT_PIECES).map(round));
+      const missing = todo.filter((p) => !outcomes.has(pieceKey(p)));
+      if (missing.length) await Promise.all(packPieces(missing, linesOf, EXTRACT_CHARS / 2, EXTRACT_PIECES / 2).map(round));
+      for (const p of todo) if (!outcomes.has(pieceKey(p))) outcomes.set(pieceKey(p), "unmapped");
+      return { kept: uniqueSeams(kept), dropped, retried, outcomes };
+    }
   });
 
-  store.replaceSeams(name, { commit: state.commit, paths: redo, seams: kept });
+  const deleted = (changes ?? []).filter((c) => c.status === "D").map((c) => c.path);
+  store.replaceSeams(name, {
+    commit: state.commit,
+    paths: redo ? [...redo, ...deleted] : null,
+    seams: outcome.kept,
+    pieces: outcome.ledger,
+    derived: outcome.derived,
+    survey: outcome.survey,
+  });
   return {
     repo: name,
     commit: state.commit,
     mode: redo ? "update" : "full",
     redone: redo ?? [],
-    kept,
-    dropped,
-    retried,
-    swept,
+    kept: outcome.kept,
+    dropped: outcome.dropped,
+    retried: outcome.retried,
+    derived: outcome.derived.length,
+    screened: outcome.screened,
+    unmapped: outcome.ledger.filter((p) => p.http === "unmapped" || p.links === "unmapped").map(({ path, start, end }) => ({ path, start, end })),
     costUsd,
     durationMs: Date.now() - started,
   };
 }
 
-function sweepScope(found: readonly Seam[]): string {
-  return [
-    "Cover the whole repository. An earlier pass found these, and may have stopped before it had looked everywhere:",
-    ...(found.length ? found.map((s) => `- ${s.kind} ${s.rawPath} (${s.path})`) : ["- (none)"]),
-    "Go through every service, app and project in turn (web, mobile and desktop front ends, APIs, workers, tests) and list only the ones it missed. An empty list is a fine answer.",
-  ].join("\n");
+/** A route's identity for telling a listed route from the same one worked out from a base class. */
+function routeId(seam: Seam): string {
+  return `${seam.kind} ${seam.method} ${seam.key ?? seam.rawPath} ${seam.path}`;
 }
 
-function retryScope(dropped: readonly DroppedSeam[], redo: readonly string[] | null): string {
+/** The files a survey rests on: when one changes, the survey is made again. */
+function surveyFiles(survey: LinkSurvey): string[] {
   return [
-    "An earlier pass listed these, and the automatic check dropped them for the reasons given:",
+    ...survey.templates.flatMap((t) => t.cites.map((c) => c.path)),
+    ...survey.inherited.flatMap((b) => [...b.cites, ...b.routes.flatMap((r) => r.cites)].map((c) => c.path)),
+    ...survey.configFiles,
+  ];
+}
+
+/** What a mapping run said of each piece it was given, by key: "entries" or "none". */
+function answeredPieces(files: unknown): Map<string, string> {
+  if (!Array.isArray(files)) return new Map();
+  return new Map(files.flatMap((f) => {
+    const answer = f as Partial<{ file: string; from: number; outcome: string }>;
+    return typeof answer?.file === "string" ? [[pieceKey({ path: cleanPath(answer.file), start: Number(answer.from ?? 1) }), String(answer.outcome)] as [string, string]] : [];
+  }));
+}
+
+function batchScope(survey: LinkSurvey): string {
+  return [
+    "Only list entries declared in the files and parts given at the end, whose text is there with each line numbered. Read any other file you need to resolve prefixes, base URLs, templates and names.",
+    surveyText(survey),
+    "In `files`, answer for every file and part given: its path as `file`, its first line as `from` (1 for a whole file), and `outcome` \"entries\" if you listed any declared in it, or \"none\".",
+  ].filter(Boolean).join("\n");
+}
+
+function retryScope(dropped: readonly DroppedSeam[]): string {
+  return [
+    "An earlier pass over the files at the end listed these, and the automatic check dropped them for the reasons given:",
     ...dropped.map((d) => `- ${d.seam}: ${d.reason}`),
-    "List again only the ones that are real, this time citing every line each fixed segment of the path, or each part of the name, comes from (such as a base-URL constant, a route prefix or the class a method belongs to), and leave out any you can't support.",
-    ...(redo ? ["Only these files are being mapped:", ...redo.map((path) => `- ${path}`)] : []),
-  ].join("\n");
-}
-
-function scopeText(redo: readonly string[] | null): string {
-  if (!redo) return "Cover the whole repository.";
-  return [
-    "Only list entries declared in these files. Read any other file you need to resolve prefixes, base URLs and names:",
-    ...redo.map((path) => `- ${path}`),
+    "List again only the ones that are real, this time citing every line each fixed segment of the path, or each part of the name, comes from (such as a base-URL constant, a route prefix, a route template or the class a method belongs to), and leave out any you can't support. Answer `files` as an empty list.",
   ].join("\n");
 }
 

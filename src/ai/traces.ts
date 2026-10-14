@@ -123,8 +123,12 @@ export async function updateTraces(store: Store, runner: Runner, name: string, o
   if (!state) throw new BrainError(`"${name}" has not been synced yet. Run: brain sync ${name}`);
   const started = Date.now();
   const seams = store.seams({ repos: [name], includeUnresolved: true }).filter((s) => !isTestPath(s.path));
-  const entrySeams = unique(seams.filter((s) => ENTRY_KINDS.includes(s.kind)));
-  const exitSeams = seams.filter((s) => EXIT_KINDS.includes(s.kind) && s.key !== null);
+  // A route a class inherits is handled by its base class's code: tracing each of hundreds of
+  // derived classes would repeat one chain. Answers point at the base method instead.
+  const entrySeams = unique(seams.filter((s) => ENTRY_KINDS.includes(s.kind) && !s.derived));
+  // Calls and publishes named only at run time are exits too: a chain may end at one, so a
+  // handler calling a URL from config doesn't read as reaching nothing.
+  const exitSeams = seams.filter((s) => EXIT_KINDS.includes(s.kind));
   const exitRefs = [...new Set(exitSeams.map(seamRef))].sort();
   const previous = store.traceLinks(name);
   // A repo meeting no other service (a library, a docs repo) has nothing to trace.

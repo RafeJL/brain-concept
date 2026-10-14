@@ -316,6 +316,22 @@ describe("following a flow", () => {
     expect(tableKey("ordering.orders")).toBe(tableKey('"Orders"'));
   });
 
+  it("ends a chain at a call named only at run time, saying where it goes can't be followed, not that it reaches nothing", async () => {
+    const env = await shop();
+    const at = env.store.getState("basket")!.commit;
+    const cacheCall = { ...seam("basket", "http-call", "GET config:CacheUrl", "src/handler.ts", 2, at), key: null };
+    env.store.replaceSeams("basket", { commit: at, paths: null, seams: [seam("basket", "event-subscribe", "OrderStarted", "src/handler.ts", 1, at), cacheCall] });
+    const answer = (prompt: string) =>
+      prompt.includes("src/handler.ts:1") ? [{ entry: "E1", leads: [{ exit: /- (X\d+): [^\n]*config:CacheUrl/.exec(prompt)?.[1], steps: [step("src/handler.ts", 1, 2)] }] }] : answersFor(prompt);
+    for (const repo of ["web", "orders", "basket"]) await updateTraces(env.store, traceRunner(answer).runner, repo);
+
+    const text = (await findConsumers(env.deps, LOCAL_CALLER, { target: "POST /api/orders", format: "concise", follow: true })).text;
+
+    expect(text).toContain("→ calls GET config:CacheUrl (src/handler.ts:1-2)");
+    expect(text).toContain("(named only at run time, so where it goes can't be followed)");
+    expect(text).not.toContain("handles OrderStarted · src/handler.ts:1 · ends here");
+  });
+
   it("explains that packages aren't traced", async () => {
     const { deps } = await traced();
     expect((await findConsumers(deps, LOCAL_CALLER, { target: "package left-pad", format: "concise", follow: true })).text).not.toContain("What handling");

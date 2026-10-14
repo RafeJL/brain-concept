@@ -3,6 +3,7 @@ import { FAMILIES, type SeamCoverage } from "../../core/seams.js";
 import type { Enrolment, Freshness, LanguageShare, PageKind } from "../../core/types.js";
 import { liveStatus } from "../../ingest/enrol.js";
 import type { Caller } from "../access.js";
+import { coverageLine, coverageOf, type MapCoverage } from "../coverage.js";
 import { enrolmentCard, enrolmentLines, readableEnrolment, readyLine, unfinished } from "../enrolment.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
 import { factCountText, factsAbout } from "../facts.js";
@@ -23,6 +24,8 @@ export interface RepoCard {
   languages: LanguageShare[];
   /** The routes and calls Claude Code found, and the commit they describe (null: not mapped yet). */
   seams: SeamCoverage & { commit: string | null };
+  /** How complete the link map is: shown in detailed cards, and in concise ones when partial. */
+  coverage: { state: MapCoverage["state"]; line: string };
   neighbours: Neighbours;
   /** The AI-written wiki, if one has been generated. */
   wiki: { pages: string[]; kinds: PageKind[]; commit: string } | null;
@@ -80,6 +83,7 @@ export async function repoCard(deps: ToolDeps, caller: Caller, name: string, for
     files: state.fileCount,
     languages,
     seams: { ...deps.store.seamCoverage(name), commit: state.seamsCommit },
+    coverage: { state: worst(coverageOf(deps.store, name, "http").state, coverageOf(deps.store, name, "event").state), line: coverageLine(deps.store, name) },
     neighbours: neighbours(deps.store, name, readable),
     wiki: wikiOf(deps, name, state.commit),
     ...productAndSystem(deps, name, readable),
@@ -99,9 +103,15 @@ function conciseText(card: RepoCard): string {
     `Files: ${card.files} on ${card.ref}`,
     `Languages: ${shown.join(" · ")}${more > 0 ? ` (+${more} more)` : ""}`,
     seamsLine(card),
+    ...(card.seams.commit && card.coverage.state === "partial" ? [card.coverage.line] : []),
     ...neighbourLines(card.neighbours),
     ...notes(card),
   ].join("\n");
+}
+
+/** The less complete of two coverages. */
+function worst(a: MapCoverage["state"], b: MapCoverage["state"]): MapCoverage["state"] {
+  return a === "partial" || b === "partial" ? "partial" : a === "unknown" || b === "unknown" ? "unknown" : "complete";
 }
 
 function detailedText(card: RepoCard): string {
@@ -120,6 +130,7 @@ function detailedText(card: RepoCard): string {
     "Languages:",
     ...rows,
     seamsLine(card),
+    ...(card.seams.commit ? [card.coverage.line] : []),
     ...neighbourLines(card.neighbours),
     ...notes(card),
   ].join("\n");

@@ -53,6 +53,11 @@ describe("Claude Code runner", () => {
     expect(args[args.indexOf("--permission-mode") + 1]).toBe("dontAsk");
     expect(args[args.indexOf("--model") + 1]).toBe("sonnet");
     expect(args[args.indexOf("--output-format") + 1]).toBe("json");
+    // The prompt goes on stdin, so a long one doesn't pass Windows' command-line limit.
+    expect(args).not.toContain("p");
+    const inline = claudeArgs({ cwd: ".", prompt: "p", schema: { type: "object" }, model: "haiku", explore: false });
+    expect(inline[inline.indexOf("--tools") + 1]).toBe("");
+    expect(inline).not.toContain("--allowedTools");
   });
 
   it("reads a recorded result, and refuses errors and missing output", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { checkPage } from "../src/ai/check.js";
 import { generateWiki } from "../src/ai/generate.js";
-import { inventory } from "../src/ai/inventory.js";
+import { inventory, isVendored, vendoredFolders } from "../src/ai/inventory.js";
 import { checkPlan, replanReason } from "../src/ai/plan.js";
 import { limitRunner, type RunRequest, type RunResult, type Runner } from "../src/ai/runner.js";
 import { normalisePath } from "../src/core/http.js";
@@ -109,6 +109,29 @@ describe("the inventory", () => {
     const projects = ["a", "b", "c", "d"].map((p) => file(`services/${p}/package.json`, "JSON"));
     expect(inventory([...projects, file("node_modules/x/package.json", "JSON"), file("tests/e2e/package.json", "JSON")])).toMatchObject({ large: true, projects: ["services/a", "services/b", "services/c", "services/d"] });
     expect(inventory(projects.slice(0, 3)).large).toBe(false);
+  });
+
+  it("leaves out generated code and copies of libraries, but not the repo's own versioned folders", () => {
+    const own = ["src/Api/v1/OrdersController.cs", "src/Api/v1.2/Legacy.cs", "src/app.js", "Scripts/atlas.js"];
+    const vendored = [
+      "src/Resources/AtlasResource.Designer.cs",
+      "src/Service References/Crm/Reference.cs",
+      "src/Proto/basket_pb2.py",
+      "Scripts/jquery-ui-1.10.3.js",
+      "Scripts/angular.min.js",
+      "Scripts/kendo/2014.1.318/kendo.all.js",
+      "Scripts/ckeditor/ckeditor.js",
+      "Scripts/ckeditor/plugins/a/plugin.js",
+      "Scripts/ckeditor-customized/core/editor.js",
+    ];
+    const markers = ["Scripts/ckeditor/LICENSE.md", "Scripts/ckeditor-customized/package.json", "Scripts/LICENSE.txt"];
+    const folders = vendoredFolders([...own, ...vendored, ...markers]);
+
+    expect([...folders].sort()).toEqual(["Scripts/ckeditor", "Scripts/ckeditor-customized"]);
+    expect(own.filter((p) => isVendored(p, folders))).toEqual([]);
+    expect(vendored.filter((p) => !isVendored(p, folders))).toEqual([]);
+    // A copied library's manifest isn't a project of the repo's.
+    expect(inventory([file("Scripts/ckeditor-customized/package.json", "JSON"), file("Scripts/ckeditor-customized/core/editor.js")]).projects).toEqual([]);
   });
 
   it("maps folders, projects and entry points for the planning run", () => {

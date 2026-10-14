@@ -6,7 +6,20 @@ const NOT_CODE = new Set(["JSON", "YAML", "TOML", "XML", "Markdown", "HTML", "CS
 /** Files that make a folder a project of its own. */
 const MANIFEST = /(^|\/)(package\.json|[^/]+\.csproj|[^/]+\.fsproj|composer\.json|pyproject\.toml|setup\.py|go\.mod|Cargo\.toml|pom\.xml|build\.gradle(\.kts)?|Gemfile)$/;
 const TEST = /(^|\/)(tests?|spec|specs|__tests__|e2e|testing|fixtures)(\/|$)|[.-]tests?\b|(Functional|Unit|Integration)Tests/i;
-const VENDORED = /(^|\/)(node_modules|vendor|dist|build|bin|obj|\.git)\//;
+const VENDORED = /(^|\/)(node_modules|vendor|vendors|bower_components|dist|build|bin|obj|\.git)\//;
+/**
+ * Code a tool wrote or a library shipped, not the repo's own: minified and bundled files,
+ * resource and service-reference classes, protobuf output, and copies of a library at a version
+ * (`jquery-ui-1.10.3.js`, `Scripts/kendo/2014.1.318/`). On atlas-webapp-webapi these were a third
+ * of what counted as source (2026-10-13 trial).
+ */
+const GENERATED = /(\.min\.js|\.bundle\.js|\.designer\.cs|\.g\.cs|\.g\.i\.cs|\.generated\.\w+|_pb2(_grpc)?\.py|\.pb\.go)$|(^|\/)Reference\.cs$/i;
+// A folder named for a three-part version, not an API version (`v1/`, `v1.2/` are the repo's own).
+const VERSIONED = /(^|\/)\d+\.\d+\.\d+(\.\d+)?\/|[-.]v?\d+\.\d+(\.\d+)*(\.min)?\.js$/;
+/** Folders a front end serves static files from; a package copied into one is a library, not a project. */
+const ASSET_FOLDER = /(^|\/)(Scripts|scripts|lib|libs|plugins|static|assets|wwwroot|public|Content)\//;
+/** What a copied library carries at its root: its own manifest, licence or change log. */
+const LIBRARY_MARKER = /(^|\/)(package\.json|bower\.json|composer\.json|(LICEN[CS]E|COPYING|CHANGES|CHANGELOG)(\.\w+)?)$/i;
 const ENTRY = /(^|\/)(Program\.cs|Startup\.cs|main\.[a-z]+|index\.[jt]sx?|app\.[a-z]+|server\.[jt]s|manage\.py|artisan|routes\/(api|web)\.php)$/i;
 
 /**
@@ -34,12 +47,30 @@ export function isTestPath(path: string): boolean {
   return TEST.test(path);
 }
 
-export function isSource(file: Pick<FileRecord, "path" | "language">): boolean {
-  return file.language !== null && !NOT_CODE.has(file.language) && !TEST.test(file.path) && !VENDORED.test(file.path);
+/**
+ * Folders holding a copy of a third-party library: one inside a folder of static files with its
+ * own manifest, licence or change log at its root (`WebApp/Scripts/ckeditor/LICENSE.md`,
+ * `WebApp/Scripts/ckeditor-customized/package.json`). The static folder itself never counts.
+ */
+export function vendoredFolders(paths: readonly string[]): Set<string> {
+  const folders = paths.filter((p) => LIBRARY_MARKER.test(p)).map((p) => posix.dirname(p));
+  return new Set(folders.filter((dir) => ASSET_FOLDER.test(`${posix.dirname(dir)}/`)));
 }
 
-export function isProjectManifest(path: string): boolean {
-  return MANIFEST.test(path) && !TEST.test(path) && !VENDORED.test(path);
+/** Whether a path is vendored or generated code; `folders` from `vendoredFolders`. */
+export function isVendored(path: string, folders: ReadonlySet<string> = new Set()): boolean {
+  if (VENDORED.test(path) || GENERATED.test(path) || VERSIONED.test(path)) return true;
+  for (let dir = posix.dirname(path); dir !== "." && dir !== "/"; dir = posix.dirname(dir)) if (folders.has(dir)) return true;
+  return false;
+}
+
+/** The repo's own code: a language that is code, outside tests, vendored and generated code. */
+export function isSource(file: Pick<FileRecord, "path" | "language">, vendored?: ReadonlySet<string>): boolean {
+  return file.language !== null && !NOT_CODE.has(file.language) && !TEST.test(file.path) && !isVendored(file.path, vendored);
+}
+
+export function isProjectManifest(path: string, vendored?: ReadonlySet<string>): boolean {
+  return MANIFEST.test(path) && !TEST.test(path) && !isVendored(path, vendored) && !vendored?.has(posix.dirname(path));
 }
 
 /**
@@ -48,8 +79,9 @@ export function isProjectManifest(path: string): boolean {
  * large, and is the map its planning run starts from, so that run doesn't list folders itself.
  */
 export function inventory(files: readonly FileRecord[]): Inventory {
-  const source = files.filter(isSource);
-  const projects = [...new Set(files.filter((f) => isProjectManifest(f.path)).map((f) => posix.dirname(f.path)))].sort();
+  const vendored = vendoredFolders(files.map((f) => f.path));
+  const source = files.filter((f) => isSource(f, vendored));
+  const projects = [...new Set(files.filter((f) => isProjectManifest(f.path, vendored)).map((f) => posix.dirname(f.path)))].sort();
   const languages = new Map<string, number>();
   const folders = new Map<string, number>();
   for (const file of source) {

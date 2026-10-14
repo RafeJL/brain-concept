@@ -553,3 +553,30 @@ uses, under names ending `-test`, and H8 removes them. To use a copy of your sto
 8. **Clean up.** `npm run brain -- repo remove <name>` for flask-test, laravel-test,
    flask-cli-test and no-such-repo. Each says it removed the brain's clone where it made one, and
    `%USERPROFILE%\.brain\repos` no longer holds them. laravel-test's own folder is left alone.
+
+## Part I: maps that say what they covered (B6b)
+
+Use a copy of your store (`$env:BRAIN_DB`). A small repo costs cents; a monolith like
+atlas-webapp-webapi about an hour and $70 for its links.
+
+1. **Map a repo again.** `sync <repo> --only links --full`. The links line now ends with what was
+   screened: `screened N pieces of its own code: M to map for HTTP, K for messages`, and says how
+   many routes came from base classes. Anything no run answered for is listed as `not mapped`.
+2. **The card says how complete it is.** `card <repo> --detailed` has a `Link map:` line:
+   `complete`, `partial` (with the pieces not mapped), or `coverage not recorded` for a repo not
+   mapped again yet.
+3. **Inherited routes.** On a repo with a CRUD base controller, `impact <repo> --route "GET
+   /api/<Controller>"` finds the derived route, citing the controller's class line, the base
+   method and the route template. `consumers "GET /api/<Controller>" --follow` says its handling
+   is the base method's, with its file and line.
+4. **Convention routes.** Pick a controller action with `[HttpGet]` but no `[Route]`;
+   `impact <repo> --route "GET /api/<Controller>/<Action>"` finds it.
+5. **No false "none".** On a repo mapped before this change, `impact <repo> --route "GET
+   /nothing"` says the map was made before coverage was recorded. After mapping it again it says
+   only that nothing matched.
+6. **Run-time exits.** Follow a route whose handler calls a URL from config
+   (`consumers "<METHOD /path>" --follow`): the step shows `calls ... (named only at run time, so
+   where it goes can't be followed)`, not `ends here`.
+7. **Tests and vendored code are left out.** Calls from a repo's tests to its own routes no longer
+   appear in `consumers`; files under a vendored library (`Scripts/ckeditor/`) or generated
+   (`*.Designer.cs`) are not screened.

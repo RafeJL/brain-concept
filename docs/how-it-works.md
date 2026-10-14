@@ -153,6 +153,28 @@ with its full path. No language needs any setup.
 - **Names match exactly**, ignoring case and package versions. Paths match with parameters in any
   style, and a base path such as `/api` may differ between server and caller.
 - **Shared databases aren't linked:** table names like `users` repeat across unrelated databases.
+- **Tests aren't mapped.** A repo's tests calling its own routes aren't callers that break in
+  production.
+
+### How a repo's links are mapped
+
+One AI run can't cover a large repo: it stops after a sample, a different one each time. So the
+brain splits the work itself:
+1. **Survey.** One run finds what applies everywhere: convention route templates
+   (`api/{controller}/{action}`), base classes whose methods every derived class serves, and where
+   settings such as base URLs live. Each is checked against the lines it cites.
+2. **Screen.** A fast model reads every file of the repo's own code (tests, vendored and generated
+   code left out; long files in parts), with its text in the prompt so none can be skipped, and
+   flags those that declare routes, make calls or send messages.
+3. **Map.** Flagged files go to the mapping runs a few at a time, again with their text in the
+   prompt, and each run answers for every file it was given.
+4. **Work out inherited routes.** Routes a class gets from its base class are worked out by the
+   brain from the survey, citing the class, the base method and the template, and checked like
+   the rest.
+
+Each piece's outcome is kept, so the map knows what it covered. A file no run answered for is
+"not mapped", and answers say so: "no caller found" there is unknown, not none. `brain_repo_card`
+shows how complete a repo's map is. Sync after that screens and maps only changed files.
 
 ### Following a flow
 
@@ -166,7 +188,9 @@ Hops go two ways:
   table's writer to a job that polls it. Between repos, a table is only named, never linked.
 
 Each hop is a chain of cited steps from the handler to the line that makes the call, checked
-without AI. A step that reaches nothing says "ends here", and one not yet mapped says so.
+without AI. A step that reaches nothing says "ends here", and one not yet mapped says so. A call or
+message named only at run time (a URL from config the repo doesn't hold) is shown as a step that
+can't be followed, not as the end of the flow.
 
 The chains come from a third run in the links step. Sync keeps them current: lines that only move
 cost nothing, and only chains whose code changed are followed again.
@@ -205,13 +229,11 @@ the top of the product page, on the card, in search and in system overviews.
 
 ## What it can't do yet
 
-Found on real Citation repos (2026-10-13). Fixes are planned (B6b).
-- **Links in very large repos are a sample.** On a monolith with hundreds of controllers, the link
-  map holds only some of the routes and calls, and varies from run to run. Treat "no consumer
-  found" or "no matching routes" there as unknown, not as none. Wiki pages stay accurate.
-- **Calls and queues named at run time end a trace.** When a URL or queue name comes from config,
-  the trace says "ends here" where the code actually calls out.
-- **Paths with spaces can't be cited**, so files under such folders aren't described.
+- **Paths with spaces can't be cited**, so files under such folders aren't described (found on
+  real Citation repos, 2026-10-13; a fix is planned).
+- **A link map made before 2026-10-14 doesn't record what it covered.** On a large repo it may be
+  a sample, and answers say so. `brain sync <repo> --only links --full` maps it again with
+  coverage.
 - **Search by meaning:** `brain_search` matches words, not synonyms. Search "auth" rather than
   "login security".
 - **Flows across repos as pages:** a flow page covers one repo. Following a flow across repos is a

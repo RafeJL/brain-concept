@@ -34,6 +34,8 @@ export interface Reached {
   next: TraceNode[];
   /** Repos it continues in that the caller can't read: counted, never named. */
   hidden: number;
+  /** Set when what is reached is named only at run time (a URL or queue from config): it can't be followed. */
+  runtime?: boolean;
   /** Set when what's reached is a table read or written. */
   table?: { name: string; access: "read" | "write" };
 }
@@ -47,7 +49,7 @@ export interface Reached {
  */
 export function traceFrom(store: Store, readable: readonly string[], starts: readonly Seam[]): TraceNode[] {
   const all = store.listRepos().map((r) => r.name);
-  const seams = new Map(all.map((repo) => [repo, store.seams({ repos: [repo] })]));
+  const seams = new Map(all.map((repo) => [repo, store.seams({ repos: [repo], includeUnresolved: true })]));
   const links = new Map<string, TraceLink[]>();
   const linksOf = (repo: string) => links.get(repo) ?? links.set(repo, store.traceLinks(repo)).get(repo)!;
   const visited = new Set<string>();
@@ -60,7 +62,12 @@ export function traceFrom(store: Store, readable: readonly string[], starts: rea
     const all = linksOf(repo).filter((l) => l.entry === entry);
     const failed = all.find((l) => l.target.type === "unmapped");
     const chains = all.filter((l) => l.target.type !== "unmapped");
-    if (chains.length === 0) return failed?.target.type === "unmapped" ? { ...node, outcome: { type: "unmapped", reason: failed.target.reason } } : node;
+    if (chains.length === 0) {
+      if (failed?.target.type === "unmapped") return { ...node, outcome: { type: "unmapped", reason: failed.target.reason } };
+      const inherited = seams.get(repo)?.find((s) => s.derived && seamRef(s) === entry);
+      const base = inherited?.cites[0];
+      return base ? { ...node, outcome: { type: "unmapped", reason: `inherited from a base class, so its handling is the base method at ${base.path}:${lineRange(base.start, base.end)}` } } : node;
+    }
     const ends = chains.find((l) => l.target.type === "none");
     if (ends) return { ...node, outcome: { type: "ends", pointer: stepPointer(ends.steps[0]!) } };
 
@@ -71,7 +78,8 @@ export function traceFrom(store: Store, readable: readonly string[], starts: rea
         const ref = chain.target.ref;
         const exits = seams.get(repo)!.filter((s) => seamRef(s) === ref);
         const { next, hidden } = followExit(exits, readable, seams, (s) => visit(s.repo, seamRef(s), labelOf(s), `${s.path}:${lineRange(s.startLine, s.endLine)}`, ref));
-        reached.push({ what: exitWords(ref), how, next, hidden });
+        const runtime = exits.length > 0 && exits.every((x) => x.key === null);
+        reached.push({ what: exitWords(ref), how, next, hidden, ...(runtime ? { runtime } : {}) });
       } else if (chain.target.type === "table") {
         const { name, access } = chain.target;
         // A write carries the flow on only to what runs by itself and reads that table: a job polling
@@ -93,10 +101,12 @@ export function traceFrom(store: Store, readable: readonly string[], starts: rea
 }
 
 /** Who serves a call or handles a published event, among all repos; those the caller can't read are only counted. */
-function followExit(exits: readonly Seam[], readable: readonly string[], seams: ReadonlyMap<string, Seam[]>, visit: (s: Seam) => TraceNode): { next: TraceNode[]; hidden: number } {
+function followExit(all: readonly Seam[], readable: readonly string[], seams: ReadonlyMap<string, Seam[]>, visit: (s: Seam) => TraceNode): { next: TraceNode[]; hidden: number } {
+  // Only a named exit can be matched; one named at run time leads nowhere the brain can see.
+  const exits = all.filter((x) => x.key !== null);
   if (exits.length === 0) return { next: [], hidden: 0 };
   const family = familyOf(exits[0]!.kind);
-  const every = [...seams.values()].flat();
+  const every = [...seams.values()].flat().filter((s) => s.key !== null);
   const targets =
     family === "event"
       ? every.filter((s) => s.kind === FAMILIES.event.uses && exits.some((x) => x.key === s.key))
@@ -162,9 +172,11 @@ export function renderTrace(nodes: readonly TraceNode[], detailed: boolean, stor
     switch (node.outcome.type) {
       case "unmapped":
         out.push(
-          node.outcome.reason
-            ? `${head} · not mapped: no chain from it held at this commit (${node.outcome.reason})`
-            : `${head} · not mapped yet (what it leads to hasn't been traced)`,
+          node.outcome.reason?.startsWith("inherited")
+            ? `${head} · ${node.outcome.reason}`
+            : node.outcome.reason
+              ? `${head} · not mapped: no chain from it held at this commit (${node.outcome.reason})`
+              : `${head} · not mapped yet (what it leads to hasn't been traced)`,
         );
         return;
       case "loop":
@@ -192,7 +204,8 @@ export function renderTrace(nodes: readonly TraceNode[], detailed: boolean, stor
       for (const child of next) walk(child, depth + 2);
       if (next.length < r.next.length) out.push(`${pad}      +${r.next.length - next.length} more (format detailed shows them)`);
       if (r.hidden) out.push(`${pad}      continues in ${r.hidden === 1 ? "a repo" : `${r.hidden} repos`} you can't read`);
-      if (!r.next.length && !r.hidden && !r.table) out.push(`${pad}      (nothing enrolled serves or handles it)`);
+      if (r.runtime) out.push(`${pad}      (named only at run time, so where it goes can't be followed)`);
+      else if (!r.next.length && !r.hidden && !r.table) out.push(`${pad}      (nothing enrolled serves or handles it)`);
     }
     if (shown.length < flowing.length) out.push(`${pad}  +${flowing.length - shown.length} more things it reaches (format detailed shows them)`);
   };
