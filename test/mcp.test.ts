@@ -18,14 +18,40 @@ async function connect(store: SqliteStore): Promise<Client> {
 }
 
 describe("MCP server", () => {
-  it("lists the read-only tools, then the four that record what a person says: facts, notes and systems", async () => {
+  it("lists the read-only tools, then the four that record what a person says, then adding a repo", async () => {
     const client = await connect(new SqliteStore(":memory:"));
 
     const { tools } = await client.listTools();
 
-    expect(tools.map((t) => t.name)).toEqual(["brain_repo_card", "brain_find_consumers", "brain_impact", "brain_get", "brain_search", "brain_review", "brain_record_fact", "brain_set_note", "brain_facts", "brain_systems"]);
+    expect(tools.map((t) => t.name)).toEqual([
+      "brain_repo_card",
+      "brain_find_consumers",
+      "brain_impact",
+      "brain_get",
+      "brain_search",
+      "brain_review",
+      "brain_record_fact",
+      "brain_set_note",
+      "brain_facts",
+      "brain_systems",
+      "brain_add_repo",
+    ]);
     expect(tools.slice(0, 6).every((t) => t.annotations?.readOnlyHint === true)).toBe(true);
     expect(tools.slice(6).every((t) => t.annotations?.readOnlyHint === false)).toBe(true);
+    // It costs time and money, so the person allows every call; and it reaches GitHub.
+    const add = tools.find((t) => t.name === "brain_add_repo")!;
+    expect(add._meta).toEqual({ "anthropic/requiresUserInteraction": true });
+    expect(add.annotations).toMatchObject({ openWorldHint: true, destructiveHint: false });
+    expect(Object.keys(add.inputSchema.properties ?? {})).toEqual(["source", "name", "note"]);
+    expect(add.description).toMatch(/takes time and money/);
+  });
+
+  it("tells agents to offer adding a repo the brain lacks, and not to plan from one being enrolled", async () => {
+    const client = await connect(new SqliteStore(":memory:"));
+
+    expect(client.getInstructions()).toContain("offer to add it with brain_add_repo");
+    expect(client.getInstructions()).toContain("While a repo is being enrolled, don't plan from it");
+    expect(client.getInstructions()).toContain("brain_repo_card finds them at once");
   });
 
   it("tells the client when to use the brain", async () => {
@@ -92,5 +118,13 @@ describe("server instructions", () => {
     expect(hidden).not.toContain("aspnet-api");
     expect(hidden).toContain("- payroll");
     expect(empty).toBe(INSTRUCTIONS);
+  });
+
+  it("mark a repo still being enrolled as not ready", async () => {
+    const s = store();
+    const at = new Date().toISOString();
+    s.saveEnrolment({ repo: "payroll", source: "acme/payroll", status: "running", step: "writing the wiki", error: null, pid: process.pid, files: 10, estimate: null, costUsd: 0, startedAt: at, updatedAt: at, finishedAt: null });
+
+    expect(await serverInstructions(deps(s))).toContain("- payroll (being enrolled: not ready yet)");
   });
 });

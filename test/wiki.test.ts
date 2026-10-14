@@ -53,6 +53,11 @@ describe("Claude Code runner", () => {
     expect(args[args.indexOf("--permission-mode") + 1]).toBe("dontAsk");
     expect(args[args.indexOf("--model") + 1]).toBe("sonnet");
     expect(args[args.indexOf("--output-format") + 1]).toBe("json");
+    // The prompt goes on stdin, so a long one doesn't pass Windows' command-line limit.
+    expect(args).not.toContain("p");
+    const inline = claudeArgs({ cwd: ".", prompt: "p", schema: { type: "object" }, model: "haiku", explore: false });
+    expect(inline[inline.indexOf("--tools") + 1]).toBe("");
+    expect(inline).not.toContain("--allowedTools");
   });
 
   it("reads a recorded result, and refuses errors and missing output", () => {
@@ -335,7 +340,7 @@ describe("brain_get", () => {
 
     expect(noWiki).toMatchObject({ ok: false, text: "api has no wiki yet. Generate it with: brain sync api" });
     expect(noPage.text).toBe('api has no page "nope". Pages: overview, build-run-test, api, product.');
-    expect(hidden.text).toBe('No readable repo named "api". No repos are enrolled yet. Add one with: brain add <path>');
+    expect(hidden.text).toBe('No readable repo named "api". No repos are enrolled yet. Add one with brain_add_repo (a GitHub URL, owner/repo or a local folder).');
   });
 
   it("puts the wiki on the repo card", async () => {

@@ -3,6 +3,7 @@ import { parseTarget, type LinkTarget } from "../../core/links.js";
 import { familyOf, isProvider, type Seam } from "../../core/seams.js";
 import { seamRef } from "../../core/traces.js";
 import type { Caller } from "../access.js";
+import { coverageNote } from "../coverage.js";
 import { renderTrace, traceFrom } from "../trace.js";
 import {
   alsoDeclared,
@@ -12,6 +13,7 @@ import {
   FAMILY_LABEL,
   footer,
   groupRoutes,
+  NO_REPOS,
   PAGE_SIZE,
   pointer,
   readableRepos,
@@ -61,7 +63,7 @@ export async function findConsumers(deps: ToolDeps, caller: Caller, input: Consu
   }
   const readable = await readableRepos(deps, caller);
   const scope = input.repos?.length ? readable.filter((name) => input.repos!.includes(name)) : readable;
-  if (readable.length === 0) return { ok: false, text: "No repos are enrolled yet. Add one with: brain add <path>" };
+  if (readable.length === 0) return { ok: false, text: NO_REPOS };
   if (scope.length === 0) return { ok: false, text: `None of the requested repos are enrolled or readable. Repos you can read: ${readable.join(", ")}.` };
 
   const matches = deps.store.seams({ repos: scope }).flatMap((seam) => {
@@ -126,7 +128,7 @@ async function render(deps: ToolDeps, { target, hits }: Consumers, scope: string
   const label = family === "http" ? `${target.endpoint.method ?? "any method"} ${target.endpoint.key}` : `${family} ${target.name}`;
   if (hits.length === 0) {
     const none = `No ${roles.provider}s or ${roles.consumer}s found for ${label}.`;
-    return [none, family === "http" ? "" : similarNames(deps, scope, target), unresolvedNote(deps, scope, [], family)].filter(Boolean).join("\n");
+    return [none, family === "http" ? "" : similarNames(deps, scope, target), unresolvedNote(deps, scope, [], family), coverageNote(deps.store, scope, family)].filter(Boolean).join("\n");
   }
 
   const servers = hits.filter((h) => h.role === "server").length;

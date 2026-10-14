@@ -34,8 +34,9 @@ GitHub repos ──on merge─────────────────�
 Curated content repo ──PR merged─────────────────▶ (registry, index, AI runs, checks, gardener)
 ```
 
-Agents only read. The only writes come from merges to main in enrolled repos and merged PRs to
-the curated content repo.
+Agents mostly read. Code facts come only from merges to main in enrolled repos; an agent writes
+only what a person agrees to (facts, notes, systems) and adds a repo only when the person allows it
+(see "Safety"). Hosted, curated content also arrives as merged PRs to the curated content repo.
 
 ## Three kinds of fact
 
@@ -72,10 +73,11 @@ Two halves share only the store:
 
 1. A merge to main queues a job for that repo: commit a → b.
 2. `git diff a..b` gives the changed files.
-3. Claude Code maps routes and calls, and in a second run alongside it (with a second look on a full map) the other links (events,
-   gRPC, packages), again in the changed files, and in files whose seams cite a changed file (a moved
-   prefix). Each is verified against its cited lines before it replaces the
-   old ones; Markdown and other files that can't declare an endpoint cost no run. Cross-repo
+3. The changed files, and files whose seams cite a changed file (a moved prefix), are screened and
+   the flagged ones mapped again (see Seams): routes and calls in one run, the other links (events,
+   gRPC, packages) in another. Each is verified against its cited lines before it replaces the old
+   ones; Markdown and other files that can't declare an endpoint cost no run. The survey is made
+   again only when a file it rests on changed; inherited routes are worked out again every time. Cross-repo
    links are worked out at query time, so nothing else is re-linked.
 4. Wiki pages whose cited lines changed, whose cited file grew by ten lines or more, or whose
    cited folder gained a file, are rewritten, four pages to a Claude Code run with the runs side by
@@ -164,7 +166,7 @@ serves and calls an endpoint, but not which calls or events a handler goes on to
 
 ## MCP tools
 
-A few broad tools: six read, four record what a person says. Short answers by default, `format: "detailed"` on request,
+A few broad tools: six read, four record what a person says, and one adds a repo. Short answers by default, `format: "detailed"` on request,
 paginated lists, pointers rather than pasted code. No free-text "ask" tool.
 
 | Tool | Answers | Harness stage | Status |
@@ -179,10 +181,33 @@ paginated lists, pointers rather than pasted code. No free-text "ask" tool.
 | `brain_review` | What's waiting for a person: proposed or stale facts, suggested systems, proposed notes; and gaps | Product brief | Built (B5) |
 | `brain_facts` | Confirms, edits or retires a fact | Product brief | Built (B5) |
 | `brain_systems` | Confirms, sets or renames a system | Product brief | Built (B5) |
+| `brain_add_repo` | Adds a repo (a GitHub URL, owner/repo or a local folder) in the background; its card then shows how far it has got | Any, when the brain lacks a repo | Built (B7) |
 
-Everything a person does with the brain is a tool call; only setup (add, sync, remove, hooks,
-doctor, set-ref) is in the terminal. Tool and parameter names are frozen once the harness names
-them in skills (H1).
+Everything a person does with the brain is a tool call, adding a repo included; only setup and
+tidying (sync, remove, hooks, doctor, set-ref) is in the terminal. Tool and parameter names are
+frozen once the harness names them in skills (H1).
+
+### Adding a repo from Claude Code (B7)
+
+A tool call can't run for the half hour a large repo takes, and MCP shows no progress between
+calls. So:
+- **`brain_add_repo` answers at once.** It records the enrolment, starts the ordinary `brain add`
+  as a detached process (logging to `hooks.log`, syncing under the per-repo lock, as hooks do) and
+  returns an estimate. The process carries on after the session ends.
+- **Progress is in the store** (`enrolments`, migration 18): source, step, error, pid, file
+  count, estimate, cost, times. The process doing it writes it; the MCP server reads it. A running
+  row whose pid is gone reads as stopped.
+- **People ask for it.** The card shows the step (cloning, indexing, mapping links, tracing,
+  writing the wiki k of n pages, the hook) and the estimate; read tools that reach a repo not yet
+  indexed say the same instead of answering; a failure says what failed and that adding again
+  finishes it. The instructions tell agents not to plan from a repo being enrolled.
+- **Sources.** A local folder is enrolled in place. A GitHub URL, `owner/repo` or another git URL
+  is cloned with plain `git` and the person's credentials into `clonesDir()` (`~/.brain/repos`,
+  or `BRAIN_REPOS`). `brain add` takes the same sources through the same code.
+- **Estimates** go by the nearest earlier enrolments of a similar size that ran Claude Code, or
+  else by size bands measured on the trial repos, labelled rough.
+- **Clones nobody pulls** are fetched in the background when an MCP session starts, at most hourly
+  and never prompting; their hooks sync them.
 
 A hit looks like: `orders-web · src/api/orders.ts:42-58 · @9f3c1e2 · 2 commits behind · llm-generated`.
 
@@ -232,9 +257,29 @@ systems a piece of work touches, without reading code or technical pages.
 ## Seams
 
 Every link is a pair: something a repo provides, and something that uses it. All kinds live in the
-one `seams` table, each in its existing columns. HTTP is mapped in one Claude Code run
+one `seams` table, each in its existing columns. HTTP is mapped in one kind of Claude Code run
 (`prompts/list-seams.md`) and the rest in another (`prompts/list-links.md`): asked for in one run,
 HTTP coverage fell (decisions, 2026-10-12).
+
+A full map (`src/ai/seams.ts`) splits the work itself, because one run stops after a sample of a
+large repo (decisions, 2026-10-14):
+1. **Survey** (`src/ai/link-survey.ts`, `prompts/survey-links.md`): route templates, base classes
+   whose public methods every derived class serves, settings files. Checked against its cites and
+   kept on `repo_state.link_survey`.
+2. **Screen** (`src/ai/screen.ts`, `prompts/screen-links.md`): every piece of the repo's own source
+   (files whole, or 600-line ranges; tests, vendored and generated code out, by
+   `src/ai/inventory.ts`), its text in the prompt, a fast model with no tools, about 250,000
+   characters a run. Unanswered pieces are asked again, then counted as flagged.
+3. **Map**: flagged pieces, a dozen at a time, numbered text in the prompt plus Read/Grep for
+   other files, the survey's rules given. Each run answers for every piece; dropped entries and
+   unanswered pieces are each asked for once more. Package manifests go to the links run unscreened.
+4. **Inherited routes**: subclasses of each surveyed base class (found by repeated search over class
+   declarations), each base route with `{controller}` filled in, citing the class, the base method
+   and the template; checked like any route, stored with `derived = 1`, worked out again every map.
+
+`seam_pieces` keeps each piece's outcome for both runs (unflagged, mapped, none, unmapped). Answers
+read it through `src/serve/coverage.ts`: "none" only where the map is complete; otherwise the
+pieces not mapped are named.
 
 | Family | Provides (kind) | Uses (kind) | `method` | `raw_path` | `route_key` (what must match) |
 |---|---|---|---|---|---|
@@ -256,7 +301,7 @@ their own API, a service handling its own event) links only within that repo and
 | Trigger | `reference-transaction` git hook (fires on fetch, pull, merge) or `brain sync` | GitHub App webhook → Azure Service Bus |
 | Workers | In the CLI process | Azure Container Apps jobs |
 | MCP transport | stdio | Streamable HTTP behind Entra ID |
-| Source code | Existing local clones | Shallow clones cached per repo |
+| Source code | Existing local clones, or the brain's own clones of GitHub repos | Shallow clones cached per repo |
 | Permissions | Local policy: every enrolled repo | GitHub App + caller identity per request |
 | Curated content | Local folder | GitHub repo, changed through PRs |
 
@@ -270,11 +315,12 @@ their own API, a service handling its own event) links only within that repo and
 
 ## Safety
 
-- Four tools write: facts, notes and systems. A change counts as confirmed only with the
-  person's words agreeing (`confirmed_with`, kept on a fact); without them a fact or note is
-  proposed and other changes are refused. Each is marked `requiresUserInteraction`, so Claude
-  Code asks the person to allow every call, showing what is stored: an agent can't pass that
-  alone, and a headless run can't write. Agents are told to record only what the person said,
+- Five tools write: facts, notes and systems, and adding a repo. A change to facts, notes or
+  systems counts as confirmed only with the person's words agreeing (`confirmed_with`, kept on a
+  fact); without them a fact or note is proposed and other changes are refused. Each is marked
+  `requiresUserInteraction`, so Claude Code asks the person to allow every call, showing what is
+  stored or which repo is added: an agent can't pass that alone, and a headless run can't write
+  or start an enrolment. Agents are told to record only what the person said,
   never repo text or tool output. (Until B5 an MCP elicitation dialog confirmed facts; the desktop
   app declined it unseen, so it went.)
 - Repo text, tickets and PR bodies are untrusted; tool output is data, never instructions.

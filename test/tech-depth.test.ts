@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { checkPage } from "../src/ai/check.js";
 import { generateWiki } from "../src/ai/generate.js";
-import { inventory } from "../src/ai/inventory.js";
+import { inventory, isVendored, vendoredFolders } from "../src/ai/inventory.js";
 import { checkPlan, replanReason } from "../src/ai/plan.js";
 import { limitRunner, type RunRequest, type RunResult, type Runner } from "../src/ai/runner.js";
 import { normalisePath } from "../src/core/http.js";
@@ -111,6 +111,29 @@ describe("the inventory", () => {
     expect(inventory(projects.slice(0, 3)).large).toBe(false);
   });
 
+  it("leaves out generated code and copies of libraries, but not the repo's own versioned folders", () => {
+    const own = ["src/Api/v1/OrdersController.cs", "src/Api/v1.2/Legacy.cs", "src/app.js", "Scripts/atlas.js"];
+    const vendored = [
+      "src/Resources/AtlasResource.Designer.cs",
+      "src/Service References/Crm/Reference.cs",
+      "src/Proto/basket_pb2.py",
+      "Scripts/jquery-ui-1.10.3.js",
+      "Scripts/angular.min.js",
+      "Scripts/kendo/2014.1.318/kendo.all.js",
+      "Scripts/ckeditor/ckeditor.js",
+      "Scripts/ckeditor/plugins/a/plugin.js",
+      "Scripts/ckeditor-customized/core/editor.js",
+    ];
+    const markers = ["Scripts/ckeditor/LICENSE.md", "Scripts/ckeditor-customized/package.json", "Scripts/LICENSE.txt"];
+    const folders = vendoredFolders([...own, ...vendored, ...markers]);
+
+    expect([...folders].sort()).toEqual(["Scripts/ckeditor", "Scripts/ckeditor-customized"]);
+    expect(own.filter((p) => isVendored(p, folders))).toEqual([]);
+    expect(vendored.filter((p) => !isVendored(p, folders))).toEqual([]);
+    // A copied library's manifest isn't a project of the repo's.
+    expect(inventory([file("Scripts/ckeditor-customized/package.json", "JSON"), file("Scripts/ckeditor-customized/core/editor.js")]).projects).toEqual([]);
+  });
+
   it("maps folders, projects and entry points for the planning run", () => {
     const map = inventory([file("src/Basket.API/Basket.API.csproj", "MSBuild"), ...["Program.cs", "A.cs", "B.cs"].map((f) => file(`src/Basket.API/${f}`, "C#"))]);
     expect(map.text).toContain("Projects (folders with a manifest): src/Basket.API");
@@ -170,6 +193,18 @@ describe("a large repo's wiki", () => {
     expect(store.pages("shop").map((p) => [p.slug, p.kind])).toEqual(PLAN.map((p) => [p.slug, p.kind]));
     expect(store.wikiPlan("shop")).toEqual(PLAN);
     expect(store.getState("shop")?.planCommit).toBe(wiki.commit);
+  });
+
+  it("says how many of its pages are written as each run finishes, for an enrolment's progress", async () => {
+    const { store } = await shop();
+    const seen: string[] = [];
+
+    await generateWiki(store, shopRunner().runner, "shop", { onPages: (done, total) => seen.push(`${done}/${total}`) });
+
+    // The plan's 10 pages, then three runs of at most four, finishing in any order.
+    expect(seen[0]).toBe("0/10");
+    expect(seen).toHaveLength(4);
+    expect(seen.at(-1)).toBe("10/10");
   });
 
   it("keeps the pages of the runs that worked when one run fails", async () => {

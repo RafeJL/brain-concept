@@ -357,15 +357,16 @@ describe("the write tools over MCP", () => {
     return client;
   }
 
-  it("are the four that write, and each asks the person to allow every call", async () => {
+  it("are the four that write, besides adding a repo, and each asks the person to allow every call", async () => {
     const { store } = await brain();
     const { tools } = await (await connect(store)).listTools();
     const writes = tools.filter((t) => t.annotations?.readOnlyHint !== true);
+    const recording = writes.filter((t) => t.name !== "brain_add_repo");
 
-    expect(writes.map((t) => t.name)).toEqual(["brain_record_fact", "brain_set_note", "brain_facts", "brain_systems"]);
+    expect(recording.map((t) => t.name)).toEqual(["brain_record_fact", "brain_set_note", "brain_facts", "brain_systems"]);
     expect(tools.find((t) => t.name === "brain_review")?._meta).toBeUndefined();
     expect(writes.every((t) => JSON.stringify(t._meta) === JSON.stringify({ "anthropic/requiresUserInteraction": true }))).toBe(true);
-    expect(writes.every((t) => "confirmed_with" in (t.inputSchema.properties ?? {}))).toBe(true);
+    expect(recording.every((t) => "confirmed_with" in (t.inputSchema.properties ?? {}))).toBe(true);
   });
 
   it("record a fact confirmed with the person's words, and proposed without them", async () => {

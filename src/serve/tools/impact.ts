@@ -2,6 +2,7 @@ import { matchEndpoints, type MatchQuality } from "../../core/http.js";
 import { parseTarget } from "../../core/links.js";
 import { familyOf, isProvider, type Seam, type SeamFamily } from "../../core/seams.js";
 import type { Caller } from "../access.js";
+import { absenceNote } from "../coverage.js";
 import {
   alsoDeclared,
   count,
@@ -47,6 +48,8 @@ export interface Impact {
   outgoingCalls: number;
   /** The same for its event subscriptions, gRPC calls and package dependencies. */
   otherUses: number;
+  /** The family asked about: whose map's coverage an empty answer reports. */
+  family: SeamFamily;
 }
 
 /**
@@ -85,11 +88,11 @@ export async function impact(deps: ToolDeps, caller: Caller, input: ImpactInput)
 
   const uses = deps.store.seams({ repos: [input.repo], path, includeUnresolved: true }).filter((seam) => !isProvider(seam.kind));
   const outgoingCalls = uses.filter((seam) => seam.kind === "http-call").length;
-  const data: Impact = { repo: input.repo, path, routes: impacts, outgoingCalls, otherUses: uses.length - outgoingCalls };
+  const data: Impact = { repo: input.repo, path, routes: impacts, outgoingCalls, otherUses: uses.length - outgoingCalls, family: target?.family ?? "http" };
   return { ok: true, data, text: await render(deps, data, found.readable, input.format, input.offset ?? 0) };
 }
 
-async function render(deps: ToolDeps, { repo, path, routes, outgoingCalls, otherUses }: Impact, readable: string[], format: Format, offset: number): Promise<string> {
+async function render(deps: ToolDeps, { repo, path, routes, outgoingCalls, otherUses, family }: Impact, readable: string[], format: Format, offset: number): Promise<string> {
   const scope = path ? `${repo} · ${path}` : repo;
   if (routes.length === 0) {
     const uses = [
@@ -97,7 +100,8 @@ async function render(deps: ToolDeps, { repo, path, routes, outgoingCalls, other
       ...(otherUses ? [`has ${count(otherUses, "event subscription, gRPC call or package dependency", "event subscriptions, gRPC calls or package dependencies")}`] : []),
     ];
     const calls = uses.length ? ` It ${uses.join(" and ")}; use brain_find_consumers on one to see who provides it.` : "";
-    return `No matching routes, events, gRPC methods or packages are declared in ${scope}.${calls}`;
+    const note = absenceNote(deps.store, repo, family, path);
+    return `No matching routes, events, gRPC methods or packages are mapped in ${scope}.${calls}${note ? `\n${note}` : ""}`;
   }
 
   const withCallers = routes.filter((r) => r.callers.length > 0);

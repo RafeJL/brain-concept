@@ -71,6 +71,52 @@ export interface Seam {
   /** Other lines that contribute part of the path or name: a global prefix, a router mount, a base URL. */
   cites: SeamCite[];
   commit: string;
+  /**
+   * A route a class gets from the base class it derives from (`EmployeeController` serving the
+   * CRUD actions of `AtlasEntityApiController`), worked out by the brain from the survey's rule
+   * rather than listed by Claude Code. Cited and checked like any route.
+   */
+  derived?: boolean;
+}
+
+/**
+ * What a full map made of one piece of a file (the whole file, or a range of a long one), for each
+ * of its two runs: HTTP, and the other links. "unflagged": screening read it and found nothing to
+ * map; "mapped": a checked seam is declared in it; "none": the mapping run read it and found
+ * none; "unmapped": no run answered for it, so what it declares is unknown.
+ */
+export type PieceOutcome = "unflagged" | "mapped" | "none" | "unmapped";
+
+export interface SeamPiece {
+  path: string;
+  start: number;
+  end: number;
+  http: PieceOutcome;
+  links: PieceOutcome;
+}
+
+/**
+ * What a survey run found about how a repo forms its routes, given to every mapping run and used
+ * to work out inherited routes. Each part was checked against the lines it cites.
+ */
+export interface LinkSurvey {
+  /** Convention route templates, as written: `api/{controller}/{action}/{id}`. */
+  templates: { template: string; cites: SeamCite[] }[];
+  /** Base classes whose public methods are routes of every class derived from them. */
+  inherited: InheritedRoutes[];
+  /** Files holding settings such as base URLs and queue names. */
+  configFiles: string[];
+}
+
+export interface InheritedRoutes {
+  /** The base class's name, without type parameters: `AtlasEntityApiController`. */
+  base: string;
+  /** What a derived class's name drops to fill `{controller}`: "Controller". Empty when nothing. */
+  suffix: string;
+  /** The routes each derived class serves, with `{controller}` in the path. */
+  routes: { method: string; path: string; cites: SeamCite[] }[];
+  /** The base class's declaration. */
+  cites: SeamCite[];
 }
 
 export interface SeamCoverage {

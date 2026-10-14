@@ -1,5 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { hooksLogPath } from "../config.js";
 import { fullRefName, gitDir, hooksDir } from "../core/git.js";
 import { BrainError } from "../core/types.js";
 import type { Store } from "../store/store.js";
@@ -23,7 +25,7 @@ export interface HookCommand {
   dbPath?: string;
   /** Where background syncs append their output. */
   logPath: string;
-  /** Extra `brain sync` flags, e.g. `--no-ai` where no AI should run. */
+  /** Extra `brain sync` (or `brain add`) flags, e.g. `--no-ai` where no AI should run. */
   syncFlags?: string[];
 }
 
@@ -35,6 +37,19 @@ export interface HookStatus {
   problem?: string;
   /** Installed, but not what `brain hooks install` would write now (an older brain wrote it). */
   outdated?: boolean;
+}
+
+/**
+ * How a background process runs this checkout's CLI: absolute paths, since hooks get no predictable
+ * PATH. Hooks and enrolments started from Claude Code both use it, with the same store and log.
+ */
+export function brainCommand(): HookCommand {
+  return {
+    node: process.execPath,
+    brain: fileURLToPath(new URL("../../bin/brain.mjs", import.meta.url)),
+    dbPath: process.env.BRAIN_DB,
+    logPath: hooksLogPath(),
+  };
 }
 
 /** A value quoted for sh, with Windows paths in the forward-slash form git's sh understands. */

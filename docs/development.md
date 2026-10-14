@@ -1,6 +1,8 @@
 # Working on the brain
 
-For trying the brain, see the [README](../README.md). This page is for changing it.
+For setting the brain up, see the [README](../README.md); for every command,
+[cli.md](cli.md); for what it answers and how far to trust it, [how-it-works.md](how-it-works.md).
+This page is for changing it.
 
 ## Checks
 
@@ -33,11 +35,11 @@ src/cli.ts      the brain CLI; prints exactly what agents get
 src/doctor.ts   brain doctor's checks
 src/core/       types, git access, languages, HTTP path and link-name matching, citations, page sections, the per-repo run queue
 src/store/      Store interface, SQLite implementation, migrations, the search index
-src/ingest/     registry, sync (the git index), hooks
+src/ingest/     registry, sync (the git index), hooks, enrolling (sources, clones, progress, background runs)
 src/ai/         Claude Code runner, prompts (Markdown), wiki pages, seams (routes, calls and other links), system suggestions, the checks on all three
-src/serve/      access policy, freshness, neighbours, systems, tools, MCP server (the read side)
+src/serve/      access policy, freshness, neighbours, systems, enrolment status, tools, MCP server (the read side)
 test/           vitest; fixtures are real files in their own languages
-docs/           architecture, decisions, research, manual testing
+docs/           how it works, commands, architecture, decisions, research, manual testing
 ```
 
 Rules for changing it (and for agents working here) are in [CLAUDE.md](../CLAUDE.md).
@@ -87,6 +89,21 @@ index is updated in the same transactions as pages and seams.
 The hook isn't installed if the repo already has its own `reference-transaction` hook, or if
 `core.hooksPath` points inside the repo (as husky does), because that would change tracked files.
 
+Repos the brain cloned from GitHub (in `%USERPROFILE%\.brain\repos`) have no one to pull them, so
+the MCP server fetches them in the background when a session starts, at most once an hour. Their
+hooks then sync them as above.
+
+## How adding a repo from Claude Code works
+
+`brain_add_repo` (`src/serve/tools/add-repo.ts`) works out the source and name, records the
+enrolment, and starts `brain add <source> --name <name>` as a detached process
+(`enrolInBackground`, `src/ingest/enrol.ts`). That process is the ordinary CLI `add`: it clones a
+GitHub source, enrols, syncs under the per-repo lock, installs the hook, and records each step in
+the `enrolments` table as it goes (`trackEnrolment`). The tool answers at once; the card and the
+read tools read the row. The tests run the real CLI in the background with `--no-ai`, and clone
+from local bare repos through git's `url.<base>.insteadOf` (set with `GIT_CONFIG_COUNT`), so they
+never reach the network.
+
 ## Design docs
 
 - [architecture.md](architecture.md): what is being built. Treat it as the spec.
@@ -104,5 +121,7 @@ The hook isn't installed if the repo already has its own `reference-transaction`
 | 4 (B3) | Facts from people (`human-reviewed`): `brain_record_fact`, staleness, gaps; each fact checked against the code | ✅ |
 | 4 (B4) | Technical depth: page plans for large repos, area, flow, data-model and integrations pages, checked diagrams, a steering note, steps and repos side by side; following a flow across repos | ✅ B4a; B4b built |
 | B5 | Everything a person does through MCP: confirming in the conversation, `brain_review`, `brain_facts`, `brain_systems` (replaces `brain web`, dropped) | Built |
-| B6 | Real Citation repos and the readiness gate | Next |
+| B6 | Real Citation repos and the readiness gate | Trial done (findings drove B6b) |
+| B6b | Maps that say what they covered: survey, screening, mapping in parts, inherited routes, coverage in answers, run-time exits in traces | Built |
+| B7 | Adding a repo from Claude Code (`brain_add_repo`, the eleventh tool), GitHub sources, enrolment status on the card; the README rewritten for setting up | Built |
 | 6 | Hosting: Azure, cloud containers for the runs, GitHub permissions | Planned |

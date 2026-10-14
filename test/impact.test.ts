@@ -26,7 +26,7 @@ describe("brain_impact", () => {
 
     expect(result.ok).toBe(true);
     expect(result.text).toContain("orders-api · src/OrdersController.cs · 2 routes, 2 callers in 2 repos · llm-generated");
-    expect(result.text).toMatch(/GET \/api\/orders\/\{id\}\s+\(4-5\)\n {2}← orders-api · tests\/OrdersTests.cs:1 · same repo\n {2}← shop-web · src\/api.ts:1/);
+    expect(result.text).toMatch(/GET \/api\/orders\/\{id\}\s+\(4-5\)\n {2}← orders-api · src\/AdminClient.cs:1 · same repo\n {2}← shop-web · src\/api.ts:1/);
     expect(result.text).toContain("No known callers: DELETE /api/orders/{id}");
     expect(result.text).toContain("1 call uses a URL only known at run time (shop-web · src/api.ts:2)");
   });
@@ -55,7 +55,7 @@ describe("brain_impact", () => {
     const result = await impact(deps, LOCAL_CALLER, { repo: "shop-web", path: "./src/api.ts", format: "concise" });
 
     expect(result.text).toBe(
-      "No matching routes, events, gRPC methods or packages are declared in shop-web · src/api.ts. It makes 2 HTTP calls; use brain_find_consumers on one to see who provides it.",
+      "No matching routes, events, gRPC methods or packages are mapped in shop-web · src/api.ts. It makes 2 HTTP calls; use brain_find_consumers on one to see who provides it.",
     );
   });
 

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { liveStatus } from "./ingest/enrol.js";
 import { hookStatus, type HookCommand } from "./ingest/hooks.js";
 import type { Store } from "./store/store.js";
 
@@ -69,7 +70,25 @@ export async function doctor(deps: DoctorDeps): Promise<Check[]> {
 
   if (claude.ok) checks.push(mcpCheck(await deps.exec("claude", ["mcp", "get", "citation-brain"]), deps));
 
-  for (const repo of repos) {
+  const enrolling = new Set<string>();
+  for (const enrolment of deps.store.enrolments()) {
+    const status = liveStatus(enrolment);
+    const label = `Enrolling: ${enrolment.repo}`;
+    if (status === "running") {
+      enrolling.add(enrolment.repo);
+      checks.push({ ok: true, label, detail: `${enrolment.step} (brain card ${enrolment.repo} shows how far it has got)` });
+    } else if (status !== "done") {
+      checks.push({
+        ok: false,
+        label,
+        detail: `${status} while ${enrolment.step}${enrolment.error ? `: ${enrolment.error}` : ""}`,
+        fix: `Run: brain add "${enrolment.source}" to finish it (it redoes only what's missing), or brain repo remove ${enrolment.repo}`,
+      });
+    }
+  }
+
+  // A repo still being enrolled gets its hook at the end.
+  for (const repo of repos.filter((r) => !enrolling.has(r.name))) {
     const status = await hookStatus(deps.store, repo.name, deps.hook);
     if (status.problem) checks.push({ ok: false, label: `Hook: ${repo.name}`, detail: status.problem });
     else if (!status.installed) {
@@ -119,7 +138,7 @@ export function formatChecks(checks: readonly Check[], hasRepos: boolean): strin
   const failed = checks.filter((check) => !check.ok).length;
   lines.push("");
   if (failed) lines.push(`${failed} thing${failed === 1 ? "" : "s"} to fix. Run brain doctor again afterwards.`);
-  else if (!hasRepos) lines.push("All set. Next: brain add <path to a git repo>");
+  else if (!hasRepos) lines.push('All set. Next: ask Claude Code to "add <GitHub URL or folder> to the brain", or run: brain add <path or GitHub URL>');
   else lines.push("All set. Ask Claude Code about one of your repos, e.g. \"what does <repo> do?\"");
   return lines.join("\n");
 }

@@ -1,8 +1,11 @@
 import { hasLiteralSegment, matchEndpoints, type Endpoint, type MatchQuality } from "../../core/http.js";
 import { FAMILIES, familyOf, type Seam, type SeamFamily } from "../../core/seams.js";
 import type { Freshness, RepoRecord, RepoState, WikiPage } from "../../core/types.js";
+import { liveStatus } from "../../ingest/enrol.js";
 import type { Store } from "../../store/store.js";
 import type { AccessPolicy, Caller } from "../access.js";
+import { enrolmentLines, readableEnrolment, unfinished } from "../enrolment.js";
+import { coverageNote } from "../coverage.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
 
 export type Format = "concise" | "detailed";
@@ -34,18 +37,39 @@ export interface SyncedRepo {
 }
 
 /**
+ * The repos in `names` without a wiki, for a note on what a search couldn't cover: each marked
+ * "being enrolled" while its enrolment runs, so an agent waits rather than syncs.
+ */
+export function withoutWiki(deps: ToolDeps, names: readonly string[]): string[] {
+  return names
+    .filter((name) => deps.store.pages(name).length === 0)
+    .map((name) => {
+      const enrolment = deps.store.enrolment(name);
+      return enrolment && liveStatus(enrolment) === "running" ? `${name} (being enrolled)` : name;
+    });
+}
+
+/** What every tool says when there's nothing to read. */
+export const NO_REPOS = "No repos are enrolled yet. Add one with brain_add_repo (a GitHub URL, owner/repo or a local folder).";
+
+/**
  * A repo the caller may read and that has been synced. Unknown and unreadable repos get the same
- * answer, so a repo's existence never leaks.
+ * answer, so a repo's existence never leaks. One still being enrolled (cloned, or indexed) says
+ * where it has got to instead, or why its enrolment failed and how to try again.
  */
 export async function requireSyncedRepo(deps: ToolDeps, caller: Caller, name: string): Promise<SyncedRepo | Failure> {
   const readable = await readableRepos(deps, caller);
   const repo = readable.includes(name) ? deps.store.getRepo(name) : undefined;
+  const state = repo && deps.store.getState(name);
+  if (!state) {
+    const enrolment = await readableEnrolment(deps, caller, name);
+    if (unfinished(enrolment)) return { ok: false, text: [`"${name}" isn't ready yet.`, ...enrolmentLines(enrolment)].join("\n") };
+  }
   if (!repo) {
-    const list = readable.length ? `Repos you can read: ${readable.join(", ")}.` : "No repos are enrolled yet. Add one with: brain add <path>";
+    const list = readable.length ? `Repos you can read: ${readable.join(", ")}.` : NO_REPOS;
     return { ok: false, text: `No readable repo named "${name}". ${list}` };
   }
-  const state = deps.store.getState(name);
-  if (!state) return { ok: false, text: `"${name}" is enrolled but has not been synced yet. Run: brain sync ${name}` };
+  if (!state) return { ok: false, text: `"${name}" is enrolled but hasn't been indexed yet. Adding it again with brain_add_repo indexes it.` };
   return { ok: true, repo, state, readable };
 }
 
@@ -217,6 +241,8 @@ export async function footer(deps: ToolDeps, options: FooterOptions): Promise<st
   for (const family of options.families ?? ["http"]) {
     const gap = unresolvedNote(deps, options.unresolvedIn, options.relevantRepos, family);
     if (gap) lines.push(gap);
+    const unknown = coverageNote(deps.store, options.unresolvedIn, family);
+    if (unknown) lines.push(unknown);
   }
   lines.push(options.closing);
   return lines;

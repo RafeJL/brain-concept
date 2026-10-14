@@ -7,6 +7,11 @@ export interface RunRequest {
   prompt: string;
   schema: object;
   model: string;
+  /**
+   * False for a run that answers only from the text in its prompt, with no tools (screening files
+   * given inline). By default it may read the folder: Read, Grep and Glob.
+   */
+  explore?: boolean;
 }
 
 export interface RunResult<T> {
@@ -23,17 +28,18 @@ export interface Runner {
 
 /**
  * Arguments for an isolated, read-only, headless Claude Code run: no MCP servers, no user
- * settings, memory or hooks (so it can't call the brain, or anything else), file tools only,
- * structured output.
+ * settings, memory or hooks (so it can't call the brain, or anything else), file tools only (or
+ * none), structured output. The prompt goes on stdin: a command line is capped at about 32,000
+ * characters on Windows, and a prompt holding files' text is far longer.
  */
 export function claudeArgs(request: RunRequest): string[] {
   return [
-    "-p", request.prompt,
+    "-p",
     "--output-format", "json",
     "--json-schema", JSON.stringify(request.schema),
     "--safe-mode",
     "--strict-mcp-config",
-    "--allowedTools", "Read,Grep,Glob",
+    ...(request.explore === false ? ["--tools", ""] : ["--allowedTools", "Read,Grep,Glob"]),
     "--permission-mode", "dontAsk",
     "--no-session-persistence",
     "--model", request.model,
@@ -94,7 +100,9 @@ export function limitRunner(runner: Runner, max: number): Runner {
 export const claudeRunner: Runner = {
   run<T>(request: RunRequest): Promise<RunResult<T>> {
     return new Promise((resolve, reject) => {
-      const child = spawn("claude", claudeArgs(request), { cwd: request.cwd, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn("claude", claudeArgs(request), { cwd: request.cwd, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+      child.stdin.on("error", () => {});
+      child.stdin.end(request.prompt);
       let stdout = "";
       let stderr = "";
       child.stdout.on("data", (chunk) => (stdout += chunk));

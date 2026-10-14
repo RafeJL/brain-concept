@@ -153,6 +153,25 @@ export async function changedLines(repoPath: string, from: string, to: string, p
   return changes;
 }
 
+/**
+ * Clones `url` into `dir` with the person's own git credentials (their credential manager or SSH
+ * key). Never waits on a terminal prompt nobody will see; a failure says what git said.
+ */
+export async function cloneInto(url: string, dir: string): Promise<void> {
+  try {
+    await run("git", ["clone", "--quiet", "--", url, dir], { windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+  } catch (error) {
+    if ((error as { code?: string }).code === "ENOENT") throw new BrainError("git isn't installed or isn't on PATH. Install it, then check with: brain doctor");
+    const said = String((error as { stderr?: string }).stderr ?? "").trim().split(/\r?\n/).filter(Boolean).slice(-2).join(" ");
+    throw new BrainError(`git clone ${stripCredentials(url)} failed: ${redact(said) || "no reason given"}`);
+  }
+}
+
+/** Takes user:token out of any URL in git's messages. */
+function redact(text: string): string {
+  return text.replace(/(https?:\/\/)[^/\s@]+@/gi, "$1");
+}
+
 export async function remoteUrl(repoPath: string): Promise<string | null> {
   const url = await tryGit(repoPath, ["config", "--get", "remote.origin.url"]);
   return url ? stripCredentials(url) : null;

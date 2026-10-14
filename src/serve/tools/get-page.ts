@@ -1,6 +1,7 @@
 import { firstSentence, withoutDiagrams } from "../../core/sections.js";
 import type { Freshness, PageKind, WikiPage } from "../../core/types.js";
 import type { Caller } from "../access.js";
+import { enrolmentLines, readableEnrolment, unfinished } from "../enrolment.js";
 import { factBlock, factsAbout } from "../facts.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
 import { linkSummary, neighbours } from "../neighbours.js";
@@ -53,6 +54,8 @@ export async function getPage(deps: ToolDeps, caller: Caller, input: PageInput):
 
   const pages = deps.store.pages(repo.name);
   if (pages.length === 0) {
+    const enrolment = await readableEnrolment(deps, caller, repo.name);
+    if (unfinished(enrolment)) return { ok: false, text: [`${repo.name} has no wiki yet.`, ...enrolmentLines(enrolment)].join("\n") };
     return { ok: false, text: `${repo.name} has no wiki yet. Generate it with: brain sync ${repo.name}` };
   }
   const newest = wikiCommit(pages, state.commit);

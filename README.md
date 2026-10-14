@@ -1,367 +1,210 @@
 # brain-concept
 
-**Add a repo, get a wiki.** The brain gives coding agents (Claude Code, through MCP) context about
-every repository you add. Claude Code reads each repo, in any language, and writes wiki pages
-in which every sentence cites the lines it is based on. It also maps the HTTP routes each repo
-serves and calls, the events it publishes and handles, its gRPC services and its shared
-packages, so an agent can see which repos depend on each other. A product page in each wiki,
-and systems that group the repos making up one product, let a product owner's agent answer
-"what does it do, who uses it, what are the rules, and what would this work touch?" without
-reading code. Everything is checked against the code before an agent sees it.
+The brain gives coding agents context about your organisation's repos, over MCP.
+For each repo you add, Claude Code writes a wiki in which every sentence cites the code it's based on.
+The brain also maps how repos depend on each other: HTTP calls, events, gRPC and shared packages.
+Agents ask it for what they need, instead of cloning and reading whole repos.
 
-Agents then ask for exactly what they need instead of cloning and reading whole repos:
+It's a local proof of concept for the Citation delivery harness.
+It runs on your machine, reads your clones, and uses your own Claude Code.
+
+## Set it up
+
+This takes about 10 minutes, in PowerShell.
+
+1. Install Node 24 (22.13 or later works), Git for Windows and Claude Code.
+   Sign in to Claude Code by running `claude` once.
+
+2. Clone this repo and go into it:
+
+   ```powershell
+   git clone https://github.com/RafeJL/brain-concept.git
+   cd brain-concept
+   ```
+
+3. Install its packages:
+
+   ```powershell
+   npm install
+   ```
+
+   npm may warn about install scripts. That's harmless.
+
+4. Check what's in place:
+
+   ```powershell
+   npm run brain -- doctor
+   ```
+
+   Each line shows ✓ or ✗, and each ✗ says how to fix it.
+   The MCP server shows ✗ until the next step.
+
+5. Register the brain with Claude Code.
+   Doctor prints the exact command for your machine. It looks like this:
+
+   ```powershell
+   claude mcp add --scope user citation-brain -- node "C:\Repos\brain-concept\bin\brain-mcp.mjs"
+   ```
+
+   `--scope user` makes the brain available in every folder.
+
+6. Run doctor again. Every line should show ✓.
+
+   ```powershell
+   npm run brain -- doctor
+   ```
+
+7. Start a new Claude Code session and type `/mcp`.
+   `citation-brain` should show as connected.
+
+## Add repos
+
+### From Claude Code
+
+Ask in plain words, in any session. For example:
+
+- *Add github.com/The-Citation-Group-Tech/foo to the brain.*
+- *Add The-Citation-Group-Tech/foo to the brain, and focus its wiki on billing.*
+- *Add the repo in C:\Repos\foo to the brain.*
+
+Then:
+
+1. The agent tells you roughly how long it will take and what it costs, and asks.
+2. Claude Code asks you to allow the `brain_add_repo` call. It asks every time, by design.
+3. The brain starts the work in the background and answers at once.
+   It carries on if you close the session.
+
+A GitHub repo is cloned with your own git credentials, into `%USERPROFILE%\.brain\repos`.
+A local folder is used where it is.
+The brain only reads committed code on the main branch, never your uncommitted work.
+
+### From a terminal
+
+```powershell
+npm run brain -- add https://github.com/The-Citation-Group-Tech/foo
+```
+
+```powershell
+npm run brain -- add C:\Repos\foo
+```
+
+It prints an estimate, then each step as it goes.
+To add several, list them all: they go three at a time.
+
+### How long it takes
+
+Measured when adding real repos (several go side by side, so the times overlap):
+
+| Repo | Files | Time | Claude Code usage |
+|---|---|---|---|
+| A small service (unity-idp-middleware) | about 120 | a few minutes | about $1.50 |
+| A medium one (atlas-ai-audit-ai-be-app, Python) | about 800 | 10–20 minutes | about $7 |
+| A large one (eShop) | about 1,100 | 15–25 minutes | about $8–12 |
+| A monolith (atlas-webapp-webapi) | about 23,000 | about 25 minutes | about $11 |
+
+The wiki has at most 20 pages, so a monolith costs little more than a large repo, but it's
+described less deeply (see [what it can't do yet](docs/how-it-works.md#what-it-cant-do-yet)).
+The estimate improves as you add repos: the brain goes by how long earlier ones took.
+
+### Is it ready?
+
+Ask the agent: *Is foo ready yet?*
+It reads the repo's card. While the repo is enrolling, the card says where it has got to:
 
 ```
-> How do I run the tests in aspnet-api?
-
-  citation-brain - brain_get (repo: aspnet-api, page: build-run-test)
-
-`dotnet run --project build/build.csproj -- test` formats, builds in Release mode, and runs all
-test projects — the standard validation command [readme.md:34-38] [AGENTS.md:21-25] …
+foo  @3bd7882 · up to date
+Being enrolled: tracing what each entry point leads to; writing the wiki (4 of 18 pages) · started 6 min ago
+Expect roughly 15–25 minutes and $8–12 of Claude Code usage (rough: from its size alone, 2431 files) in all.
+Not ready to plan from yet: its wiki and links are still being written. Check its card again for progress.
 ```
 
-**Status:** a local proof of concept for the Citation delivery harness. It runs on your machine
-against your own clones, and uses your own Claude Code.
+- **Done:** the card shows the wiki and links, and says `Enrolled … ready.`
+- **Failed:** the card says what failed. Ask the agent to add it again. It redoes only what's missing.
+- **From a terminal:** `npm run brain -- card foo`.
 
-## Try it in 10 minutes
+Agents won't plan from a repo that is still enrolling.
+You can ask about a new repo straight away in the same session.
+It only appears in the brain's list of repos in new sessions.
 
-**You need:**
-- Node 22.13 or later;
-- git;
-- Claude Code, installed and signed in (run `claude` once).
+## What to ask
 
-Then, from this folder:
+You don't need to name the brain or its tools. Ask about a repo or product by name.
 
-```
-npm ci
-npm run brain -- doctor
-```
-
-`doctor` checks the three tools and whether Claude Code knows about the brain yet, and says how
-to fix anything missing. Run the `claude mcp add …` command it prints. That registers the brain
-with Claude Code, once, for every folder.
-
-`npm ci` may warn about install scripts. That's harmless: nothing here needs them.
-
-**Add a repo** (any local git clone):
-
-```
-npm run brain -- add C:\path\to\some-repo
-```
-
-Here is what that does:
-1. It indexes the committed code on the repo's main branch. Your uncommitted work is never read.
-2. It has Claude Code map the repo's routes and calls and write its wiki. A small repo gets
-   about five to seven pages: overview, build and test, API, its most important module, a
-   product page (what it does for its users, written for a product owner), and data-model and
-   integrations pages where they apply. A large repo gets up to 20, a page per area (see "For
-   technical plans"). Before starting, it prints a rough cost from your Claude Code allowance:
-   about $0.50–2 for a small repo, up to about $8–12 for one as large as eShop. It takes 2–25
-   minutes. Add several at once (`add <path> <path> …`) and they go three at a time.
-3. It installs a git hook, so the repo updates itself whenever its branch moves (a pull or a
-   fetch). Updates cost cents, and nothing when nothing relevant changed.
-
-**Ask Claude Code.** Start a new session anywhere and ask in plain words. You don't need to name
-the brain:
-- *What does some-repo do?*
-- *How do I run its tests?*
-- *Which repos call its endpoints?* (needs two or more repos added)
-- *Where do we validate login tokens?* (searches every repo you've added)
-- *What can users do in some-repo, and what rules apply?* (answered from its product page)
+**Product brief (a PO):**
+- *What does foo do, and who uses it?*
+- *What rules apply to following authors in RealWorld?*
 - *Which repos would "let users save articles to read later" touch?*
-- *Users can follow at most 500 authors: record that.* (the agent shows you the fact, you say yes
-  and allow the call; later sessions answer with it)
-- *What's waiting for me to confirm? What do people ask that you can't answer?*
+- *Users can follow at most 500 authors: record that.*
+  The agent shows you the fact and asks. You say yes and allow the call.
+- *What's waiting for me to confirm?*
 
-To see exactly what an agent gets, use the same answers from the command line:
-`npm run brain -- card some-repo`, `page some-repo`, `search "tokens"`.
+**Technical plan:**
+- *Plan adding a delivery date to orders in eShop.*
+- *How does checkout work, end to end?*
+- *Which repos call `GET /api/orders/{id}`?*
+- *What would changing how orders are created set off downstream?*
 
-**To stop trialling:** `npm run brain -- repo remove some-repo` removes everything the brain holds
-about a repo, and its hook. Delete `%USERPROFILE%\.brain` to remove the whole store. Remove the
-MCP server with `claude mcp remove citation-brain -s user`.
+**Development:**
+- *How do I run the tests in foo?*
+- *Where do we validate login tokens?*
+- *What breaks if I rename this endpoint?*
 
-> **Shortcut:** to type `brain` instead of `npm run brain --`, add this to your PowerShell
-> profile (`notepad $PROFILE`):
-> `function brain { node C:\path\to\brain-concept\bin\brain.mjs @args }`
+The harness's skills call the same tools.
 
-## What agents can ask
+## Keeping repos up to date
 
-The MCP server tells Claude Code when to use it. These are its ten tools. Six only read; the
-other four record what a person tells them, and count only once that person agrees:
+There's nothing to do.
 
-| Tool | Answers | From |
-|---|---|---|
-| `brain_repo_card` | What is this repo for, which system is it part of, which repos does it call and which call it, is there a wiki? | The index, the product page, systems and the link map |
-| `brain_get` | What it is, who uses it and its business rules, how to build and test it, what API it serves, how its key modules work; or an overview of a whole system | The repo's wiki pages; for a system, its repos' product pages and the links between them |
-| `brain_search` | Where is this handled? (when you don't know which repo or page) | Every repo's wiki sections, endpoints and other links, and system names |
-| `brain_find_consumers` | Who serves this endpoint, and who calls it? Who publishes this event and who handles it? The same for a gRPC method or a shared package | Routes, calls, events, gRPC and packages across every repo |
-| `brain_review` | What's waiting for me to decide: proposed or stale facts, suggested systems, proposed notes; and what the brain couldn't answer | Facts, systems, notes and gaps |
-| `brain_impact` | What breaks if I change this repo, file or endpoint? Or: which systems, repos and endpoints would this piece of work touch? | What it serves or publishes, and everyone who uses each; for work, the wiki and route map |
-| `brain_record_fact` | Records a rule, term, purpose, decision or answer a person has just stated, on a repo or a system | The person, who agrees in the conversation |
-| `brain_set_note` | Sets what a repo's wiki should focus on, when a person says so | The person, who agrees in the conversation |
-| `brain_facts` | Confirms, rewords, re-anchors or retires a fact | The person, who agrees in the conversation |
-| `brain_systems` | Confirms a suggested system, adds or moves repos, changes a summary, renames one | The person, who agrees in the conversation |
-
-Everything a person does with the brain works from the conversation. Only setup stays in the
-terminal: adding, syncing and removing repos, hooks, `doctor`.
-
-For example, `npm run brain -- consumers "GET /api/articles/:slug"` gives:
-
-```
-GET /api/articles/{} · 4 servers, 6 callers in 5 repos · llm-generated
-
-Served by
-  aspnet-api · src/Conduit/Features/Articles/ArticlesController.cs:39 · GET /api/articles/{slug}
-  express-api · src/app/routes/article/article.controller.ts:87-90 · GET /api/articles/{slug}
-  flask-api · conduit/articles/views.py:78 · GET /api/articles/{slug}
-  laravel-api · routes/api.php:30-34 · GET /api/articles/{article}
-
-Called by
-  react-web · src/agent.js:61-62 · GET /api/articles/{slug}
-  …
-```
-
-These are C#, TypeScript, Python and PHP servers side by side, each with its full path. No
-language needs any setup.
-
-Links that aren't HTTP work the same way: `consumers "event OrderStartedIntegrationEvent"` lists
-who publishes an event and who handles it, `consumers "grpc Basket/GetBasket"` a gRPC method's
-server and callers, and `consumers "package @citation/ui"` the repo that publishes a package and
-the repos that depend on it. Names match exactly, ignoring case and package versions. Shared
-databases aren't linked: table names like `users` repeat across unrelated databases.
-
-**Following a flow.** `consumers "POST /api/orders" --follow` (or `follow: true` over MCP) also
-shows what starts it (the UI actions and jobs that lead to it, such as the web and mobile checkouts),
-then what handling it sets off, hop by hop, until the flow ends:
-- **Between repos:** the calls it makes and events it publishes, then who serves or handles those.
-- **Through tables:** the tables it reads and writes. Within a repo, the trace continues from a
-  table's writer to whatever reads it, such as a job that polls it. Between repos, a table is only
-  named, never linked.
-
-Each hop is a chain of cited steps from the handler to the line that makes the call, checked
-without AI. A step that reaches nothing says "ends here", and one not yet mapped says so.
-
-The chains come from a third run in the links step. It covers every route, handler and gRPC method
-a repo serves, and the jobs and UI actions it finds. Sync keeps them current: lines that only move
-cost nothing, and only chains whose code changed are followed again. Sync also reports the calls
-and events nothing was found to trigger, as a sign of what the run may have missed.
-
-### For product owners
-
-Every wiki has a **product page** in product language: who uses it, what they can do, its
-business rules (each cited to the line that enforces it), its terms, what it depends on and what
-it doesn't do. Code names appear only in citations. The repo card opens with its first sentence:
-
-```
-react-web  @ee72eba · up to date
-Product: Lets readers browse, write and discuss short-form articles, organise them by topic, and follow the authors they want to keep up with. · read with brain_get (page "product")
-System: RealWorld (with aspnet-api, express-api, flask-api, laravel-api) · overview with brain_get (system "RealWorld")
-```
-
-**Systems** say which repos make up one product. Claude Code suggests them and a person confirms
-them:
-
-```
-npm run brain -- systems suggest          # cents: it reads the repos' cards and links, not their code
-npm run brain -- systems                  # what it suggested, and why
-npm run brain -- systems confirm --all    # or confirm one, or fix with: systems set <system> <repo>...
-```
-
-Agents see suggested systems labelled "suggested" until someone confirms them. A system's overview
-(`systems show <system>`, or `brain_get` with `system`) lists its repos, what each is for and how
-they connect. It is put together when asked, so it is never out of date.
-
-**Which repos would a piece of work touch?** `brain_impact` with `work` searches the wikis
-(product pages first) and the route map, and groups what it finds by system:
-
-```
-npm run brain -- impact --work "notify buyers when an order ships"
-```
-
-```
-"notify buyers when an order ships" would most likely touch:
-
-eShop
-  eshop  api › Ordering (`Ordering.API`, group `api/orders`); ordering-api › Aggregate model; …; routes: PUT /api/orders/ship, …
-
-Weaker matches: citation-harness-library
-```
-
-It also names the repos that call the matching endpoints. No AI runs, so it is instant and free;
-the calling agent does the reasoning.
-
-### For technical plans
-
-A **small repo** (most services and libraries) gets the fixed pages above in one run, plus a
-data-model page and an integrations page when it has them.
-
-A **large repo** gets a wiki that fits it. A large repo has 200 or more source files outside
-tests, or four or more projects, such as eShop's twenty. First, a free count of its folders,
-projects and entry points (no AI) is handed to a planning run, which picks its pages:
-- the core pages: overview, build and test, API, and product;
-- a page per area a developer would work in on its own, such as Basket, Ordering or Identity;
-- up to three **flow** pages, a journey such as checkout as numbered, cited steps;
-- a **data-model** page and an **integrations** page.
-
-There are at most 20 pages. They're written four to a run, side by side, each run starting from
-its pages' key files. `brain wiki plan <repo>` shows the plan.
-
-The overview and each flow page carry a Mermaid diagram. A comment above each box and message
-cites the code, and every element is checked like a sentence. Agents get the text without the
-diagrams unless they ask, since the text says the same.
-
-The wiki follows the code:
-- **Lines shift:** when a commit only shifts the lines a page cites, the citations move with
-  them and no AI runs.
-- **A new project or area:** it's planned again, adding pages only for what's new.
-- **A steering note:** you set one with `brain note <repo> "Ordering matters most"`, or an agent
-  sets it with `brain_set_note` once you agree. It re-plans the wiki at the next
-  sync, and each page follows it when it's next rewritten (`sync <repo> --only wiki --full`
-  rewrites them all now). It can't switch off a check.
-
-`brain_impact` with `work` names the area and flow pages to read for a piece of work.
-
-### Facts from people
-
-The code can't say everything: "follows are capped at 500 because people bulk-followed" lives in
-someone's head. When a person tells their agent something like that, the agent offers to record
-it with `brain_record_fact`. Two things make it the person's decision, not the agent's:
-- **Their words.** The agent shows the fact and asks; the call carries their reply ("yes, record
-  that"), and it is stored with the fact. Without it, the fact is only *proposed*.
-- **The permission prompt.** Claude Code asks the person to allow every call to a writing tool,
-  showing what will be stored, even when the brain's tools are allowed. An agent can't click it.
-  A headless run (`claude -p`) has no one to allow it, so it can't write at all.
-
-Confirmed facts are stored as `human-reviewed`, with who, when and their words, and come first:
-at the top of the product page, on the card, in search and in system overviews. The answer to
-recording one lists what the brain already says nearby, so the agent can raise a contradiction.
-
-```
-## From people
-
-- Users can follow at most 500 authors. (rule · human-reviewed · Rafe Loveday, 2026-10-12 · enforced at src/follow.ts:2 · fact #1)
-```
-
-- **Proposed facts wait.** Agents see them labelled "proposed" until the person agrees
-  (`brain_review` lists them; `brain_facts` confirms, or `brain facts confirm` in a terminal). Rewording a confirmed
-  fact without their agreement makes it proposed again, so a confirmed fact never says something
-  nobody agreed to.
-- **A changed rule replaces the old one.** If the person changes something already recorded
-  ("the cap is now 1000"), the agent offers to replace that fact. The old one is retired when the
-  new one is confirmed, so the two never both stand.
-- **Anchored facts go stale.** A fact can point at the lines that enforce it. When those lines
-  change, the next sync marks it stale ("re-confirm before relying on it"); lines moving around
-  it don't.
-- **Checked against the code.** On the next sync, Claude Code reads each new or changed fact
-  against the code of the repo it's about (or each repo of its system) and says whether the code
-  **agrees**, **contradicts** it, or has **nothing for it** (agreed but not built, or not a code
-  matter). The answer must cite lines that pass the usual check, and it never changes the fact:
-  `(… · code agrees (checked @e45c37c) · fact #4)`, or `not in the code of aspnet-api,
-  express-api, …`. Where the code agrees with a fact nobody anchored, those lines become its
-  anchors, so it goes stale when they change. Checks run again only when the fact or the code
-  they read changes: cents each, nothing otherwise.
-- **Gaps:** searches the brain couldn't answer are logged on your machine. `brain_review` (or
-  `brain gaps`) lists the most asked, which is what is worth writing down.
-
-You can also add facts yourself: `npm run brain -- facts add <repo or system> --kind rule --text "..."`.
-
-## How far to trust an answer
-
-- **Every claim is checked before it's stored, with no AI involved.**
-  - Each sentence in a wiki page must cite lines that exist, at most 80 of them, and the names it
-    mentions must appear there.
-  - Each route or call must have its HTTP method and every fixed part of its path in the lines it
-    cites. Each event, gRPC method or package must have its name, or each part of it, there.
-  - Anything that fails is removed, and `brain sync` says what and why. On the trial repos about
-    80% of wiki claims were kept, and the removals were real problems.
-- **Every answer says when it's from:** the commit it describes, and how far behind the tracked
-  branch that is (`@a397d11 · up to date`, or `2 commits behind origin/main`).
-- **Systems are suggested by Claude Code and confirmed by a person.** A suggestion is stored only
-  if its repos exist, none is in two systems, and each repo in it calls or is called by another
-  member in the route map. Agents
-  see unconfirmed systems labelled "suggested".
-- **Everything Claude Code wrote is labelled `llm-generated`.** The check confirms the cited
-  lines say what the claim names, not that the claim reads them correctly. So agents are told to
-  confirm at the citation before relying on it.
-- **Facts from people are labelled `human-reviewed`** once the person confirms them, with who and
-  when, or "proposed" until then. Only the person can confirm: with their words in the conversation and their
-  click on the permission prompt. Text in a repo can't plant one, since agents are told to record
-  only what the person said.
-- **Answers give file and line pointers, never pasted code.**
-- **Gaps are stated, not hidden.** For example, calls whose URL (or events whose name) is only
-  known at run time are counted and located.
-- **Your code stays on your machine.** It is read only by your own Claude Code, in a temporary
-  read-only copy at the indexed commit. That run has no other tools or MCP servers.
-
-## Commands
-
-Run them with `npm run brain -- <command>` from this folder (or `brain <command>` with the
-shortcut above). `search`, `card`, `page`, `consumers` and `impact` print exactly what an agent
-gets.
-
-| Command | Does |
-|---|---|
-| `doctor` | Checks Node, git, Claude Code, the store, the MCP registration and each repo's hook, and says how to fix anything missing. |
-| `add <path> [<path>...] [--name n] [--note "<focus>"] [--no-hook] [--no-ai]` | Adds repos: indexes them, has Claude Code map them and write their wikis (three repos at a time), and installs their hooks. Each answers questions as soon as it's indexed. `--no-ai` indexes only. |
-| `sync [<name>] [--full] [--only links\|wiki\|facts] [--no-ai] [--model m]` | Brings repos up to their tracked branch, redoing only what changed: the links, the wiki, and facts from people checked against the code, side by side. All repos if no name is given, three at a time. `--full` redoes everything. `--only` runs one of those steps. This is what the hook runs. |
-| `note <name> ["<focus>" \| --clear \| --confirm]` | Shows or sets the note steering a repo's wiki; `--confirm` applies one an agent proposed. |
-| `wiki plan <name>` | A large repo's page plan: each page's kind, what it covers, and when it was written. |
-| `hooks install\|remove\|status [<name>]` | Turns automatic updates on or off, or shows which repos have them. |
-| `repo list` | Lists repos and how up to date each is. |
-| `repo add <path> [--name n] [--ref r]` | Enrols a repo only, with no AI, for when you want to sync later. |
-| `repo set-ref <name> <ref>` | Tracks a different branch, e.g. `origin/release`. |
-| `repo remove <name>` | Removes a repo, everything held about it, and its hook. |
-| `search "<query>" [--repo n]... [--detailed]` | `brain_search`. |
-| `card <name> [--detailed]` | `brain_repo_card`. Given a system's name, it shows that system's overview. |
-| `page <name> [<page>]` | `brain_get`: the page list, or one page (`product` for the product page). |
-| `consumers "<METHOD /path>" [--detailed] [--follow]` | `brain_find_consumers`. Takes `:id` and `{id}` style paths, or full URLs; or `"event <name>"`, `"grpc <Service/Method>"`, `"package <name>"`. `--follow` traces what handling it sets off, across repos. |
-| `impact <repo> [--path file] [--route "<METHOD /path>"]` | `brain_impact`. `--route` also takes an event, gRPC method or package. |
-| `impact --work "<description>"` | `brain_impact` with `work`: which systems, repos and endpoints a piece of work would most likely touch. |
-| `systems` | Lists systems, whether each is suggested or confirmed, and repos in none. |
-| `systems suggest [--model m]` | Has Claude Code suggest systems from the repos' cards, product pages and links. Costs cents. Confirmed systems are left alone. |
-| `systems show <system>` | `brain_get` with `system`: the system's overview. |
-| `systems confirm <system>` or `--all` | Confirms suggested systems. |
-| `systems set <system> <repo>... [--summary "<line>"]` | Adds or moves repos into a system (creating it if needed), or changes its one-line summary. Either way the system counts as confirmed. |
-| `systems rename <system> <new>` / `systems remove <system>` | Tidies up. Removing a system leaves its repos enrolled, and removes the facts on it. |
-| `facts [<repo or system>] [--all]` | Lists facts from people; proposed and stale ones are marked. `--all` adds retired ones. |
-| `facts add <repo or system> --kind <k> --text "<fact>" [--quote ...] [--anchor file:lines]... [--ticket t]` | Records a fact yourself, confirmed. Kinds: rule, term, purpose, decision, answer. |
-| `facts confirm <id>` / `facts edit <id> [--text ...] [--anchor ...]` / `facts retire <id>` | Confirms a proposed or stale fact, rewords or re-anchors one, or marks one no longer true. |
-| `facts check [<repo or system>] [--full]` | Checks facts against the code now rather than at the next sync. `--full` checks them again even if nothing changed. |
-| `facts export` | Every fact as Markdown, by repo and system. |
-| `gaps` | Searches the brain couldn't answer, most asked first. |
-
-A repo tracks what `origin/HEAD` points at (usually `origin/main`), so it describes what has been
-merged, and a fetch is enough to update it. The store is `%USERPROFILE%\.brain\brain.db`. Set
-`BRAIN_DB` to use another file.
+- Each repo gets a git hook. When its main branch moves (a pull or a fetch), the brain updates it in the background.
+- Repos the brain cloned are fetched when you start a Claude Code session, at most once an hour.
+- Updates redo only what changed. They cost cents, or nothing when nothing relevant changed.
+- Every answer says which commit it describes, and how far behind the main branch that is.
 
 ## Troubleshooting
 
-- **Something's not working:** run `npm run brain -- doctor` first.
-- **Claude Code didn't use the brain:**
-  - Start a *new* session; sessions pick up MCP servers when they start.
-  - Check `/mcp` shows `citation-brain` as connected.
-  - Ask about the repo or system by name. The brain tells each new session which systems and
-    repos it holds, so a name that matches a public project (like RealWorld) still goes to the
-    brain. A repo added after the session started is only listed in the next one.
-- **A repo isn't updating:** `npm run brain -- hooks status`. Background syncs log to
-  `%USERPROFILE%\.brain\hooks.log` (read it with `Get-Content -Encoding utf8` in Windows
-  PowerShell). A repo that uses husky or its own `reference-transaction` hook can't take the
-  brain's hook. Run `brain sync <name>` from your own hook instead.
-- **A wiki page says "kept from @…":** its rewrite failed the check twice, so the last good
-  version is shown. `brain sync <name> --full --only wiki` rewrites the wiki without
-  re-mapping the links.
-- **Group policy blocks `node_modules\.bin`:** that's why every command here runs through `node`.
-  Use the npm scripts or the shortcut, not `npx`.
+- **Something's wrong.** Run `npm run brain -- doctor` first.
+- **Claude Code doesn't use the brain.**
+  - Start a new session. Sessions load MCP servers when they start.
+  - Type `/mcp`. `citation-brain` should show as connected.
+  - Ask about the repo or product by name.
+- **The brain's tools don't load.**
+  - Run `claude mcp get citation-brain`. Its path should point at this folder.
+  - Run that command on its own, e.g. `node C:\Repos\brain-concept\bin\brain-mcp.mjs`.
+    It should print `citation-brain MCP server ready`. Press Ctrl+C to stop it.
+  - If you moved this folder, run doctor. It prints the commands to register it again.
+- **A repo is still enrolling.** Ask for its card. A large repo can take half an hour.
+  If the card says it stopped or failed, ask the agent to add it again.
+- **A GitHub repo won't clone.** The card says what git said.
+  Check you can clone it yourself with `git clone <url>`.
+- **A repo isn't updating.** Run `npm run brain -- hooks status`.
+  Background work is logged to `%USERPROFILE%\.brain\hooks.log`:
 
-## What it can't do yet
+  ```powershell
+  Get-Content -Encoding utf8 -Tail 50 $env:USERPROFILE\.brain\hooks.log
+  ```
 
-- **Search by meaning:** `brain_search` matches words, not synonyms. Search "auth" rather than
-  "login security".
-- **Flows across repos:** a flow page covers one repo, and names the link where a step crosses
-  into another. Pages that follow a journey through several repos are planned (B4b).
-- **Hosting:** today it runs on your machine. A hosted version with GitHub permissions is phase 6.
+- **Group policy blocks `node_modules\.bin`.** That's why every command here runs through `node`.
+  Use the npm scripts, not `npx`.
 
-## Working on the brain
+## Removing it
 
-See [docs/development.md](docs/development.md) for tests, layout and design docs. The
-[manual testing guide](docs/manual-testing.md) covers checking changes against real repos.
+- **One repo.** This removes everything the brain holds about it, its hook, and the brain's clone of it:
+
+  ```powershell
+  npm run brain -- repo remove foo
+  ```
+
+- **The MCP server:**
+
+  ```powershell
+  claude mcp remove citation-brain -s user
+  ```
+
+- **Everything.** Delete `%USERPROFILE%\.brain`. It holds the store, the log and the brain's clones.
+
+## More
+
+- [How it works](docs/how-it-works.md): what each tool answers, how far to trust it, facts from people, the wiki, links between repos, and limits.
+- [Commands](docs/cli.md): every terminal command.
+- [Working on the brain](docs/development.md): tests, layout and design docs.
+- [Manual testing](docs/manual-testing.md): checking changes against real repos.

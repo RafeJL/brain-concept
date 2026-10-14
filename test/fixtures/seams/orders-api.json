@@ -4,6 +4,6 @@
     { "kind": "route", "method": "DELETE", "path": "/api/orders/{id}", "runtime": false, "cites": [{ "file": "src/OrdersController.cs", "start": 7, "end": 8 }, { "file": "src/OrdersController.cs", "start": 1, "end": 1 }] },
     { "kind": "route", "method": "GET", "path": "/health", "runtime": false, "cites": [{ "file": "src/Health.cs", "start": 1, "end": 1 }] },
     { "kind": "route", "method": "GET", "path": "/api/orders/{orderId}", "runtime": false, "cites": [{ "file": "docs/openapi.yaml", "start": 3, "end": 4 }] },
-    { "kind": "call", "method": "GET", "path": "/api/orders/{id}", "runtime": false, "cites": [{ "file": "tests/OrdersTests.cs", "start": 1, "end": 1 }] }
+    { "kind": "call", "method": "GET", "path": "/api/orders/{id}", "runtime": false, "cites": [{ "file": "src/AdminClient.cs", "start": 1, "end": 1 }] }
   ]
 }

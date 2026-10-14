@@ -253,4 +253,40 @@ export const MIGRATIONS: (string | ((db: DatabaseSync) => void))[] = [
   `
   ALTER TABLE facts ADD COLUMN confirmed_with TEXT;
   `,
+  // B7: where each enrolment has got to, written by the process doing it (often in the background)
+  // and read by the MCP server. Not tied to repos: a repo being cloned isn't enrolled yet. Finished
+  // ones stay, so the next estimate can go by how long earlier ones took.
+  `
+  CREATE TABLE enrolments (
+    repo        TEXT PRIMARY KEY,
+    source      TEXT NOT NULL,
+    status      TEXT NOT NULL CHECK (status IN ('running', 'failed', 'done')),
+    step        TEXT NOT NULL,
+    error       TEXT,
+    pid         INTEGER,
+    files       INTEGER,
+    estimate    TEXT,
+    cost_usd    REAL NOT NULL DEFAULT 0,
+    started_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    finished_at TEXT
+  );
+  `,
+  // B6b: maps that say what they covered. Each piece of a file (the whole file, or a range of a
+  // long one) records what each mapping run made of it, so answers can tell "none" from "not
+  // mapped". Inherited routes are marked so each map can work them out again. The survey a full
+  // map was made with is kept for the updates after it.
+  `
+  CREATE TABLE seam_pieces (
+    repo       TEXT NOT NULL REFERENCES repos(name) ON DELETE CASCADE,
+    path       TEXT NOT NULL,
+    start_line INTEGER NOT NULL,
+    end_line   INTEGER NOT NULL,
+    http       TEXT NOT NULL CHECK (http IN ('unflagged', 'mapped', 'none', 'unmapped')),
+    links      TEXT NOT NULL CHECK (links IN ('unflagged', 'mapped', 'none', 'unmapped')),
+    PRIMARY KEY (repo, path, start_line)
+  );
+  ALTER TABLE seams ADD COLUMN derived INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE repo_state ADD COLUMN link_survey TEXT;
+  `,
 ];

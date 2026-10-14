@@ -5,7 +5,9 @@ import { enrolRepo } from "../src/ingest/registry.js";
 import { syncRepo } from "../src/ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy, type AccessPolicy } from "../src/serve/access.js";
 import { findConsumers } from "../src/serve/tools/find-consumers.js";
+import { impact } from "../src/serve/tools/impact.js";
 import { repoCard } from "../src/serve/tools/repo-card.js";
+import type { RunRequest, Runner } from "../src/ai/runner.js";
 import { SqliteStore } from "../src/store/sqlite.js";
 import { commit, commitFixture, makeRepo, mapSeams, recordedRunner, recordedSeams, repoFromFixture } from "./helpers.js";
 
@@ -30,6 +32,43 @@ const route = (method: string, path: string, ...cites: [string, number, number][
   runtime: false,
   cites: cites.map(([file, start, end]) => ({ file, start, end })),
 });
+
+/** Each kind of run's file headers: a whole file (from 1) or a part (from its first line). */
+function filesIn(prompt: string): { file: string; from: number }[] {
+  return [...prompt.matchAll(/===== FILE (.+?)(?: \(lines (\d+)-\d+\))? =====/g)].map((m) => ({ file: m[1]!, from: Number(m[2] ?? 1) }));
+}
+
+/**
+ * A runner answering each kind of run as the brain asks it: the survey, screening (by `flag`,
+ * everything unflagged unless given), and the HTTP and links mapping runs, which answer for every
+ * file they were given unless `answerFiles` is false.
+ */
+function pipeline(options: {
+  survey?: unknown;
+  flag?: (file: string, from: number) => Partial<{ route: boolean; call: boolean; message: boolean }>;
+  screenNothing?: boolean;
+  http?: (prompt: string) => unknown[];
+  links?: (prompt: string) => unknown[];
+  answerFiles?: boolean;
+}) {
+  const requests: RunRequest[] = [];
+  const runner: Runner = {
+    async run<T>(request: RunRequest) {
+      requests.push(request);
+      const p = request.prompt;
+      let output: unknown;
+      if (p.startsWith("You are surveying")) output = options.survey ?? { templates: [], inherited: [], config_files: [] };
+      else if (p.startsWith("You are screening"))
+        output = { files: options.screenNothing ? [] : filesIn(p).map(({ file, from }) => ({ file, from, route: false, call: false, message: false, ...(options.flag?.(file, from) ?? {}) })) };
+      else {
+        const seams = (p.includes("mapped separately") ? options.links : options.http)?.(p) ?? [];
+        output = { seams, files: options.answerFiles === false ? [] : filesIn(p).map(({ file, from }) => ({ file, from, outcome: "none" })) };
+      }
+      return { output: output as T, costUsd: 0.05, durationMs: 1000, model: "claude-sonnet-5" };
+    },
+  };
+  return { runner, requests, maps: () => requests.filter((r) => !/^You are (surveying|screening)/.test(r.prompt)) };
+}
 
 describe("verifying the AI's routes and calls", () => {
   const files = {
@@ -158,10 +197,11 @@ describe("mapping and updating a repo's routes and calls", () => {
     await syncRepo(store, "api");
     const update = recordedRunner(recordedSeams("articles-api-v2"));
     const result = await updateSeams(store, update.runner, "api");
+    const httpRun = update.requests.find((r) => r.prompt.includes("List every HTTP route"))!;
 
     expect(result).toMatchObject({ mode: "update", redone: ["src/articles.ts", "src/tags.ts"] });
-    expect(update.requests[0]!.prompt).toContain("Only list entries declared in these files");
-    expect(update.requests[0]!.prompt).toContain("- src/tags.ts");
+    expect(httpRun.prompt).toContain("Only list entries declared in the files and parts given at the end");
+    expect(httpRun.prompt).toContain("===== FILE src/tags.ts =====\n1| router.get(\"/tags\", list);");
     expect(store.seams({ repos: ["api"] }).map((s) => `${s.method} ${s.key}`)).toEqual(["PUT /articles/{}", "GET /tags"]);
 
     commit(apiDir, {}, "remove tags", ["src/tags.ts"]);
@@ -172,6 +212,7 @@ describe("mapping and updating a repo's routes and calls", () => {
     expect(none.requests).toHaveLength(0);
     expect(after.redone).toEqual([]);
     expect(store.seams({ repos: ["api"] }).map((s) => s.path)).toEqual(["src/articles.ts"]);
+    expect(store.seamPieces("api").map((p) => p.path)).not.toContain("src/tags.ts");
   });
 
   it("maps a file again when a file its seams were built from changes", async () => {
@@ -185,8 +226,10 @@ describe("mapping and updating a repo's routes and calls", () => {
     await syncRepo(store, "api");
     const update = recordedRunner({ seams: [route("GET", "/v2/tags", ["Tags.cs", 1, 1], ["Program.cs", 1, 1])] });
     await updateSeams(store, update.runner, "api");
+    const httpRun = update.requests.find((r) => r.prompt.includes("List every HTTP route"))!;
 
-    expect(update.requests[0]!.prompt).toContain("- Program.cs\n- Tags.cs");
+    expect(httpRun.prompt).toContain("===== FILE Program.cs =====");
+    expect(httpRun.prompt).toContain("===== FILE Tags.cs =====");
     expect(store.seams({ repos: ["api"] }).map((s) => s.key)).toEqual(["/v2/tags"]);
   });
 
@@ -196,68 +239,156 @@ describe("mapping and updating a repo's routes and calls", () => {
     await enrolRepo(store, { path: makeRepo({ "CatalogService.cs": service }), name: "web" });
     await syncRepo(store, "web");
     const call = (...lines: number[]) => ({ kind: "call", method: "GET", path: "/api/catalog/items", runtime: false, cites: lines.map((l) => ({ file: "CatalogService.cs", start: l, end: l })) });
-    // The HTTP run and its retry; the run for other links, alongside, finds none, and so does its second look.
-    const prompts: string[] = [];
-    const runner = {
-      async run<T>(request: { prompt: string }) {
-        prompts.push(request.prompt);
-        const answer = request.prompt.includes("mapped separately") ? [] : request.prompt.includes("dropped them") ? [call(7, 1)] : [call(7)];
-        return { output: { seams: answer } as T, costUsd: 0.05, durationMs: 1000, model: "claude-sonnet-5" };
-      },
-    };
+    const { runner, maps } = pipeline({ flag: () => ({ call: true }), http: (p) => (p.includes("dropped them") ? [call(7, 1)] : [call(7)]) });
 
-    const result = await updateSeams(store, runner as never, "web");
+    const result = await updateSeams(store, runner, "web");
 
-    expect(prompts).toHaveLength(4);
-    expect(prompts.find((p) => p.includes("dropped them"))).toContain('call GET /api/catalog/items (CatalogService.cs:7): "api" isn\'t in the cited lines');
+    expect(maps().map((r) => r.prompt.includes("dropped them"))).toEqual([false, true]);
+    expect(maps()[1]!.prompt).toContain('call GET /api/catalog/items (CatalogService.cs:7): "api" isn\'t in the cited lines');
     expect(result).toMatchObject({ retried: 1, dropped: [] });
-    expect(result.costUsd).toBeCloseTo(0.2);
     expect(store.seams({ repos: ["web"] }).map((s) => [s.key, s.startLine, s.cites])).toEqual([["/api/catalog/items", 7, [{ path: "CatalogService.cs", start: 1, end: 1 }]]]);
   });
 
-  it("maps HTTP and other links in separate runs, and skips the HTTP run when only a manifest changed", async () => {
+  it("maps HTTP and other links in separate runs, and runs only the links run when only a manifest changed", async () => {
     const store = new SqliteStore(":memory:");
     const dir = makeRepo({ "Orders.cs": '[HttpGet("orders")]\nbus.Publish("OrderStarted");\n', "requirements.txt": "requests\n" });
     await enrolRepo(store, { path: dir, name: "orders" });
     await syncRepo(store, "orders");
     const event = { kind: "event-publish", name: "OrderStarted", runtime: false, cites: [{ file: "Orders.cs", start: 2, end: 2 }] };
     // Both runs give the same answer; each keeps only its own kinds, so nothing is stored twice.
-    const full = recordedRunner({ seams: [route("GET", "/orders", ["Orders.cs", 1, 1]), event] });
+    const full = pipeline({ flag: () => ({ route: true, message: true }), http: () => [route("GET", "/orders", ["Orders.cs", 1, 1]), event], links: () => [route("GET", "/orders", ["Orders.cs", 1, 1]), event] });
 
     await updateSeams(store, full.runner, "orders");
 
-    // HTTP, links, then the links run's second look.
-    expect(full.requests.map((r) => r.prompt.includes("HTTP routes and calls are mapped separately"))).toEqual([false, true, true]);
-    expect(full.requests[2]!.prompt).toContain("- event-publish OrderStarted (Orders.cs)");
+    expect(full.maps().map((r) => r.prompt.includes("HTTP routes and calls are mapped separately"))).toEqual([false, true]);
+    // Manifests go to the links run unscreened: they can publish or depend on a package.
+    expect(full.maps()[1]!.prompt).toContain("===== FILE requirements.txt =====");
+    expect(full.maps()[0]!.prompt).not.toContain("requirements.txt");
     expect(store.seams({ repos: ["orders"] }).map((s) => `${s.kind} ${s.key}`)).toEqual(["http-route /orders", "event-publish orderstarted"]);
 
     commit(dir, { "requirements.txt": "requests\n@citation/ui\n" });
     await syncRepo(store, "orders");
-    const update = recordedRunner({ seams: [] });
+    const update = pipeline({});
     await updateSeams(store, update.runner, "orders");
 
-    // An update maps a few files, so it takes no second look.
+    // No survey (nothing it rests on changed), nothing to screen, and no HTTP run.
     expect(update.requests).toHaveLength(1);
     expect(update.requests[0]!.prompt).toContain("HTTP routes and calls are mapped separately");
   });
 
-  it("keeps what a full map's second look finds that the first links run missed", async () => {
+  it("maps only what screening flags, in pieces for long files, and records what became of each piece", async () => {
     const store = new SqliteStore(":memory:");
-    const files = { "Basket.cs": 'bus.Subscribe<OrderStarted>();\n', "WebApp.cs": 'bus.Subscribe<OrderPaid>();\n' };
+    const big = Array.from({ length: 700 }, (_, i) => (i === 649 ? '[HttpGet("reports")]' : `// line ${i + 1}`)).join("\n");
+    const files = {
+      "Orders.cs": '[HttpGet("orders")]\n',
+      "Util.cs": "static class Util {}\n",
+      "Bus.cs": 'bus.Publish("OrderStarted");\n',
+      "Big.cs": big,
+      "tests/OrdersTests.cs": 'await client.GetAsync("orders");\n',
+    };
     await enrolRepo(store, { path: makeRepo(files), name: "shop" });
     await syncRepo(store, "shop");
-    const handler = (name: string, file: string) => ({ kind: "event-subscribe", name, runtime: false, cites: [{ file, start: 1, end: 1 }] });
-    const runner = {
-      async run<T>(request: { prompt: string }) {
-        const answer = !request.prompt.includes("mapped separately") ? [] : request.prompt.includes("may have stopped") ? [handler("OrderPaid", "WebApp.cs"), handler("OrderStarted", "Basket.cs")] : [handler("OrderStarted", "Basket.cs")];
-        return { output: { seams: answer } as T, costUsd: 0.05, durationMs: 1000, model: "claude-sonnet-5" };
-      },
+    const flags: Record<string, object> = { "Orders.cs": { route: true }, "Bus.cs": { message: true }, "Big.cs:601": { route: true } };
+    const { runner, maps, requests } = pipeline({
+      flag: (file, from) => flags[from > 1 ? `${file}:${from}` : file] ?? {},
+      http: () => [route("GET", "/orders", ["Orders.cs", 1, 1]), route("GET", "/reports", ["Big.cs", 650, 650])],
+      links: () => [{ kind: "event-publish", name: "OrderStarted", runtime: false, cites: [{ file: "Bus.cs", start: 1, end: 1 }] }],
+    });
+
+    const result = await updateSeams(store, runner, "shop");
+    const screening = requests.find((r) => r.prompt.startsWith("You are screening"))!;
+
+    // Tests aren't screened or mapped; screening reads every other file, with no tools.
+    expect(screening.prompt).not.toContain("tests/OrdersTests.cs");
+    expect(screening.prompt).toContain("===== FILE Big.cs (lines 601-700) =====");
+    expect(screening.explore).toBe(false);
+    expect(maps()[0]!.prompt).not.toContain("Util.cs");
+    expect(maps()[0]!.prompt).toContain("650| [HttpGet(\"reports\")]");
+    expect(result.screened).toEqual({ pieces: 5, http: 2, links: 1 });
+    expect(store.seamPieces("shop").map((p) => `${p.path}:${p.start} ${p.http} ${p.links}`)).toEqual([
+      "Big.cs:1 unflagged unflagged",
+      "Big.cs:601 mapped unflagged",
+      "Bus.cs:1 unflagged mapped",
+      "Orders.cs:1 mapped unflagged",
+      "Util.cs:1 unflagged unflagged",
+    ]);
+  });
+
+  it("asks again for a piece no run answered for, then records it as not mapped; a piece screening didn't answer is mapped", async () => {
+    const store = new SqliteStore(":memory:");
+    await enrolRepo(store, { path: makeRepo({ "Orders.cs": '[HttpGet("orders")]\n' }), name: "shop" });
+    await syncRepo(store, "shop");
+    // Screening answers nothing, so the piece counts as flagged; the mapping runs answer for no file.
+    const { runner, maps } = pipeline({ screenNothing: true, answerFiles: false });
+
+    const result = await updateSeams(store, runner, "shop");
+
+    expect(maps().filter((r) => r.prompt.includes("List every HTTP route"))).toHaveLength(2);
+    expect(result.unmapped).toEqual([{ path: "Orders.cs", start: 1, end: 1 }]);
+    expect(store.seamPieces("shop")).toEqual([{ path: "Orders.cs", start: 1, end: 1, http: "unmapped", links: "unmapped" }]);
+  });
+
+  it("works out the routes derived classes get from a base class, from the survey, and checks them", async () => {
+    const store = new SqliteStore(":memory:");
+    const files = {
+      "WebApiConfig.cs": 'config.Routes.MapHttpRoute("DefaultApi", "api/{controller}/{id}");\n',
+      "EntityApiController.cs": ["public abstract class EntityApiController<T> : ApiController {", "  public IHttpActionResult Get() => Ok();", "  [HttpPost] public IHttpActionResult Post(T item) => Ok();", "}", ""].join("\n"),
+      "EmployeeController.cs": "public class EmployeeController : EntityApiController<Employee> { }\n",
+      "AuditedController.cs": "public abstract class AuditedController<T> : EntityApiController<T> { }\n",
+      "NoteController.cs": "public class NoteController : AuditedController<Note> { }\n",
+      "Helper.cs": "public class Helper : EntityApiController<Thing> { }\n",
     };
+    await enrolRepo(store, { path: makeRepo(files), name: "atlas" });
+    await syncRepo(store, "atlas");
+    const cite = (file: string, line: number) => ({ file, start: line, end: line });
+    const survey = {
+      templates: [{ template: "api/{controller}/{id}", cites: [cite("WebApiConfig.cs", 1)] }, { template: "v9/{controller}", cites: [cite("WebApiConfig.cs", 1)] }],
+      inherited: [
+        {
+          base: "EntityApiController<T>",
+          suffix: "Controller",
+          cites: [cite("EntityApiController.cs", 1)],
+          routes: [
+            { method: "GET", path: "api/{controller}", cites: [cite("EntityApiController.cs", 2), cite("WebApiConfig.cs", 1)] },
+            { method: "POST", path: "api/{controller}", cites: [cite("EntityApiController.cs", 3), cite("WebApiConfig.cs", 1)] },
+            // Not supported by its lines: "v9" appears nowhere.
+            { method: "GET", path: "v9/{controller}", cites: [cite("EntityApiController.cs", 2)] },
+          ],
+        },
+      ],
+      config_files: ["Web.config"],
+    };
+    const { runner, maps } = pipeline({ survey, flag: () => ({}) });
 
-    const result = await updateSeams(store, runner as never, "shop");
+    const result = await updateSeams(store, runner, "atlas");
 
-    expect(result.swept).toBe(1);
-    expect(store.seams({ repos: ["shop"] }).map((s) => `${s.path} ${s.key}`)).toEqual(["Basket.cs orderstarted", "WebApp.cs orderpaid"]);
+    // A grandchild counts; an abstract class and a class without the suffix serve nothing.
+    expect(store.seams({ repos: ["atlas"] }).map((s) => `${s.method} ${s.rawPath} ${s.path} ${s.derived ? "derived" : ""}`)).toEqual([
+      "GET /api/Employee EmployeeController.cs derived",
+      "POST /api/Employee EmployeeController.cs derived",
+      "GET /api/Note NoteController.cs derived",
+      "POST /api/Note NoteController.cs derived",
+    ]);
+    expect(result.derived).toBe(4);
+    // Following one points at the base method that handles it, rather than tracing each copy.
+    const followed = await findConsumers({ store, access: new LocalAccessPolicy() }, LOCAL_CALLER, { target: "GET /api/Employee", format: "concise", follow: true });
+    expect(followed.text).toContain("inherited from a base class, so its handling is the base method at EntityApiController.cs:2");
+    expect(store.linkSurvey("atlas")).toMatchObject({ templates: [{ template: "api/{controller}/{id}" }], inherited: [{ base: "EntityApiController", routes: [{}, {}] }], configFiles: [] });
+    expect(maps()).toHaveLength(0);
+  });
+
+  it("tells mapping runs the survey's templates, base classes and settings files", async () => {
+    const store = new SqliteStore(":memory:");
+    const files = { "WebApiConfig.cs": 'routes.MapHttpRoute("api/{controller}/{action}");\n', "appsettings.json": '{ "OrdersUrl": "https://orders" }\n', "Client.cs": "await http.GetAsync(config[\"OrdersUrl\"]);\n" };
+    await enrolRepo(store, { path: makeRepo(files), name: "web" });
+    await syncRepo(store, "web");
+    const survey = { templates: [{ template: "api/{controller}/{action}", cites: [{ file: "WebApiConfig.cs", start: 1, end: 1 }] }], inherited: [], config_files: ["appsettings.json"] };
+    const { runner, maps } = pipeline({ survey, flag: () => ({ call: true }) });
+
+    await updateSeams(store, runner, "web");
+
+    expect(maps()[0]!.prompt).toContain("- api/{controller}/{action} (WebApiConfig.cs:1)");
+    expect(maps()[0]!.prompt).toContain("live in: appsettings.json. When a URL or name comes from a setting");
   });
 
   it("runs no AI when only Markdown changed", async () => {
@@ -348,7 +479,7 @@ describe("brain_find_consumers", () => {
 
     const result = await findConsumers({ store, access: new LocalAccessPolicy() }, LOCAL_CALLER, { target: "GET /api/orders/{id}", format: "concise" });
 
-    expect(result.text).toContain("Called by\n  shop-web · src/api.ts:1 · GET /api/orders/{id}\n  orders-api · tests/OrdersTests.cs:1 · GET /api/orders/{id} · same repo");
+    expect(result.text).toContain("Called by\n  shop-web · src/api.ts:1 · GET /api/orders/{id}\n  orders-api · src/AdminClient.cs:1 · GET /api/orders/{id} · same repo");
   });
 
   it("says when nothing matched, and why that isn't proof", async () => {
@@ -358,5 +489,42 @@ describe("brain_find_consumers", () => {
 
     expect(result.text).toContain("No servers or callers found for GET /nothing/here.");
     expect(result.text).toContain("isn't proof");
+  });
+});
+
+describe("answers that say what a map didn't cover", () => {
+  it("say where no run answered for a piece, instead of calling it none", async () => {
+    const store = new SqliteStore(":memory:");
+    await enrolRepo(store, { path: makeRepo({ "Orders.cs": '[HttpGet("orders")]\n' }), name: "shop" });
+    await syncRepo(store, "shop");
+    await updateSeams(store, pipeline({ flag: () => ({ route: true }), answerFiles: false }).runner, "shop");
+    const deps = { store, access: new LocalAccessPolicy() };
+
+    const empty = await impact(deps, LOCAL_CALLER, { repo: "shop", format: "concise" });
+    const card = await repoCard(deps, LOCAL_CALLER, "shop", "concise");
+    const nobody = await findConsumers(deps, LOCAL_CALLER, { target: "GET /orders", format: "concise" });
+
+    expect(empty.text).toContain("No matching routes, events, gRPC methods or packages are mapped in shop.");
+    expect(empty.text).toContain("Parts of the link map are unknown in shop (1 not mapped: Orders.cs:1): no run answered for them, so a missing route or caller there isn't proof there is none.");
+    expect(card.text).toContain("Link map: partial. 1 files screened; 1 flagged pieces not mapped (Orders.cs:1)");
+    expect(nobody.text).toContain("Parts of the link map are unknown in shop");
+  });
+
+  it("say when a map was made before coverage was recorded, and say nothing when it is complete", async () => {
+    const { store, deps } = await twoRepos();
+    const at = store.getState("api")!.commit;
+    // An older map: seams stored with no survey or pieces.
+    store.replaceSeams("api", { commit: at, paths: null, seams: [] });
+    const db = (store as unknown as { db: { prepare(sql: string): { run(...a: unknown[]): void } } }).db;
+    db.prepare("UPDATE repo_state SET link_survey = NULL WHERE repo = ?").run("api");
+
+    const older = await impact(deps, LOCAL_CALLER, { repo: "api", format: "concise" });
+    const complete = await impact(deps, LOCAL_CALLER, { repo: "web", format: "concise" });
+    const card = await repoCard(deps, LOCAL_CALLER, "api", "detailed");
+
+    expect(older.text).toContain("api's link map was made before the brain recorded what it covered");
+    expect(complete.text).not.toContain("link map was made before");
+    expect(complete.text).not.toContain("unknown in");
+    expect(card.text).toContain("Link map: coverage not recorded");
   });
 });

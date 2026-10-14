@@ -3,7 +3,7 @@ import type { SystemRecord } from "../../core/systems.js";
 import type { SectionHit } from "../../store/store.js";
 import type { Caller } from "../access.js";
 import { visibleSystems } from "../systems.js";
-import { count, groupRoutes, indexedAt, linkCalls, readableRepos, TIER, type Format, type ToolDeps, type ToolResult } from "./common.js";
+import { count, groupRoutes, indexedAt, linkCalls, NO_REPOS, readableRepos, TIER, withoutWiki, type Format, type ToolDeps, type ToolResult } from "./common.js";
 import { impact, type ImpactInput } from "./impact.js";
 import { matchExpression } from "./search.js";
 
@@ -92,7 +92,7 @@ export async function workImpact(deps: ToolDeps, caller: Caller, input: WorkImpa
   const match = matchExpression(withoutFiller(input.work));
   if (!match) return { ok: false, text: `"${input.work}" has no words to search for.` };
   const readable = await readableRepos(deps, caller);
-  if (readable.length === 0) return { ok: false, text: "No repos are enrolled yet. Add one with: brain add <path>" };
+  if (readable.length === 0) return { ok: false, text: NO_REPOS };
 
   const byRepo = new Map<string, LikelyRepo>();
   const entry = (repo: string) => byRepo.get(repo) ?? byRepo.set(repo, { repo, score: 0, sections: [], routes: [], callers: [] }).get(repo)!;
@@ -164,7 +164,7 @@ function groupBySystem(likely: readonly LikelyRepo[], systems: readonly SystemRe
 }
 
 async function render(deps: ToolDeps, { work, groups, weaker }: WorkImpact, readable: string[], format: Format): Promise<string> {
-  const noWiki = readable.filter((name) => deps.store.pages(name).length === 0);
+  const noWiki = withoutWiki(deps, readable);
   const noWikiNote = noWiki.length ? `No wiki yet, so only their routes were searched: ${noWiki.join(", ")} (brain sync <repo> writes one).` : "";
   if (groups.length === 0) {
     deps.store.logGap({ tool: "brain_impact", query: work, repos: [], askedAt: new Date().toISOString() });

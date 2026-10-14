@@ -2,10 +2,10 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { FactCheck, FactRecord, Gap, GapSummary, NewFact } from "../core/facts.js";
-import type { Seam, SeamCoverage, SeamKind } from "../core/seams.js";
+import type { LinkSurvey, PieceOutcome, Seam, SeamCoverage, SeamKind, SeamPiece } from "../core/seams.js";
 import type { SystemRecord } from "../core/systems.js";
 import type { TraceLink, TraceTarget } from "../core/traces.js";
-import { BrainError, type FileRecord, type LanguageShare, type PageKind, type PlannedPage, type RepoNote, type RepoRecord, type RepoState, type WikiPage } from "../core/types.js";
+import { BrainError, type Enrolment, type EnrolmentEstimate, type FileRecord, type LanguageShare, type PageKind, type PlannedPage, type RepoNote, type RepoRecord, type RepoState, type WikiPage } from "../core/types.js";
 import { MIGRATIONS } from "./migrations.js";
 import { indexPage, indexSeam, SEARCH_WEIGHTS } from "./search-index.js";
 import type { FactChange, FactFilter, SearchFilter, SearchPage, SeamFilter, SeamUpdate, SectionHit, Store, SyncUpdate } from "./store.js";
@@ -76,7 +76,34 @@ export class SqliteStore implements Store {
   }
 
   removeRepo(name: string): boolean {
-    return Number(this.db.prepare("DELETE FROM repos WHERE name = ?").run(name).changes) > 0;
+    let removed = false;
+    this.transaction(() => {
+      removed = Number(this.db.prepare("DELETE FROM repos WHERE name = ?").run(name).changes) > 0;
+      this.db.prepare("DELETE FROM enrolments WHERE repo = ?").run(name);
+    });
+    return removed;
+  }
+
+  enrolment(repo: string): Enrolment | undefined {
+    const row = this.db.prepare("SELECT * FROM enrolments WHERE repo = ?").get(repo) as Row | undefined;
+    return row && toEnrolment(row);
+  }
+
+  enrolments(): Enrolment[] {
+    return (this.db.prepare("SELECT * FROM enrolments ORDER BY started_at DESC").all() as Row[]).map(toEnrolment);
+  }
+
+  saveEnrolment(e: Enrolment): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO enrolments (repo, source, status, step, error, pid, files, estimate, cost_usd, started_at, updated_at, finished_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(e.repo, e.source, e.status, e.step, e.error, e.pid, e.files, e.estimate && JSON.stringify(e.estimate), e.costUsd, e.startedAt, e.updatedAt, e.finishedAt);
+  }
+
+  removeEnrolment(repo: string): boolean {
+    return Number(this.db.prepare("DELETE FROM enrolments WHERE repo = ?").run(repo).changes) > 0;
   }
 
   getState(repo: string): RepoState | undefined {
@@ -131,19 +158,43 @@ export class SqliteStore implements Store {
     const clearAll = this.db.prepare("DELETE FROM seams WHERE repo = ?");
     const clear = this.db.prepare("DELETE FROM seams WHERE repo = ? AND path = ?");
     const insert = this.db.prepare(
-      `INSERT INTO seams (repo, path, kind, method, raw_path, route_key, start_line, end_line, cites, commit_sha)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO seams (repo, path, kind, method, raw_path, route_key, start_line, end_line, cites, commit_sha, derived)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const state = this.db.prepare("UPDATE repo_state SET seams_commit = ? WHERE repo = ?");
+    const clearPiecesAll = this.db.prepare("DELETE FROM seam_pieces WHERE repo = ?");
+    const clearPieces = this.db.prepare("DELETE FROM seam_pieces WHERE repo = ? AND path = ?");
+    const insertPiece = this.db.prepare("INSERT OR REPLACE INTO seam_pieces (repo, path, start_line, end_line, http, links) VALUES (?, ?, ?, ?, ?, ?)");
+    const add = (s: Seam, derived: boolean) => {
+      const { lastInsertRowid } = insert.run(repo, s.path, s.kind, s.method, s.rawPath, s.key, s.startLine, s.endLine, JSON.stringify(s.cites), s.commit, Number(derived));
+      indexSeam(this.db, Number(lastInsertRowid), s);
+    };
     this.transaction(() => {
       if (update.paths === null) clearAll.run(repo);
       else for (const path of update.paths) clear.run(repo, path);
-      for (const s of update.seams) {
-        const { lastInsertRowid } = insert.run(repo, s.path, s.kind, s.method, s.rawPath, s.key, s.startLine, s.endLine, JSON.stringify(s.cites), s.commit);
-        indexSeam(this.db, Number(lastInsertRowid), s);
+      for (const s of update.seams) add(s, false);
+      if (update.derived) {
+        this.db.prepare("DELETE FROM seams WHERE repo = ? AND derived = 1").run(repo);
+        for (const s of update.derived) add(s, true);
       }
+      if (update.pieces) {
+        if (update.paths === null) clearPiecesAll.run(repo);
+        else for (const path of update.paths) clearPieces.run(repo, path);
+        for (const p of update.pieces) insertPiece.run(repo, p.path, p.start, p.end, p.http, p.links);
+      }
+      if (update.survey) this.db.prepare("UPDATE repo_state SET link_survey = ? WHERE repo = ?").run(JSON.stringify(update.survey), repo);
       state.run(update.commit, repo);
     });
+  }
+
+  seamPieces(repo: string): SeamPiece[] {
+    const rows = this.db.prepare("SELECT * FROM seam_pieces WHERE repo = ? ORDER BY path, start_line").all(repo) as Row[];
+    return rows.map((r) => ({ path: String(r.path), start: Number(r.start_line), end: Number(r.end_line), http: String(r.http) as PieceOutcome, links: String(r.links) as PieceOutcome }));
+  }
+
+  linkSurvey(repo: string): LinkSurvey | null {
+    const row = this.db.prepare("SELECT link_survey FROM repo_state WHERE repo = ?").get(repo) as Row | undefined;
+    return row?.link_survey ? (JSON.parse(String(row.link_survey)) as LinkSurvey) : null;
   }
 
   seams(filter: SeamFilter): Seam[] {
@@ -629,6 +680,25 @@ function toSeam(row: Row): Seam {
     endLine: Number(row.end_line),
     cites: JSON.parse(String(row.cites)) as Seam["cites"],
     commit: String(row.commit_sha),
+    ...(Number(row.derived) === 1 ? { derived: true } : {}),
+  };
+}
+
+function toEnrolment(row: Row): Enrolment {
+  const optional = (value: unknown) => (value === null ? null : String(value));
+  return {
+    repo: String(row.repo),
+    source: String(row.source),
+    status: String(row.status) as Enrolment["status"],
+    step: String(row.step),
+    error: optional(row.error),
+    pid: row.pid === null ? null : Number(row.pid),
+    files: row.files === null ? null : Number(row.files),
+    estimate: row.estimate === null ? null : (JSON.parse(String(row.estimate)) as EnrolmentEstimate),
+    costUsd: Number(row.cost_usd),
+    startedAt: String(row.started_at),
+    updatedAt: String(row.updated_at),
+    finishedAt: optional(row.finished_at),
   };
 }
 
