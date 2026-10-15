@@ -124,4 +124,5 @@ never reach the network.
 | B6 | Real Citation repos and the readiness gate | Trial done (findings drove B6b) |
 | B6b | Maps that say what they covered: survey, screening, mapping in parts, inherited routes, coverage in answers, run-time exits in traces | Built |
 | B7 | Adding a repo from Claude Code (`brain_add_repo`, the eleventh tool), GitHub sources, enrolment status on the card; the README rewritten for setting up | Built |
+| B8 | Planning depth: strict tool inputs, several pages per `brain_get`, a conventions page, tests in build-run-test, steps renumbered after removals | Built |
 | 6 | Hosting: Azure, cloud containers for the runs, GitHub permissions | Planned |

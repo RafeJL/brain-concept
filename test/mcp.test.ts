@@ -72,6 +72,30 @@ describe("MCP server", () => {
     expect(JSON.stringify(result.content)).toContain("· up to date");
   });
 
+  it("refuses a parameter a tool doesn't have, naming it, instead of dropping it", async () => {
+    const client = await connect(new SqliteStore(":memory:"));
+
+    const result = await client.callTool({ name: "brain_get", arguments: { repo: "orders", pages: ["overview"] } });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('Unrecognized key: \\"pages\\"');
+    const { tools } = await client.listTools();
+    expect(tools.every((t) => t.inputSchema.additionalProperties === false)).toBe(true);
+  });
+
+  it("takes one page or up to five in brain_get, and refuses more", async () => {
+    const client = await connect(new SqliteStore(":memory:"));
+
+    const six = await client.callTool({ name: "brain_get", arguments: { repo: "orders", page: ["a", "b", "c", "d", "e", "f"] } });
+    const none = await client.callTool({ name: "brain_get", arguments: { repo: "orders", page: [] } });
+    const several = await client.callTool({ name: "brain_get", arguments: { repo: "orders", page: ["overview", "conventions"] } });
+
+    expect(six.isError).toBe(true);
+    expect(JSON.stringify(six.content)).toContain("Invalid arguments for tool brain_get");
+    expect(none.isError).toBe(true);
+    // A list that passes reaches the tool, which knows no such repo.
+    expect(JSON.stringify(several.content)).toContain("No repos are enrolled yet.");
+  });
+
   it("flags unknown repos as errors without throwing", async () => {
     const client = await connect(new SqliteStore(":memory:"));
 

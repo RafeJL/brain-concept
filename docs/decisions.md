@@ -1027,3 +1027,36 @@ shape exists, and `confirmed_with` shows what each person agreed to.
 - If Claude Code shows progress for long-running MCP tasks, the card could give way to it.
 - If people enrol many large repos at once from several sessions, a cap on Claude Code runs across
   processes (today it's per command).
+
+## 2026-10-14: planning depth (B8)
+
+Tests of the harness against the brain showed three gaps. An agent called `brain_get` with a `pages`
+list; the schema silently dropped the unknown key, the agent got the page index back and gave up
+on the wiki. Plans needed where an area's tests live and the repo-wide conventions, which the wiki
+lacked. And when the checker removed a step from a numbered list, the numbering kept a gap.
+
+**What it does:**
+- **Tool inputs are strict.** All 11 tools refuse a parameter they don't have, with the SDK's
+  message (`Unrecognized key: "pages"`), so an agent learns at once what it got wrong.
+- **`brain_get` takes up to five pages.** `page` is a name or a list. Each page is shown as it is
+  alone, with `---` between them; a name that isn't a page is named in its place, and the call is
+  an error only when none is.
+- **A `conventions` core page,** and build-run-test says where each part's tests live. Conventions
+  are patterns to follow (logging, errors and user-facing messages, validation, configuration),
+  at most four bullets a heading, each with a cited example. An existing wiki gains the page on its
+  next update; a large repo's stored plan gains it without planning again, keeping its plan date.
+- **The checker tidies what removals leave.** Steps are counted again from the list's first number
+  (a removed first step still starts the count at its own number), and a heading whose section is
+  empty goes, never the title.
+
+**Design calls:**
+- **Strict, not lenient.** Ignoring an unknown key is what hid the mistake. A refusal costs one
+  retry; a silent drop cost the whole wiki.
+- **Pages joined, not a new answer shape.** Each page is rendered by the code that renders one, so
+  a list of one equals a string and nothing else changed.
+- **Core, not area, for conventions.** Every repo has them, and a planner reads them for any work.
+  Cost: one more page per wiki.
+- **Tombstones for removed steps,** so the count doesn't depend on which step survived.
+
+**What would change it:** if agents often want more than five pages, raise the cap; if conventions
+pages come out as inventories, tighten the prompt rather than add more headings.

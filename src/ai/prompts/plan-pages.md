@@ -2,7 +2,7 @@ You are planning an internal wiki for this repository, for developers, coding ag
 {{inventory}}
 {{current}}
 Return the pages in reading order:
-- The core pages, always, with exactly these slugs: "overview" (what it is, its main parts and how they connect), "build-run-test" (how to install, build, run and test it), "api" (the APIs it serves, grouped by area) and "product" (what it does for the people who use it, in product language).
+- The core pages, always, with exactly these slugs: "overview" (what it is, its main parts and how they connect), "build-run-test" (how to install, build, run and test it, and where each part's tests live), "conventions" (how code here is written: logging, errors and messages, validation, configuration), "api" (the APIs it serves, grouped by area) and "product" (what it does for the people who use it, in product language).
 - One "area" page for each part a developer would work on separately, such as a service, an app or a shared library, named after it. Merge small parts that belong together. Leave out tests, samples and build tooling unless they are the point of the repository.
 - At most 3 "flow" pages, for journeys the code shows crossing several areas (placing an order, signing in), named after the journey.
 - A "data-model" page (slug "data-model") if the repository stores its own entities, and an "integrations" page (slug "integrations") if it talks to outside systems: databases, message brokers, identity providers, third-party APIs.

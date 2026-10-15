@@ -65,7 +65,7 @@ export const INSTRUCTIONS =
   "the card's Product line, the \"product\" page and system overviews (brain_get with system), and " +
   "brain_impact with work for which systems a piece of work touches. Don't read technical pages or " +
   "code unless asked. For a technical plan, read the repo's overview, then the area and flow pages for the " +
-  "work (brain_impact with work names them) and the data-model page; read code only to confirm details, " +
+  "work (brain_impact with work names them), the data-model page, build-run-test and conventions; read code only to confirm details, " +
   "starting from the pages' citations. Systems labelled suggested haven't been confirmed by a person yet. " +
   "Facts labelled human-reviewed were stated and confirmed by a person; prefer them over AI-written text. " +
   "A fact may also say what the code does about it: \"code agrees\", \"code contradicts it\", or \"not in the " +
@@ -156,10 +156,12 @@ export function createServer(deps: ServerDeps, instructions = INSTRUCTIONS): Mcp
         "first for any question about a repo you don't know, before cloning or grepping. A system's name " +
         "(a product made of several repos, e.g. from the instructions' list) returns that system's " +
         "overview instead. An unknown name returns the list of repos you can read.",
-      inputSchema: {
-        repo: z.string().min(1).describe("Enrolled repo or system name, e.g. citation-harness-library or RealWorld."),
-        format: formatSchema,
-      },
+      inputSchema: z
+        .object({
+          repo: z.string().min(1).describe("Enrolled repo or system name, e.g. citation-harness-library or RealWorld."),
+          format: formatSchema,
+        })
+        .strict(),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async ({ repo, format }) => answer(await cardRequest(deps, deps.caller, repo, format)),
@@ -180,17 +182,19 @@ export function createServer(deps: ServerDeps, instructions = INSTRUCTIONS): Mcp
         "hop by hop across repos: each server's or handler's checked chain to the calls it makes, events it publishes " +
         "and tables it reads or writes, then who serves or handles those, until the flow ends. Use it to see what a " +
         "change downstream of an endpoint or event would touch.",
-      inputSchema: {
-        target: z
-          .string()
-          .min(1)
-          .describe("Endpoint, optionally with method (\"GET /api/orders/{id}\"), or \"event <name>\", \"grpc <Service/Method>\", \"package <name>\"."),
-        method: z.string().optional().describe("HTTP method, if not given in target."),
-        repos: z.array(z.string()).optional().describe("Limit the search to these repos."),
-        format: formatSchema,
-        offset: offsetSchema,
-        follow: z.boolean().optional().describe("Also trace what handling it sets off, across repos, until the flow ends."),
-      },
+      inputSchema: z
+        .object({
+          target: z
+            .string()
+            .min(1)
+            .describe("Endpoint, optionally with method (\"GET /api/orders/{id}\"), or \"event <name>\", \"grpc <Service/Method>\", \"package <name>\"."),
+          method: z.string().optional().describe("HTTP method, if not given in target."),
+          repos: z.array(z.string()).optional().describe("Limit the search to these repos."),
+          format: formatSchema,
+          offset: offsetSchema,
+          follow: z.boolean().optional().describe("Also trace what handling it sets off, across repos, until the flow ends."),
+        })
+        .strict(),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async (input) => answer(await findConsumers(deps, deps.caller, input)),
@@ -207,17 +211,19 @@ export function createServer(deps: ServerDeps, instructions = INSTRUCTIONS): Mcp
         "publisher, gRPC service or package to see which other repos would be affected. The most used " +
         "come first. For product questions, pass work instead (a description such as \"let users save " +
         "articles to read later\") to see which systems, repos and endpoints it would most likely touch.",
-      inputSchema: {
-        repo: z.string().min(1).optional().describe("Enrolled repo that serves the routes or publishes the events, gRPC methods or packages. Omit when passing work."),
-        work: z.string().min(1).optional().describe("A description of a piece of work, instead of repo, path and route."),
-        path: z.string().optional().describe("A file in that repo, e.g. src/Features/Orders/OrdersController.cs."),
-        route: z
-          .string()
-          .optional()
-          .describe("Only what matches this endpoint (\"GET /orders/{id}\"), event (\"event OrderStarted\"), gRPC method or package."),
-        format: formatSchema,
-        offset: offsetSchema,
-      },
+      inputSchema: z
+        .object({
+          repo: z.string().min(1).optional().describe("Enrolled repo that serves the routes or publishes the events, gRPC methods or packages. Omit when passing work."),
+          work: z.string().min(1).optional().describe("A description of a piece of work, instead of repo, path and route."),
+          path: z.string().optional().describe("A file in that repo, e.g. src/Features/Orders/OrdersController.cs."),
+          route: z
+            .string()
+            .optional()
+            .describe("Only what matches this endpoint (\"GET /orders/{id}\"), event (\"event OrderStarted\"), gRPC method or package."),
+          format: formatSchema,
+          offset: offsetSchema,
+        })
+        .strict(),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async (input) => answer(await impactRequest(deps, deps.caller, input)),
@@ -229,18 +235,23 @@ export function createServer(deps: ServerDeps, instructions = INSTRUCTIONS): Mcp
       title: "Read a repo's wiki",
       description:
         "Read a repository's AI-written wiki: with no page, the list of pages by kind, one line each; with a page, " +
-        "its Markdown. Pages explain what the repo is, how to build, run and test it, the API it serves and how its " +
+        "its Markdown. Pages explain what the repo is, how to build, run and test it, the conventions code here follows, the API it serves and how its " +
         "parts work; a large repo also has a page per area, flow pages (a journey step by step), a data-model page " +
         "and an integrations page. Each sentence cites the exact lines it is based on. Use it to understand a repo " +
         "before reading its code. Pages are llm-generated: confirm a claim at its citation before relying on it. " +
         "For product questions read the \"product\" page (who uses it, what they can do, business rules), or pass " +
         "system instead of repo for an overview of the repos that make up a product.",
-      inputSchema: {
-        repo: z.string().min(1).optional().describe("Enrolled repo name. Omit when passing system."),
-        page: z.string().optional().describe("Page name from the list, e.g. overview, product or build-run-test. Omit to list pages."),
-        diagrams: z.boolean().optional().describe("Include the page's Mermaid diagrams (left out by default: the text says the same)."),
-        system: z.string().min(1).optional().describe("A system's name (from a repo card or brain_search), instead of repo."),
-      },
+      inputSchema: z
+        .object({
+          repo: z.string().min(1).optional().describe("Enrolled repo name. Omit when passing system."),
+          page: z
+            .union([z.string(), z.array(z.string()).min(1).max(5)])
+            .optional()
+            .describe("Page name from the list, e.g. overview, product or build-run-test, or a list of up to 5. Omit to list pages."),
+          diagrams: z.boolean().optional().describe("Include the page's Mermaid diagrams (left out by default: the text says the same)."),
+          system: z.string().min(1).optional().describe("A system's name (from a repo card or brain_search), instead of repo."),
+        })
+        .strict(),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async (input) => answer(await getRequest(deps, deps.caller, input)),
@@ -256,12 +267,14 @@ export function createServer(deps: ServerDeps, instructions = INSTRUCTIONS): Mcp
         "and heading, with the matching text) and matching endpoints with file:line pointers. Use it when you " +
         "don't know which repo or page holds the answer, then read a page with brain_get. Keyword search: " +
         "use the words the code would use (\"auth\", \"basket\"), not a long sentence.",
-      inputSchema: {
-        query: z.string().min(1).describe("Keywords or a question, e.g. \"order cancellation\"."),
-        repos: z.array(z.string()).optional().describe("Limit the search to these repos."),
-        format: formatSchema,
-        offset: offsetSchema,
-      },
+      inputSchema: z
+        .object({
+          query: z.string().min(1).describe("Keywords or a question, e.g. \"order cancellation\"."),
+          repos: z.array(z.string()).optional().describe("Limit the search to these repos."),
+          format: formatSchema,
+          offset: offsetSchema,
+        })
+        .strict(),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async (input) => answer(await search(deps, deps.caller, input)),
@@ -278,12 +291,14 @@ export function createServer(deps: ServerDeps, instructions = INSTRUCTIONS): Mcp
         "only what's on it; with all, every live fact, not just those waiting. Use it when the person asks what needs " +
         "their attention or what the brain is missing. It only reads: change things with brain_facts, brain_systems " +
         "and brain_set_note, once the person agrees.",
-      inputSchema: {
-        repo: z.string().min(1).optional().describe("Only what's on this repo."),
-        system: z.string().min(1).optional().describe("Only what's on this system."),
-        all: z.boolean().optional().describe("List every live fact, confirmed ones too."),
-        offset: offsetSchema,
-      },
+      inputSchema: z
+        .object({
+          repo: z.string().min(1).optional().describe("Only what's on this repo."),
+          system: z.string().min(1).optional().describe("Only what's on this system."),
+          all: z.boolean().optional().describe("List every live fact, confirmed ones too."),
+          offset: offsetSchema,
+        })
+        .strict(),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async (input) => answer(await review(deps, deps.caller, input)),
@@ -302,26 +317,28 @@ export function createServer(deps: ServerDeps, instructions = INSTRUCTIONS): Mcp
         "in confirmed_with and it is stored confirmed (human-reviewed). Without confirmed_with it is stored as " +
         "proposed, labelled unconfirmed, until they agree (brain_facts, action confirm). The answer lists what the " +
         "brain already says nearby: if it contradicts the fact, tell them.",
-      inputSchema: {
-        repo: z.string().min(1).optional().describe("The repo the fact is about. Omit when passing system."),
-        system: z.string().min(1).optional().describe("The system (product) the fact is about, instead of repo."),
-        kind: z.enum(FACT_KINDS as [FactKind, ...FactKind[]]).describe("rule, term, purpose, decision, or answer (to a question the brain couldn't answer)."),
-        text: z.string().min(1).describe("The fact, in product language, e.g. \"Users can follow at most 500 authors.\""),
-        quote: z.string().min(1).describe("What the person said, in their words."),
-        stated_by: z.string().optional().describe("The person's name, if they gave it."),
-        ticket: z.string().optional().describe("A ticket the fact came from, e.g. CONDUIT-142."),
-        anchors: z
-          .array(z.string())
-          .optional()
-          .describe("Where the repo enforces it, as file:lines from the brain's citations, e.g. src/follow.ts:12-20. Lets the brain flag the fact when that code changes."),
-        replaces: z
-          .number()
-          .int()
-          .positive()
-          .optional()
-          .describe("The number of a recorded fact this one replaces (\"fact #1\" in the brain's answers), e.g. when the person changes a limit. It is retired once this one is confirmed."),
-        confirmed_with: confirmedWith,
-      },
+      inputSchema: z
+        .object({
+          repo: z.string().min(1).optional().describe("The repo the fact is about. Omit when passing system."),
+          system: z.string().min(1).optional().describe("The system (product) the fact is about, instead of repo."),
+          kind: z.enum(FACT_KINDS as [FactKind, ...FactKind[]]).describe("rule, term, purpose, decision, or answer (to a question the brain couldn't answer)."),
+          text: z.string().min(1).describe("The fact, in product language, e.g. \"Users can follow at most 500 authors.\""),
+          quote: z.string().min(1).describe("What the person said, in their words."),
+          stated_by: z.string().optional().describe("The person's name, if they gave it."),
+          ticket: z.string().optional().describe("A ticket the fact came from, e.g. CONDUIT-142."),
+          anchors: z
+            .array(z.string())
+            .optional()
+            .describe("Where the repo enforces it, as file:lines from the brain's citations, e.g. src/follow.ts:12-20. Lets the brain flag the fact when that code changes."),
+          replaces: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("The number of a recorded fact this one replaces (\"fact #1\" in the brain's answers), e.g. when the person changes a limit. It is retired once this one is confirmed."),
+          confirmed_with: confirmedWith,
+        })
+        .strict(),
       annotations: { ...write, idempotentHint: false },
       _meta: askPerson,
     },
@@ -338,12 +355,14 @@ export function createServer(deps: ServerDeps, instructions = INSTRUCTIONS): Mcp
         "agree, pass their words in confirmed_with. The next sync plans the wiki again with it: which pages it has and " +
         "what they stress. Without confirmed_with it is stored as proposed and steers nothing; to confirm a proposed " +
         "note later, pass confirm_proposed with their words.",
-      inputSchema: {
-        repo: z.string().min(1).describe("The repo whose wiki the note steers."),
-        text: z.string().min(1).optional().describe("What the wiki should focus on, in the person's terms. Omit with confirm_proposed."),
-        confirmed_with: confirmedWith,
-        confirm_proposed: z.boolean().optional().describe("Confirm the note already proposed on the repo, instead of giving text."),
-      },
+      inputSchema: z
+        .object({
+          repo: z.string().min(1).describe("The repo whose wiki the note steers."),
+          text: z.string().min(1).optional().describe("What the wiki should focus on, in the person's terms. Omit with confirm_proposed."),
+          confirmed_with: confirmedWith,
+          confirm_proposed: z.boolean().optional().describe("Confirm the note already proposed on the repo, instead of giving text."),
+        })
+        .strict(),
       annotations: { ...write, idempotentHint: true },
       _meta: askPerson,
     },
@@ -361,13 +380,15 @@ export function createServer(deps: ServerDeps, instructions = INSTRUCTIONS): Mcp
         "makes a confirmed fact proposed again, so it never says something nobody agreed to. retire: a fact that's " +
         "no longer true (kept for history). confirm, retire and new wording need confirmed_with: show the person the " +
         "fact first and pass their words when they agree.",
-      inputSchema: {
-        action: z.enum(FACT_ACTIONS as [FactAction, ...FactAction[]]).describe("confirm, edit or retire."),
-        id: z.number().int().positive().describe("The fact's number (\"fact #3\")."),
-        text: z.string().min(1).optional().describe("For edit: the new wording."),
-        anchors: z.array(z.string()).optional().describe("For edit: where the repo enforces it now, as file:lines."),
-        confirmed_with: confirmedWith,
-      },
+      inputSchema: z
+        .object({
+          action: z.enum(FACT_ACTIONS as [FactAction, ...FactAction[]]).describe("confirm, edit or retire."),
+          id: z.number().int().positive().describe("The fact's number (\"fact #3\")."),
+          text: z.string().min(1).optional().describe("For edit: the new wording."),
+          anchors: z.array(z.string()).optional().describe("For edit: where the repo enforces it now, as file:lines."),
+          confirmed_with: confirmedWith,
+        })
+        .strict(),
       annotations: { ...write, idempotentHint: false },
       _meta: askPerson,
     },
@@ -383,14 +404,16 @@ export function createServer(deps: ServerDeps, instructions = INSTRUCTIONS): Mcp
         "confirm: a suggested system, as it stands. set: add repos to a system (moving them out of any other) or " +
         "change its summary; a new name creates one. rename: give it a new name. Every change needs confirmed_with: " +
         "show the person the change and pass their words when they agree. For a system's overview, use brain_get with system.",
-      inputSchema: {
-        action: z.enum(SYSTEM_ACTIONS as [SystemAction, ...SystemAction[]]).describe("confirm, set or rename."),
-        system: z.string().min(1).describe("The system's name."),
-        repos: z.array(z.string()).optional().describe("For set: repos to add."),
-        summary: z.string().min(1).optional().describe("For set: one line on what the product is."),
-        to: z.string().min(1).optional().describe("For rename: the new name."),
-        confirmed_with: confirmedWith,
-      },
+      inputSchema: z
+        .object({
+          action: z.enum(SYSTEM_ACTIONS as [SystemAction, ...SystemAction[]]).describe("confirm, set or rename."),
+          system: z.string().min(1).describe("The system's name."),
+          repos: z.array(z.string()).optional().describe("For set: repos to add."),
+          summary: z.string().min(1).optional().describe("For set: one line on what the product is."),
+          to: z.string().min(1).optional().describe("For rename: the new name."),
+          confirmed_with: confirmedWith,
+        })
+        .strict(),
       annotations: { ...write, idempotentHint: true },
       _meta: askPerson,
     },
@@ -409,14 +432,16 @@ export function createServer(deps: ServerDeps, instructions = INSTRUCTIONS): Mcp
         "It answers at once with an estimate and carries on in the background, even after this session ends. Until it's done, don't " +
         "plan from the repo; brain_repo_card says where it has got to, when it's ready, or what failed. Call it again to retry a " +
         "failed one.",
-      inputSchema: {
-        source: z
-          .string()
-          .min(1)
-          .describe("A GitHub URL (https://github.com/owner/repo, or git@github.com:owner/repo.git), owner/repo, or the absolute path of a local git clone."),
-        name: z.string().min(1).optional().describe("The name to enrol it under. Defaults to the repo's GitHub or folder name."),
-        note: z.string().min(1).optional().describe("What its wiki should focus on, in the person's words (\"Ordering and Basket matter most\")."),
-      },
+      inputSchema: z
+        .object({
+          source: z
+            .string()
+            .min(1)
+            .describe("A GitHub URL (https://github.com/owner/repo, or git@github.com:owner/repo.git), owner/repo, or the absolute path of a local git clone."),
+          name: z.string().min(1).optional().describe("The name to enrol it under. Defaults to the repo's GitHub or folder name."),
+          note: z.string().min(1).optional().describe("What its wiki should focus on, in the person's words (\"Ordering and Basket matter most\")."),
+        })
+        .strict(),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       _meta: askPerson,
     },

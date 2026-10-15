@@ -125,6 +125,7 @@ export function checkPage(markdown: string, root: string): CheckedPage {
     // List items and table rows are one claim each; paragraphs are split into sentences.
     if (/^\s*([-*+]|\d+\.)\s|^\s*\|/.test(line)) {
       if (keep(line)) out.push(line);
+      else if (ORDERED.test(line)) out.push(GONE + line);
       return;
     }
     const kept = sentences(line).filter(keep);
@@ -132,11 +133,91 @@ export function checkPage(markdown: string, root: string): CheckedPage {
   });
 
   return {
-    markdown: out.join("\n").replace(/\[([^\]]+)\]\(https?:[^)]*\)/g, "$1"),
+    markdown: tidy(out).join("\n").replace(/\[([^\]]+)\]\(https?:[^)]*\)/g, "$1"),
     claims,
     removed,
     publishable: claims > 0 && claims - removed.length >= claims / 2,
   };
+}
+
+/** Marks a numbered step the check removed, so the steps after it can be counted again. Never output. */
+const GONE = "\0";
+const FENCE = /^\s*(```|~~~)/;
+const ORDERED = /^(\s*)(\d+)([.)])(\s+)/;
+const HEADING = /^\s{0,3}(#{1,6})(?:\s|$)/;
+
+/**
+ * Tidies what the line pass left: numbered steps count again from their run's first number (a
+ * removed step leaves no gap), and a heading whose section lost all its content goes too. The
+ * page's first heading, its title, stays. Code and diagrams are never touched.
+ */
+function tidy(lines: readonly string[]): string[] {
+  const numbered = renumber(lines);
+  let inCode = false;
+  const level = numbered.map((line) => {
+    if (FENCE.test(line)) {
+      inCode = !inCode;
+      return 0;
+    }
+    return inCode ? 0 : (HEADING.exec(line)?.[1]?.length ?? 0);
+  });
+  const dropped = new Set<number>();
+  // Last heading first, so a sub-heading is settled before the section that holds it.
+  for (let h = level.length - 1; h > level.findIndex((l) => l > 0); h--) {
+    if (level[h] === 0) continue;
+    let content = false;
+    for (let i = h + 1; i < level.length && !content; i++) {
+      if (level[i]! > 0 && level[i]! <= level[h]!) break;
+      content = level[i]! > 0 ? !dropped.has(i) : numbered[i]!.trim() !== "";
+    }
+    if (!content) dropped.add(h);
+  }
+  const out: string[] = [];
+  let skipBlank = false;
+  numbered.forEach((line, i) => {
+    if (dropped.has(i)) {
+      skipBlank = true;
+      return;
+    }
+    // The blank lines under a dropped heading go with it.
+    if (skipBlank && line.trim() === "") return;
+    skipBlank = false;
+    out.push(line);
+  });
+  return out;
+}
+
+/** Each run of ordered items at one indentation, counted from its first number. */
+function renumber(lines: readonly string[]): string[] {
+  const runs: { indent: number; next: number }[] = [];
+  let inCode = false;
+  const counted = lines.map((marked) => {
+    const gone = marked.startsWith(GONE);
+    const line = gone ? marked.slice(GONE.length) : marked;
+    if (FENCE.test(line)) {
+      inCode = !inCode;
+      runs.length = 0;
+      return line;
+    }
+    if (inCode || line.trim() === "") return line;
+    const indent = line.length - line.trimStart().length;
+    const item = ORDERED.exec(line);
+    // Text that isn't indented under a run ends it; so does a bullet or heading at its level.
+    const ends = (run: { indent: number }) => (item ? run.indent > indent : run.indent >= indent);
+    while (runs.length && ends(runs[runs.length - 1]!)) runs.pop();
+    if (HEADING.test(line)) runs.length = 0;
+    if (!item) return line;
+    const top = runs[runs.length - 1];
+    // A removed step takes no number, but a removed first step still starts the count at its own.
+    if (gone) {
+      if (!top || top.indent !== indent) runs.push({ indent, next: Number(item[2]) });
+      return marked;
+    }
+    if (top && top.indent === indent) return `${item[1]}${top.next++}${item[3]}${item[4]}${line.slice(item[0].length)}`;
+    runs.push({ indent, next: Number(item[2]) + 1 });
+    return line;
+  });
+  return counted.filter((line) => !line.startsWith(GONE));
 }
 
 /**

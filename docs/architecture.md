@@ -110,7 +110,7 @@ grepping, and five fixed pages can't hold that for a repo of twenty projects.
   pages when the repo has them.
 - **Large repos are planned.** The planning run gets the inventory (folders and their file
   counts, projects, likely entry points) rather than listing folders itself, and returns up to 20
-  pages: the four core pages, a page per area, up to three flow pages, data model and
+  pages: the five core pages, a page per area, up to three flow pages, data model and
   integrations, each with the folders it covers and its key files. The plan is checked without AI
   (folders and files exist, unique slugs, core pages present, within the caps) and retried once;
   a plan that still fails leaves the repo with what it had. Pages are written four to a run, the

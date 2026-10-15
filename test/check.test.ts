@@ -173,3 +173,95 @@ describe("tables", () => {
     expect(checked.markdown).toBe(table.split("\n").slice(0, 3).join("\n"));
   });
 });
+
+describe("what is left after removals", () => {
+  const good = (n: number) => `Step ${n} sets up the router [src/articles.ts:2].`;
+  const bad = "Step sends events to `Kafka` [src/articles.ts:2].";
+
+  it("numbers the steps again when a middle one is removed", () => {
+    const checked = checkPage(["# Flow", "", `1. ${good(1)}`, `2. ${bad}`, `3. ${good(3)}`, `4. ${good(4)}`].join("\n"), repo());
+
+    expect(checked.markdown.split("\n").slice(2)).toEqual([`1. ${good(1)}`, `2. ${good(3)}`, `3. ${good(4)}`]);
+    expect(checked.removed).toHaveLength(1);
+  });
+
+  it("numbers a list from its first number, keeps its punctuation, and counts nested and separate lists on their own", () => {
+    const checked = checkPage(
+      [
+        "# Flow",
+        "",
+        `3) ${good(3)}`,
+        `4) ${bad}`,
+        `5) ${good(5)}`,
+        `   1. ${good(1)}`,
+        `   2. ${bad}`,
+        `   3. ${good(3)}`,
+        `6) ${good(6)}`,
+        "",
+        "Then, in a separate list:",
+        "",
+        `1. ${bad}`,
+        `2. ${good(2)}`,
+      ].join("\n"),
+      repo(),
+    );
+
+    expect(checked.markdown.split("\n").filter((l) => /^\s*\d/.test(l))).toEqual([
+      `3) ${good(3)}`,
+      `4) ${good(5)}`,
+      `   1. ${good(1)}`,
+      `   2. ${good(3)}`,
+      `5) ${good(6)}`,
+      `1. ${good(2)}`,
+    ]);
+  });
+
+  it("leaves numbers in code blocks alone", () => {
+    const code = ["```text", "1. one", "3. three", "```"];
+    const checked = checkPage(["# Flow", "", `1. ${good(1)}`, ...code, `2. ${good(2)}`].join("\n"), repo());
+
+    expect(checked.markdown.split("\n").slice(3, 7)).toEqual(code);
+    expect(checked.markdown.split("\n")[7]).toBe(`2. ${good(2)}`);
+  });
+
+  it("drops a heading whose section was emptied, but keeps one that still holds a sub-section, and the title", () => {
+    const checked = checkPage(
+      [
+        "# Title",
+        "",
+        "## Gone",
+        "",
+        `- ${bad}`,
+        "",
+        "## Kept",
+        "",
+        "### Gone too",
+        "",
+        `- ${bad}`,
+        "",
+        "### Stays",
+        "",
+        `- ${good(1)}`,
+        "",
+        "## Code only",
+        "",
+        "```ts",
+        "const x = 1;",
+        "```",
+        "",
+        "## Last, emptied",
+        `- ${bad}`,
+      ].join("\n"),
+      repo(),
+    );
+
+    expect(checked.markdown.split("\n").filter((l) => l.startsWith("#"))).toEqual(["# Title", "## Kept", "### Stays", "## Code only"]);
+  });
+
+  it("keeps the title even when nothing under it survives", () => {
+    const checked = checkPage(`# Title\n\n- ${bad}\n`, repo());
+
+    expect(checked.markdown).toContain("# Title");
+    expect(checked).toMatchObject({ claims: 1, publishable: false });
+  });
+});

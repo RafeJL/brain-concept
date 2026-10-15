@@ -14,7 +14,7 @@ const MAX_FLOWS = 3;
 const MAX_KEY_FILES = 6;
 const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 /** The pages every wiki has, whatever its size. */
-export const CORE_PAGES = ["overview", "build-run-test", "api", "product"];
+export const CORE_PAGES = ["overview", "build-run-test", "conventions", "api", "product"];
 
 const SCHEMA = {
   type: "object",
@@ -107,6 +107,29 @@ export function checkPlan(pages: unknown, root: string): { plan: PlannedPage[] |
   const flows = plan.filter((p) => p.kind === "flow").length;
   if (flows > MAX_FLOWS) problems.push(`${flows} flow pages; at most ${MAX_FLOWS}`);
   return problems.length ? { plan: null, problems } : { plan, problems: [] };
+}
+
+/** What a core page missing from a stored plan is planned as. */
+const CORE_PLANNED: Record<string, { title: string; brief: string }> = {
+  overview: { title: "Overview", brief: "what it is, its main parts and how they connect" },
+  "build-run-test": { title: "Build, run and test", brief: "how to install, build, run and test it, and where each part's tests live" },
+  conventions: { title: "Conventions", brief: "how code here is written: logging, errors and messages, validation, configuration" },
+  api: { title: "API", brief: "the APIs it serves, grouped by area" },
+  product: { title: "Product", brief: "what it does for the people who use it, in product language" },
+};
+
+/**
+ * A stored plan with any core page it lacks added, each after the core page before it. A plan made
+ * before a core page existed gains it this way, without planning again.
+ */
+export function withCorePages(plan: readonly PlannedPage[]): PlannedPage[] {
+  const whole = [...plan];
+  CORE_PAGES.forEach((slug, i) => {
+    if (whole.some((p) => p.slug === slug)) return;
+    const after = whole.findLastIndex((p) => CORE_PAGES.slice(0, i).includes(p.slug));
+    whole.splice(after + 1, 0, { slug, ...CORE_PLANNED[slug]!, kind: "core", covers: [], keyFiles: [] });
+  });
+  return whole;
 }
 
 /** A wiki written before plans existed, as a plan to keep: each page, what it is and nothing more. */
