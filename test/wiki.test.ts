@@ -164,6 +164,61 @@ describe("brain wiki", () => {
     expect(store.pages("api").map((p) => p.slug)).toEqual(["overview", "build-run-test", "conventions", "api", "product"]);
   });
 
+  describe("facts a full rewrite dropped", () => {
+    const base: { slug: string; title: string; markdown: string }[] = JSON.parse(RECORDED).structured_output.pages;
+    const DELETE = "`DELETE /articles/:slug` removes one; auth is required [src/articles.ts:4].";
+    /** The recorded wiki with these pages replaced, as a full rewrite's answer. */
+    const rewrite = (...pages: { slug: string; title: string; markdown: string }[]) =>
+      recorded([...base.filter((b) => !pages.some((p) => p.slug === b.slug)), ...pages]);
+    // The overview no longer cites line 4, nor does the api page below.
+    const overview = { slug: "overview", title: "Overview", markdown: "# Overview\n\n`articles-api` is an Express API serving articles [README.md:1; src/articles.ts:1-2]." };
+    const api = { slug: "api", title: "API", markdown: "# API\n\n- `GET /articles/:slug` returns one article; auth is optional [src/articles.ts:3]." };
+
+    it("lists a fact the old wiki cited, the new one doesn't, and the code still shows", async () => {
+      const { store } = await setup();
+      const first = await generateWiki(store, fakeRunner().runner, "api");
+
+      const wiki = await generateWiki(store, fakeRunner(rewrite(overview, api)).runner, "api", { full: true });
+
+      expect(first.dropped).toEqual([]);
+      expect(wiki.dropped).toEqual([{ slug: "api", claim: `- ${DELETE}`, cites: ["src/articles.ts:4"] }]);
+    });
+
+    it("doesn't list one the code no longer shows", async () => {
+      const { store, dir } = await setup();
+      await generateWiki(store, fakeRunner().runner, "api");
+      commit(dir, { "src/articles.ts": readFileSync(join(dir, "src/articles.ts"), "utf8").replace("router.delete", "router.purge") });
+      await syncRepo(store, "api");
+
+      const wiki = await generateWiki(store, fakeRunner(rewrite(overview, api)).runner, "api", { full: true });
+
+      expect(wiki.dropped).toEqual([]);
+    });
+
+    it("doesn't list one the new wiki cites on another page", async () => {
+      const { store } = await setup();
+      await generateWiki(store, fakeRunner().runner, "api");
+      const moved = { slug: "routes", title: "Routes", markdown: `# Routes\n\n- ${DELETE}` };
+
+      const wiki = await generateWiki(store, fakeRunner(rewrite(overview, api, moved)).runner, "api", { full: true });
+
+      expect(wiki.pages.map((p) => p.slug)).toContain("routes");
+      expect(wiki.dropped).toEqual([]);
+    });
+
+    it("lists nothing for an update", async () => {
+      const { store, dir } = await setup();
+      await generateWiki(store, fakeRunner().runner, "api");
+      commit(dir, { "src/articles.ts": readFileSync(join(dir, "src/articles.ts"), "utf8").replace("auth.required, remove", "auth.required, audited, remove") });
+      await syncRepo(store, "api");
+
+      const wiki = await generateWiki(store, fakeRunner(recorded([overview, api])).runner, "api");
+
+      expect(wiki.mode).toBe("update");
+      expect(wiki.dropped).toEqual([]);
+    });
+  });
+
   it("asks for a sync first when the repo hasn't been indexed", async () => {
     const store = new SqliteStore(":memory:");
     await enrolRepo(store, { path: repoFromFixture("articles-api"), name: "api" });

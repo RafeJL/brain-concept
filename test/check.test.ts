@@ -147,6 +147,26 @@ describe("route claims", () => {
     expect(keep("`PUT` updates a tag [api.php:7].")).toBe(false);
     expect(keep("Articles are exported via `ArticleController@export` [api.php:2].")).toBe(false);
   });
+
+  it("finds a route's path word anywhere in the cited file, as a prefix declared apart from the route", () => {
+    const dir = repo();
+    writeFileSync(join(dir, "routes.py"), ["router = APIRouter(prefix=\"/tasks\")", "", "", "", "", "", "@router.post(\"/\")", "def create_task(): ..."].join("\n"));
+    writeFileSync(join(dir, "other.py"), "tasks = []");
+    const keep = (claim: string) => checkPage(claim, dir).removed.length === 0;
+
+    expect(keep("`POST /tasks/` creates a task [routes.py:7].")).toBe(true);
+    // The verb still has to be shown in the cited lines, and the word has to be in a cited file.
+    expect(keep("`GET /tasks/` lists tasks [routes.py:7].")).toBe(false);
+    expect(keep("`POST /orders/` creates an order [routes.py:7].")).toBe(false);
+    expect(keep("`POST /tasks/` creates a task [routes.py:7].".replace("routes.py:7", "other.py:1"))).toBe(false);
+  });
+
+  it("doesn't look a term that isn't a route up in the whole file", () => {
+    const dir = repo();
+    writeFileSync(join(dir, "routes.py"), ["router = APIRouter(prefix=\"/tasks\")", "", "", "", "", "", "@router.post(\"/\")", "def create_task(): ..."].join("\n"));
+
+    expect(checkPage("The `tasks` prefix is set here [routes.py:7].", dir).removed).toHaveLength(1);
+  });
 });
 
 describe("sentences", () => {

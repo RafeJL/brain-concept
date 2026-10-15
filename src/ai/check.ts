@@ -140,6 +140,37 @@ export function checkPage(markdown: string, root: string): CheckedPage {
   };
 }
 
+/**
+ * The cited claims of a page, split as `checkPage` splits them: a list item or table row is one,
+ * a paragraph is one per sentence. Code blocks and diagrams hold none.
+ */
+export function claimsOf(markdown: string): { text: string; cites: Citation[] }[] {
+  const claims: { text: string; cites: Citation[] }[] = [];
+  const add = (text: string) => {
+    const cites = parseCitations(text);
+    if (cites.length) claims.push({ text: text.trim(), cites });
+  };
+  let inCode = false;
+  let inDiagram = false;
+  const lines = markdown.split(/\r?\n/);
+  lines.forEach((line, i) => {
+    if (inDiagram) {
+      inDiagram = !FENCE.test(line);
+      return;
+    }
+    if (!inCode && opensDiagram(line)) {
+      inDiagram = true;
+      return;
+    }
+    if (FENCE.test(line)) inCode = !inCode;
+    const header = /^\s*\|/.test(line) && TABLE_RULE.test(lines[i + 1] ?? "");
+    if (inCode || header || /^\s*(```|~~~|#)/.test(line) || TABLE_RULE.test(line) || line.trim() === "") return;
+    if (/^\s*([-*+]|\d+\.)\s|^\s*\|/.test(line)) add(line);
+    else sentences(line).forEach(add);
+  });
+  return claims;
+}
+
 /** Marks a numbered step the check removed, so the steps after it can be counted again. Never output. */
 const GONE = "\0";
 const FENCE = /^\s*(```|~~~)/;
@@ -259,7 +290,7 @@ export function claimProblem(text: string, cites: readonly Citation[], root: str
   }
 
   for (const [, term] of withoutCitations(text).matchAll(/`([^`]+)`/g)) {
-    if (!supported(term!.trim(), cites, root, spans)) return `\`${term}\` isn't in the cited lines`;
+    if (!supported(term!.trim(), cites, root, spans, linesOf)) return `\`${term}\` isn't in the cited lines`;
   }
   return null;
 }
@@ -281,7 +312,7 @@ function elementProblem(label: string, cites: readonly Citation[], root: string,
     spans.push(spanText(lines!, cite));
   }
   const words = (label.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []).filter((w) => w.length >= 4 && !GENERIC.has(w.toLowerCase()));
-  if (words.length === 0 || words.some((word) => supported(word, cites, root, spans))) return null;
+  if (words.length === 0 || words.some((word) => supported(word, cites, root, spans, linesOf))) return null;
   return `none of "${label.trim()}" is in the cited lines`;
 }
 
@@ -291,9 +322,11 @@ function elementProblem(label: string, cites: readonly Citation[], root: string,
  * one (`ArticleFilter` citing ArticleFilter.php, `FollowedPeople` citing Domain/Article.cs next
  * to Domain/FollowedPeople.cs). Code is paraphrased (`dotnet tool restore` for
  * Run("dotnet", "tool restore")) and namespaced (`App\User` for class User), so whole-term
- * matching rejects correct claims. Dashes and underscores count as the same.
+ * matching rejects correct claims. Dashes and underscores count as the same. A route's path word
+ * may also be anywhere in a cited file, as a prefix declared apart from the route
+ * (`APIRouter(prefix="/tasks")` above `@router.post("/")`).
  */
-function supported(term: string, cites: readonly Citation[], root: string, spans: readonly string[]): boolean {
+function supported(term: string, cites: readonly Citation[], root: string, spans: readonly string[], linesOf: (path: string) => string[] | null): boolean {
   if (term.length < 2) return true;
   const path = term.replace(/^\.?\//, "").replace(/\/\*{1,2}$/, "").replace(/\/$/, "");
   // A cited file, or the folder holding one (`src`).
@@ -307,6 +340,7 @@ function supported(term: string, cites: readonly Citation[], root: string, spans
   const words = term.match(/[A-Za-z_][A-Za-z0-9_-]*/g)?.filter((w) => w.length >= 3) ?? [];
   const needle = loose(words.at(-1) ?? term);
   if (spans.some((span) => loose(span).includes(needle))) return true;
+  if (verb && cites.some((c) => linesOf(c.path)?.some((line) => loose(line).includes(needle)))) return true;
   // `ArticleController@show` for a resource's implied action.
   if (CRUD_ACTIONS.has(needle) && spans.some((span) => RESOURCE.test(span))) return true;
   return cites.some((c) => [c.path, ...siblings(root, c.path)].some((file) => loose(basename(file, extname(file))) === needle));
