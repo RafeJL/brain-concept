@@ -110,7 +110,7 @@ npm run brain -- card pg-react-web
 
 | Line | Shows |
 |---|---|
-| `Wiki: 4 pages (…) · read with brain_get` | The wiki Claude Code wrote |
+| `Wiki: 5 pages (…) · read with brain_get` | The wiki Claude Code wrote |
 | `Seams: about 20 routes, 1 call · llm-generated` | The RealWorld routes under the global `/api` prefix, plus the Swagger endpoint; the call is a `curl` in the Makefile |
 | `Called by: pg-react-web (… calls)` | Neighbours, from the seam graph |
 
@@ -580,3 +580,22 @@ atlas-webapp-webapi about an hour and $70 for its links.
 7. **Tests and vendored code are left out.** Calls from a repo's tests to its own routes no longer
    appear in `consumers`; files under a vendored library (`Scripts/ckeditor/`) or generated
    (`*.Designer.cs`) are not screened.
+
+## Part J: planning depth
+
+Use a copy of your store (`$env:BRAIN_DB`). The sync step runs Claude Code: cents for a small repo.
+
+1. **Several pages in one call.** In a Claude Code session ask *"Read the overview and conventions
+   pages of aspnet-api"*. It should call `brain_get` once with `page` as a list. The answer shows
+   each page in full with a `---` line between them. A name that isn't a page is named in its place,
+   and the call only fails when none of the names is a page.
+2. **An unknown parameter is refused.** Ask an agent to call `brain_get` with a `pages` list (or call
+   it from an MCP client yourself). It gets `Unrecognized key: "pages"`, not the page index.
+3. **A conventions page.** `sync <repo> --full`, then `page <repo>`. The core pages now include
+   `conventions`: how code logs, reports errors and user-facing messages, validates input and reads
+   configuration, each with a cited example. Check an example at its citation. An older wiki gets the
+   page on its next plain `sync` (a large repo's stored plan gains it too, without planning again).
+4. **Where tests live.** `page <repo> build-run-test` names each part's test folder or project, the
+   framework, the shared fixtures and how tests are named, citing a test file.
+5. **No gaps in numbering.** Read a flow page after a sync that removed a step: the numbers run
+   1, 2, 3 with no gap, and no heading is left with nothing under it.

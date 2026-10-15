@@ -42,6 +42,7 @@ const page = (slug: string, kind: PlannedPage["kind"], covers: string[] = [], ke
 const PLAN: PlannedPage[] = [
   page("overview", "core"),
   page("build-run-test", "core"),
+  page("conventions", "core"),
   page("api", "core"),
   page("product", "core"),
   page("basket", "area", ["services/basket"], ["services/basket/src/basket.ts"]),
@@ -159,7 +160,7 @@ describe("the page plan", () => {
       '"payments" covers services/payments, which isn\'t a folder',
       '"payments" starts from services/payments/pay.ts, which isn\'t a file',
       'the core page "product" is missing',
-      "21 pages planned; at most 20",
+      "22 pages planned; at most 20",
       "5 flow pages; at most 3",
     ]);
   });
@@ -187,8 +188,8 @@ describe("a large repo's wiki", () => {
     expect(pageRuns()).toHaveLength(3);
     expect(pageRuns().every((r) => r.prompt.includes("- checkout (flow): checkout: the checkout"))).toBe(true);
     expect(pageRuns()[1]!.prompt).toContain('- slug "basket" (area), title "basket": the basket. Covers services/basket. Start from services/basket/src/basket.ts.');
-    expect(pageRuns()[0]!.prompt).toContain("The product page (slug \"product\"");
-    expect(pageRuns()[1]!.prompt).not.toContain("The product page (slug \"product\"");
+    expect(pageRuns()[1]!.prompt).toContain("The product page (slug \"product\"");
+    expect(pageRuns()[0]!.prompt).not.toContain("The product page (slug \"product\"");
     expect(wiki.plan).toMatchObject({ reason: "a full rewrite", problems: [] });
     expect(store.pages("shop").map((p) => [p.slug, p.kind])).toEqual(PLAN.map((p) => [p.slug, p.kind]));
     expect(store.wikiPlan("shop")).toEqual(PLAN);
@@ -201,10 +202,10 @@ describe("a large repo's wiki", () => {
 
     await generateWiki(store, shopRunner().runner, "shop", { onPages: (done, total) => seen.push(`${done}/${total}`) });
 
-    // The plan's 10 pages, then three runs of at most four, finishing in any order.
-    expect(seen[0]).toBe("0/10");
+    // The plan's 11 pages, then three runs of at most four, finishing in any order.
+    expect(seen[0]).toBe("0/11");
     expect(seen).toHaveLength(4);
-    expect(seen.at(-1)).toBe("10/10");
+    expect(seen.at(-1)).toBe("11/11");
   });
 
   it("keeps the pages of the runs that worked when one run fails", async () => {
@@ -213,7 +214,7 @@ describe("a large repo's wiki", () => {
 
     const wiki = await generateWiki(store, runner, "shop");
 
-    expect(store.pages("shop").map((p) => p.slug)).toEqual(PLAN.map((p) => p.slug).filter((s) => !["basket", "ordering", "catalog", "web"].includes(s)));
+    expect(store.pages("shop").map((p) => p.slug)).toEqual(PLAN.map((p) => p.slug).filter((s) => !["product", "basket", "ordering", "catalog"].includes(s)));
     expect(wiki.reports.find((r) => r.slug === "ordering")).toMatchObject({ published: false });
     expect(store.getState("shop")?.pagesFailedAt).toBe(wiki.commit);
   });
@@ -255,11 +256,30 @@ describe("a large repo's wiki", () => {
     const wiki = await generateWiki(store, runner, "shop");
 
     expect(planRuns()[0]!.prompt).toContain("- basket (area): basket");
-    expect(wiki.plan).toMatchObject({ reason: "no plan yet", added: ["ordering", "catalog", "web", "checkout", "data-model"] });
+    expect(wiki.plan).toMatchObject({ reason: "no plan yet", added: ["conventions", "ordering", "catalog", "web", "checkout", "data-model"] });
     expect(pageRuns().flatMap((r) => (r.schema as { properties: { pages: { items: { properties: { slug: { enum: string[] } } } } } }).properties.pages.items.properties.slug.enum)).toEqual([
-      "ordering", "catalog", "web", "checkout", "data-model",
+      "conventions", "ordering", "catalog", "web", "checkout", "data-model",
     ]);
     expect(store.pages("shop")).toHaveLength(PLAN.length);
+  });
+
+  it("adds a core page a stored plan lacks on the next update, without planning again or touching the plan's date", async () => {
+    const { store } = await shop();
+    const sha = store.getState("shop")!.commit;
+    const before = PLAN.filter((p) => p.slug !== "conventions");
+    store.replacePages("shop", before.map((p) => ({ repo: "shop", slug: p.slug, title: p.title, kind: p.kind, markdown: markdown(p.slug), commit: sha, claims: 1, removed: 0, model: "m", costUsd: 0, generatedAt: "then" })));
+    store.replaceWikiPlan("shop", before, { commit: sha, note: null });
+    const { runner, planRuns, pageRuns } = shopRunner();
+
+    const wiki = await generateWiki(store, runner, "shop");
+
+    expect(planRuns()).toHaveLength(0);
+    expect(pageRuns()).toHaveLength(1);
+    expect(pageRuns()[0]!.prompt).toContain('- slug "conventions" (core)');
+    expect(wiki.plan).toBeNull();
+    expect(store.pages("shop").map((p) => p.slug)).toEqual(PLAN.map((p) => p.slug));
+    expect(store.wikiPlan("shop").map((p) => p.slug)).toEqual(PLAN.map((p) => p.slug));
+    expect(store.getState("shop")?.planCommit).toBe(sha);
   });
 
   it("is listed by kind, summed up on the card, and points work at its area and flow pages", async () => {
@@ -270,7 +290,7 @@ describe("a large repo's wiki", () => {
     expect(list).toContain("Areas:\n  basket                   basket: This page describes the basket part of the shop.");
     expect(list).toContain("Flows:\n  checkout");
     expect(list).toContain('start with "overview"');
-    expect((await repoCard(deps, LOCAL_CALLER, "shop", "concise")).text).toContain("Wiki: 10 pages: 4 core, 4 areas, 1 flow, data model · brain_get lists them; start with overview");
+    expect((await repoCard(deps, LOCAL_CALLER, "shop", "concise")).text).toContain("Wiki: 11 pages: 5 core, 4 areas, 1 flow, data model · brain_get lists them; start with overview");
     expect((await workImpact(deps, LOCAL_CALLER, { work: "checkout the basket", format: "concise" })).text).toContain("for a technical plan, read: flow checkout, area basket");
   });
 });
@@ -294,7 +314,7 @@ describe("a small repo's wiki", () => {
 
     expect(requests).toHaveLength(2);
     expect(requests[1]!.prompt).toContain("The wiki doesn't have these pages yet");
-    expect(store.pages("web").map((p) => p.slug)).toEqual(["overview", "build-run-test", "api", "product"]);
+    expect(store.pages("web").map((p) => p.slug)).toEqual(["overview", "build-run-test", "conventions", "api", "product"]);
   });
 });
 

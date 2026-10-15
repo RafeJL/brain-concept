@@ -5,7 +5,7 @@ import type { Store } from "../store/store.js";
 import { carriedPage } from "./affected.js";
 import { checkPage, type CheckedPage, type RemovedClaim } from "./check.js";
 import { inventory } from "./inventory.js";
-import { CORE_PAGES, planLine, planOfPages, planPages, replanReason } from "./plan.js";
+import { CORE_PAGES, planLine, planOfPages, planPages, replanReason, withCorePages } from "./plan.js";
 import { prompt } from "./prompts.js";
 import type { Runner } from "./runner.js";
 
@@ -245,6 +245,7 @@ export async function generateWiki(store: Store, runner: Runner, name: string, o
   let plan = store.wikiPlan(name);
   let planReport: PlanReport | null = null;
   let replanned = false;
+  let completed = false;
 
   const { checked, carried, planned } = await inWorktree(repo.path, state.commit, options.cwd, async (cwd) => {
     if (map.large) {
@@ -265,6 +266,12 @@ export async function generateWiki(store: Store, runner: Runner, name: string, o
           planReport = { reason, added: [], retired: [], problems: made.problems };
         }
       }
+    }
+    // A stored plan from before a core page existed gains it; its page is then written like any new one.
+    if (map.large && mode === "update" && !replanned && plan.length) {
+      const whole = withCorePages(plan);
+      completed = whole.length !== plan.length;
+      plan = whole;
     }
     const planned = map.large && plan.length > 0;
 
@@ -366,6 +373,7 @@ export async function generateWiki(store: Store, runner: Runner, name: string, o
   });
   store.replacePages(name, pages);
   if (replanned) store.replaceWikiPlan(name, plan, { commit: state.commit, note });
+  else if (completed) store.replaceWikiPlan(name, plan, { commit: state.planCommit, note: state.planNote });
   else if (!map.large && plan.length) store.replaceWikiPlan(name, [], { commit: null, note: null });
 
   const wanted = planned ? plan.map((p) => p.slug) : [...requiredPages().keys()];

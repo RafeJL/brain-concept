@@ -121,7 +121,8 @@ pages when it has them.
 A **large repo** has 200 or more source files outside tests, or four or more projects, such as
 eShop's twenty. It gets a wiki that fits it. First, a free count of its folders, projects and entry
 points (no AI) is handed to a planning run, which picks its pages:
-- the core pages: overview, build and test, API, and product;
+- the core pages: overview, build and test (with where each part's tests live), conventions (how
+  code here logs, reports errors, validates input and reads configuration), API, and product;
 - a page per area a developer would work in on its own, such as Basket, Ordering or Identity;
 - up to three **flow** pages: a journey, such as checkout, as numbered, cited steps;
 - a **data-model** page and an **integrations** page.

@@ -28,6 +28,7 @@ function pagesRunner(...answers: Page[][]) {
 // Cited lines are in test/fixtures/repos/articles-api.
 const overview = { slug: "overview", title: "Overview", markdown: "# Overview\n\n`articles-api` is an Express API serving articles [README.md:1; src/articles.ts:1-5]." };
 const build = { slug: "build-run-test", title: "Build, run and test", markdown: "# Build, run and test\n\nThe repository declares no build or test scripts [README.md:1-3]." };
+const conventions = { slug: "conventions", title: "Conventions", markdown: "# Conventions\n\nThe repository documents no coding conventions [README.md:1-3]." };
 const api = { slug: "api", title: "API", markdown: "# API\n\n- `GET /articles/:slug` returns one article [src/articles.ts:3]." };
 const routing = { slug: "routing", title: "Routing", markdown: "# Routing\n\nRoutes hang off one Express `Router` [src/articles.ts:1-2]." };
 const product = {
@@ -49,7 +50,7 @@ async function setup() {
 describe("the product page", () => {
   it("is asked for in a full run, in product language with no code names, citing where rules are enforced", async () => {
     const { store } = await setup();
-    const { runner, requests } = pagesRunner([overview, build, api, routing, product]);
+    const { runner, requests } = pagesRunner([overview, build, conventions, api, routing, product]);
 
     await generateWiki(store, runner, "api");
 
@@ -58,13 +59,13 @@ describe("the product page", () => {
     expect(ask).toContain('- slug "product": what it does for the people who use it');
     expect(ask).toContain("never put code names in the text");
     expect(ask).toContain("Cite the lines where each rule is enforced");
-    expect(store.pages("api").map((p) => p.slug)).toEqual(["overview", "build-run-test", "api", "routing", "product"]);
+    expect(store.pages("api").map((p) => p.slug)).toEqual(["overview", "build-run-test", "conventions", "api", "routing", "product"]);
   });
 
-  it("is added to an existing four-page wiki on the next update, without rewriting the others", async () => {
+  it("is added to an existing wiki that has no product page on the next update, without rewriting the others", async () => {
     const { store } = await setup();
-    await generateWiki(store, pagesRunner([overview, build, api, routing]).runner, "api");
-    store.setPagesFailedAt("api", null); // a four-page wiki from before the product page existed
+    await generateWiki(store, pagesRunner([overview, build, conventions, api, routing]).runner, "api");
+    store.setPagesFailedAt("api", null); // a wiki from before the product page existed
     const before = store.pages("api");
     const { runner, requests } = pagesRunner([product]);
 
@@ -76,14 +77,14 @@ describe("the product page", () => {
     expect(requests[0]!.prompt).not.toContain('<page slug="overview">');
     expect(JSON.stringify(requests[0]!.schema)).toContain('"enum":["product"]');
     expect(wiki.reports.map((r) => [r.slug, r.published])).toEqual([["product", true]]);
-    expect(store.pages("api").map((p) => p.slug)).toEqual(["overview", "build-run-test", "api", "routing", "product"]);
-    expect(store.pages("api").slice(0, 4)).toEqual(before);
+    expect(store.pages("api").map((p) => p.slug)).toEqual(["overview", "build-run-test", "conventions", "api", "routing", "product"]);
+    expect(store.pages("api").slice(0, 5)).toEqual(before);
   });
 
   it("is checked like any page: an unsupported rule is removed, and a failing page is written again with its rules", async () => {
     const { store } = await setup();
-    await generateWiki(store, pagesRunner([overview, build, api, routing]).runner, "api");
-    store.setPagesFailedAt("api", null); // a four-page wiki from before the product page existed
+    await generateWiki(store, pagesRunner([overview, build, conventions, api, routing]).runner, "api");
+    store.setPagesFailedAt("api", null); // a wiki from before the product page existed
     const failing = { ...product, markdown: "# Product\n\nLets readers subscribe to newsletters [src/articles.ts:50]." };
     const { runner, requests } = pagesRunner([failing], [product]);
 
@@ -101,8 +102,8 @@ describe("the product page", () => {
 
   it("isn't written again at the same commit after failing twice, only once the code moves on", async () => {
     const { store } = await setup();
-    await generateWiki(store, pagesRunner([overview, build, api, routing]).runner, "api");
-    store.setPagesFailedAt("api", null); // a four-page wiki from before the product page existed
+    await generateWiki(store, pagesRunner([overview, build, conventions, api, routing]).runner, "api");
+    store.setPagesFailedAt("api", null); // a wiki from before the product page existed
     const failing = { ...product, markdown: "# Product\n\nLets readers subscribe to newsletters [src/articles.ts:50]." };
     await generateWiki(store, pagesRunner([failing]).runner, "api");
     const again = pagesRunner([product]);
@@ -112,14 +113,14 @@ describe("the product page", () => {
     expect(again.requests).toHaveLength(0);
     expect(waiting.waiting).toEqual(["product"]);
     expect(store.getState("api")!.pagesFailedAt).toBe(store.getState("api")!.commit);
-    const full = await generateWiki(store, pagesRunner([overview, build, api, routing, product]).runner, "api", { full: true });
+    const full = await generateWiki(store, pagesRunner([overview, build, conventions, api, routing, product]).runner, "api", { full: true });
     expect(full.pages.map((p) => p.slug)).toContain("product");
     expect(store.getState("api")!.pagesFailedAt).toBeNull();
   });
 
   it("goes on the card as its first sentence, pointing at the page", async () => {
     const { store, deps } = await setup();
-    await generateWiki(store, pagesRunner([overview, build, api, routing, product]).runner, "api");
+    await generateWiki(store, pagesRunner([overview, build, conventions, api, routing, product]).runner, "api");
 
     const card = await repoCard(deps, LOCAL_CALLER, "api", "concise");
     const page = await getPage(deps, LOCAL_CALLER, { repo: "api", page: "product" });
