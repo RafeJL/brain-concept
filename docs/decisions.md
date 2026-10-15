@@ -1060,3 +1060,36 @@ lacked. And when the checker removed a step from a numbered list, the numbering 
 
 **What would change it:** if agents often want more than five pages, raise the cap; if conventions
 pages come out as inventories, tighten the prompt rather than add more headings.
+
+## 2026-10-15: wiki quality from planning tests
+
+Planning tests of the harness against freshly synced wikis found five problems. A FastAPI route
+`POST /tasks/` cited at `@router.post("/")` was removed, because `tasks` is in the router's
+`prefix` forty lines away. Conventions bullets named `ILogger<T>` where the code says
+`ILogger<OidcController>`, or cited an example in a way that read as where other code lives. A
+repo storing JSON documents in S3 got no data-model page. And a full rewrite of unity's product page
+dropped a cited fact (an OIDC check) that the page before it had.
+
+**What it does:**
+- **A route's path word may be anywhere in a cited file.** Only for a term starting with an HTTP
+  method, which must still be shown in the cited lines as before; other terms are checked as they
+  were.
+- **Conventions bullets name what they cite.** Each states the rule with the names that are in its
+  cited lines, names its example ("..., for example `Error_General_Title`"), and a heading has at
+  most four bullets, the most used patterns.
+- **Data-model counts files and objects** (JSON in S3 or blob storage): the model class that gives
+  their shape, and the key or path they are stored under.
+- **A full rewrite reports dropped facts.** `brain sync` lists claims of the previous wiki whose
+  citations no page of the new wiki overlaps, and that still pass the check against the code. Report
+  only: nothing is stored or put back.
+
+**Design calls:**
+- **File-wide for the path word, not the verb.** The verb is in the route's own line; the prefix is
+  declared elsewhere. Cost: a word that is somewhere in the file but unrelated to the route passes;
+  the verb and the word's own presence still have to hold.
+- **Full rewrites stay fresh.** The writer isn't shown the previous page: it anchored the rewrite to
+  the old wording, which is what `--full` is for avoiding. Instead the rewrite reports the facts it
+  dropped, to measure before building a way to put them back.
+
+**What would change it:** if the reports show real facts lost often, build a way to put them back;
+if the file-wide route check lets wrong routes through, read only the lines that declare a prefix.

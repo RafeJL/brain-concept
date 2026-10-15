@@ -63,7 +63,9 @@ The fetch never prompts for credentials.
   - Each sentence in a wiki page must cite lines that exist, at most 80 of them, and the names it
     mentions must appear there.
   - Each route or call must have its HTTP method and every fixed part of its path in the lines it
-    cites. Each event, gRPC method or package must have its name, or each part of it, there.
+    cites. Each event, gRPC method or package must have its name, or each part of it, there. A
+    route's path word may also be anywhere in a cited file, for a prefix declared apart from the
+    route (FastAPI's `APIRouter(prefix="/tasks")` above `@router.post("/")`).
   - Anything that fails is removed, and `brain sync` says what and why. On the trial repos about
     80% of wiki claims were kept, and the removals were real problems.
 - **Every answer says when it's from:** the commit it describes, and how far behind the tracked
@@ -122,10 +124,12 @@ A **large repo** has 200 or more source files outside tests, or four or more pro
 eShop's twenty. It gets a wiki that fits it. First, a free count of its folders, projects and entry
 points (no AI) is handed to a planning run, which picks its pages:
 - the core pages: overview, build and test (with where each part's tests live), conventions (how
-  code here logs, reports errors, validates input and reads configuration), API, and product;
+  code here logs, reports errors, validates input and reads configuration, each rule with one
+  named, cited example and at most four to a heading), API, and product;
 - a page per area a developer would work in on its own, such as Basket, Ordering or Identity;
 - up to three **flow** pages: a journey, such as checkout, as numbered, cited steps;
-- a **data-model** page and an **integrations** page.
+- a **data-model** page (entities stored as files or objects, such as JSON documents in S3, count
+  as well as tables) and an **integrations** page.
 
 There are at most 20 pages. They're written four to a run, side by side, each run starting from
 its pages' key files. `brain wiki plan <repo>` shows the plan.
@@ -141,6 +145,8 @@ diagrams unless they ask, since the text says the same.
 - **Cited lines change:** only the pages citing them are rewritten. A rewrite that fails the check
   twice keeps the last good version, which then says it's "kept from @…".
 - **A new project or area:** the plan is made again, adding pages only for what's new.
+- **A full rewrite** (`--full`) lists the facts the previous wiki cited that the new one doesn't,
+  if the code still shows them, so we can see whether rewrites lose facts.
 - **A steering note:** a person sets one (`brain note <repo> "Ordering matters most"`, or an agent
   with `brain_set_note` once they agree). It re-plans the wiki at the next sync, and each page
   follows it when it's next rewritten. It can't switch off a check.

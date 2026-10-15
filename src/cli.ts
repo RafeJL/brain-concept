@@ -429,6 +429,11 @@ function printWiki(wiki: WikiResult): void {
     if (report.removed.length > 3) console.log(`    … and ${report.removed.length - 3} more`);
   }
   if (wiki.carried.length) console.log(`  unchanged, moved to ${at}: ${wiki.carried.join(", ")}`);
+  if (wiki.dropped.length) {
+    console.log(`  ${wiki.dropped.length} facts the previous wiki cited are no longer cited, though the code still shows them:`);
+    for (const fact of wiki.dropped.slice(0, 5)) console.log(`    ${fact.slug}: "${fact.claim.slice(0, 90)}…" [${fact.cites[0]}]`);
+    if (wiki.dropped.length > 5) console.log(`    … and ${wiki.dropped.length - 5} more`);
+  }
   console.log(`Read them with: brain page ${wiki.repo}`);
 }
 

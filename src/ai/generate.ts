@@ -3,7 +3,8 @@ import { BrainError, type PageKind, type PlannedPage, type WikiPage } from "../c
 import { requireRepo } from "../ingest/registry.js";
 import type { Store } from "../store/store.js";
 import { carriedPage } from "./affected.js";
-import { checkPage, type CheckedPage, type RemovedClaim } from "./check.js";
+import { checkPage, citationProblem, claimProblem, claimsOf, fileReader, type CheckedPage, type RemovedClaim } from "./check.js";
+import { formatCitation, type Citation } from "../core/citations.js";
 import { inventory } from "./inventory.js";
 import { CORE_PAGES, planLine, planOfPages, planPages, replanReason, withCorePages } from "./plan.js";
 import { prompt } from "./prompts.js";
@@ -139,6 +140,31 @@ export interface PageReport {
   attempts: number;
 }
 
+/** A fact the previous wiki cited that a full rewrite no longer does, though the code still shows it. */
+export interface DroppedFact {
+  /** The previous page it was on. */
+  slug: string;
+  claim: string;
+  cites: string[];
+}
+
+const overlaps = (a: Citation, b: Citation) => a.path === b.path && a.start <= b.end && b.start <= a.end;
+
+/**
+ * Claims of the old pages that no citation of the new pages overlaps (on any page, as one may have
+ * been renamed) and that still pass the check against `root`: facts the rewrite lost. Claims the
+ * code no longer supports aren't reported.
+ */
+function droppedFacts(old: readonly WikiPage[], now: readonly string[], root: string): DroppedFact[] {
+  const linesOf = fileReader(root);
+  const kept = now.flatMap((markdown) => claimsOf(markdown).flatMap((c) => c.cites));
+  return old.flatMap((page) =>
+    claimsOf(page.markdown)
+      .filter(({ text, cites }) => !cites.some((c) => kept.some((k) => overlaps(c, k))) && cites.every((c) => citationProblem(c, linesOf(c.path)) === null) && claimProblem(text, cites, root, linesOf) === null)
+      .map(({ text, cites }) => ({ slug: page.slug, claim: text, cites: cites.map(formatCitation) })),
+  );
+}
+
 /** What planning did this run, for a large repo. */
 export interface PlanReport {
   reason: string;
@@ -170,6 +196,8 @@ export interface WikiResult {
   reports: PageReport[];
   /** Pages moved to this commit without the AI: nothing they cite changed, or only lines around it. */
   carried: string[];
+  /** After a full rewrite: facts the wiki before it cited that the new one doesn't, though the code still shows them. */
+  dropped: DroppedFact[];
   /** Pages the wiki should have that failed at this commit, so weren't tried again this run. */
   waiting: string[];
   /** Set when a large repo's wiki was planned this run. */
@@ -247,7 +275,7 @@ export async function generateWiki(store: Store, runner: Runner, name: string, o
   let replanned = false;
   let completed = false;
 
-  const { checked, carried, planned } = await inWorktree(repo.path, state.commit, options.cwd, async (cwd) => {
+  const { checked, carried, planned, dropped } = await inWorktree(repo.path, state.commit, options.cwd, async (cwd) => {
     if (map.large) {
       const added = plan.length && state.planCommit && mode === "update" ? await changedFiles(repo.path, state.planCommit, state.commit) : null;
       const reason = mode === "full" ? "a full rewrite" : replanReason(plan, added, note !== state.planNote);
@@ -323,7 +351,10 @@ export async function generateWiki(store: Store, runner: Runner, name: string, o
       const index = checked.findIndex((c) => c.draft.slug === draft.slug);
       checked[index] = { draft, check: checkPage(draft.markdown, cwd), attempts: 2 };
     }
-    return { checked, carried, planned };
+    // What the new wiki cites: the pages that passed, and the old version of any that didn't (it is kept).
+    const now = checked.flatMap((c) => (c.check.publishable ? [c.check.markdown] : previous.filter((p) => p.slug === c.draft.slug).map((p) => p.markdown)));
+    const dropped = mode === "full" && previous.length ? droppedFacts(previous, now, cwd) : [];
+    return { checked, carried, planned, dropped };
   });
 
   const generatedAt = new Date().toISOString();
@@ -388,6 +419,7 @@ export async function generateWiki(store: Store, runner: Runner, name: string, o
     pages,
     reports,
     carried: [...carried.keys()],
+    dropped,
     waiting: tried ? [] : stillMissing,
     plan: planReport,
     costUsd,

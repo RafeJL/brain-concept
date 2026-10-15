@@ -1,5 +1,5 @@
 - slug "overview": what the repository is, its main parts and how they fit together.
 - slug "build-run-test": how to install, build, run and test it, and where each part's tests live with their framework, fixtures and naming, from the files that define this.
-- slug "conventions": how code here is written: how it logs, reports errors and user-facing messages, validates input and reads configuration, each with one cited example.
+- slug "conventions": how code here is written: how it logs, reports errors and user-facing messages, validates input and reads configuration, each rule with one named, cited example.
 - slug "api": the HTTP API it serves, grouped by area. If it serves none, say what it exposes instead.
 - slug "product": what it does for the people who use it, in product language (see "The product page" below).
