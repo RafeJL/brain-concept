@@ -69,6 +69,48 @@ Two halves share only the store:
   instructions name the systems and repos the caller can read, each with its one-line product
   summary, so an agent knows which names are the organisation's own.
 
+### How data flows
+
+```mermaid
+flowchart TD
+  trigger["Triggers<br/>git hook, brain sync / brain add,<br/>brain_add_repo (detached brain add)"]
+  queue["runQueued<br/>one run per repo"]
+  index["syncRepo<br/>git index at the tracked ref, no AI"]
+
+  subgraph ai["AI steps, side by side"]
+    links["Links<br/>survey, screen, map,<br/>inherited routes, traces"]
+    wiki["Wiki<br/>plan (large repo),<br/>pages four to a run"]
+    factcheck["Fact checks<br/>agrees, contradicts,<br/>absent"]
+  end
+
+  runner["runner.ts<br/>Claude Code headless in a worktree<br/>at the indexed commit, Read/Grep/Glob"]
+  checks["Deterministic checks<br/>seams.ts, check.ts,<br/>diagrams.ts, chainProblem"]
+  store[("Store<br/>seams, seam_pieces, trace_links,<br/>pages, facts, systems,<br/>enrolments, search index")]
+  person["Person, through their agent<br/>record_fact, set_note,<br/>facts, systems"]
+
+  mcp["MCP server"]
+  access["AccessPolicy<br/>before any rows are read"]
+  query["Query engine<br/>neighbours, traces, overviews,<br/>coverage, worked out when asked"]
+  shaper["Response shaper<br/>pointers, commit,<br/>commits behind, tier"]
+  agent["Harness agent"]
+
+  trigger --> queue --> index
+  index -- "file inventory" --> store
+  index --> links & wiki & factcheck
+  links & wiki & factcheck --> runner
+  runner -- "answers with citations" --> checks
+  checks -- "only what the cited<br/>lines support" --> store
+  person -- "confirmed_with,<br/>permission prompt" --> store
+  agent -- "tool call" --> mcp --> access --> query
+  store -- "reads" --> query
+  query --> shaper -- "answer" --> agent
+```
+
+Only ingest and the five write tools write to the store, and every AI answer passes a
+deterministic check on the way in. Neighbours, cross-repo links, flows followed across repos and
+system overviews are never stored: the query engine works them out from the stored seams, chains
+and systems when asked, so they can't go stale.
+
 ## Freshness on merge
 
 1. A merge to main queues a job for that repo: commit a → b.
@@ -276,6 +318,28 @@ large repo (decisions, 2026-10-14):
 4. **Inherited routes**: subclasses of each surveyed base class (found by repeated search over class
    declarations), each base route with `{controller}` filled in, citing the class, the base method
    and the template; checked like any route, stored with `derived = 1`, worked out again every map.
+
+```mermaid
+flowchart TD
+  inv["inventory.ts<br/>the repo's own source:<br/>no tests, vendored or generated code"]
+  survey["Survey (one run)<br/>route templates, base classes,<br/>settings files"]
+  screen["Screen (fast model, no tools)<br/>every file or 600-line range,<br/>text in the prompt"]
+  map["Map (a dozen pieces a run)<br/>flagged pieces, text in the prompt,<br/>survey rules given"]
+  derive["Inherited routes<br/>worked out by the brain, no AI"]
+  verify["verifySeams<br/>files and lines exist,<br/>names in the cited lines"]
+  seams[("seams")]
+  pieces[("seam_pieces<br/>unflagged / mapped / none / unmapped")]
+
+  inv --> screen
+  survey --> map
+  survey --> derive
+  screen -- "flagged" --> map
+  screen -- "not flagged" --> pieces
+  map --> verify
+  derive --> verify
+  verify --> seams
+  map -- "each piece's outcome" --> pieces
+```
 
 `seam_pieces` keeps each piece's outcome for both runs (unflagged, mapped, none, unmapped). Answers
 read it through `src/serve/coverage.ts`: "none" only where the map is complete; otherwise the
