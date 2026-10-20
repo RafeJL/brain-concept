@@ -1,16 +1,12 @@
-import { copyFileSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import type { RunRequest, Runner } from "../src/ai/runner.js";
+import { describe, expect, it } from "vitest";
+import type { RunRequest } from "../src/ai/runner.js";
 import { suggestSystems, type FoundSystem } from "../src/ai/systems.js";
-import type { WikiPage } from "../src/core/types.js";
 import { enrolRepo, removeRepo } from "../src/ingest/registry.js";
 import { syncRepo } from "../src/ingest/sync.js";
-import { LOCAL_CALLER, LocalAccessPolicy, type AccessPolicy } from "../src/serve/access.js";
-import { createServer } from "../src/serve/mcp.js";
+import { LOCAL_CALLER, type AccessPolicy } from "../src/serve/access.js";
 import { joinHint } from "../src/serve/systems.js";
 import { cardRequest, repoCard } from "../src/serve/tools/repo-card.js";
 import { search } from "../src/serve/tools/search.js";
@@ -19,11 +15,7 @@ import { systemOverview } from "../src/serve/tools/system-overview.js";
 import { impactRequest, workImpact } from "../src/serve/tools/work-impact.js";
 import { MIGRATIONS } from "../src/store/migrations.js";
 import { SqliteStore } from "../src/store/sqlite.js";
-import { mapSeams, repoFromFixture, tempDir } from "./helpers.js";
-
-function page(repo: string, slug: string, title: string, markdown: string): WikiPage {
-  return { repo, slug, title, kind: "core", markdown, commit: "0".repeat(40), claims: 1, removed: 0, model: "claude-sonnet-5", costUsd: 0.1, generatedAt: "2026-10-08T00:00:00Z" };
-}
+import { connect, mapSeams, page, recordedRunner, repoFromFixture, sharedStore, tempDir } from "./helpers.js";
 
 /** Pages for the fixture repos. Serving them doesn't re-check citations, so they only need to read well. */
 const WIKIS: Record<string, [string, string, string][]> = {
@@ -35,47 +27,28 @@ const WIKIS: Record<string, [string, string, string][]> = {
   "orders-api": [["product", "Product", "# Product\n\nLets shoppers see and cancel their orders [src/OrdersController.cs:4-8]."]],
 };
 
-let template: string;
-
 /**
  * Four fixture repos with mapped routes and calls: articles-web calls articles-api, shop-web calls
  * orders-api. shop-web has no wiki. Built once; each test gets its own copy of the store.
  */
-beforeAll(async () => {
-  template = join(tempDir("file"), "world.db");
-  const store = new SqliteStore(template);
+const world = sharedStore(async (store) => {
   for (const name of ["articles-api", "articles-web", "orders-api", "shop-web"]) {
     await enrolRepo(store, { path: repoFromFixture(name, "file"), name });
     const { commit } = await syncRepo(store, name);
     await mapSeams(store, name);
-    store.replacePages(name, (WIKIS[name] ?? []).map(([slug, title, markdown]) => ({ ...page(name, slug, title, markdown), commit })));
+    store.replacePages(name, (WIKIS[name] ?? []).map(([slug, title, markdown]) => page(name, slug, title, markdown, commit)));
   }
-  store.close();
-}, 60_000);
-
-const open: SqliteStore[] = [];
-// Closed before the shared cleanup deletes the folder: Windows won't delete an open database.
-afterEach(() => open.splice(0).forEach((store) => store.close()));
-
-async function world() {
-  const copy = join(tempDir(), "brain.db");
-  copyFileSync(template, copy);
-  const store = new SqliteStore(copy);
-  open.push(store);
-  return { store, deps: { store, access: new LocalAccessPolicy() } };
-}
+});
 
 const only = (...repos: string[]): AccessPolicy => ({ readableRepos: async () => new Set(repos) });
 
 /** Answers a suggestion run with `systems`, and keeps the context file it was given. */
 function suggestionRunner(systems: unknown[]) {
   const seen: { request: RunRequest; context: string }[] = [];
-  const runner: Runner = {
-    async run<T>(request: RunRequest) {
-      seen.push({ request, context: readFileSync(join(request.cwd, "repos.md"), "utf8") });
-      return { output: { systems } as T, costUsd: 0.03, durationMs: 500, model: "claude-sonnet-5" };
-    },
-  };
+  const { runner } = recordedRunner((request) => {
+    seen.push({ request, context: readFileSync(join(request.cwd, "repos.md"), "utf8") });
+    return { systems };
+  });
   return { runner, seen };
 }
 
@@ -94,7 +67,7 @@ const shop: FoundSystem = {
 
 describe("brain systems suggest", () => {
   it("gives Claude Code each repo's links and product opening, and stores what checks out as suggested", async () => {
-    const { store } = await world();
+    const { store } = world();
     const { runner, seen } = suggestionRunner([conduit, shop]);
 
     const result = await suggestSystems(store, runner);
@@ -116,7 +89,7 @@ describe("brain systems suggest", () => {
   });
 
   it("leaves out a repo nothing links to the others, and drops unknown, duplicate or unlinked groupings", async () => {
-    const { store } = await world();
+    const { store } = world();
     const { runner } = suggestionRunner([
       // Neither calls the other: looking alike proves nothing.
       { ...conduit, name: "Lookalikes", repos: ["articles-api", "orders-api"] },
@@ -143,7 +116,7 @@ describe("brain systems suggest", () => {
   });
 
   it("leaves confirmed systems and their repos alone, and replaces earlier suggestions", async () => {
-    const { store } = await world();
+    const { store } = world();
     await suggestSystems(store, suggestionRunner([conduit, shop]).runner);
     store.confirmSystems(["conduit"]);
     const { runner, seen } = suggestionRunner([{ ...shop, name: "Conduit" }, { ...shop, name: "Orders" }]);
@@ -162,7 +135,7 @@ describe("brain systems suggest", () => {
 
 describe("confirming and tidying systems", () => {
   it("confirms, sets, renames and removes, and a removed repo leaves its system", async () => {
-    const { store } = await world();
+    const { store } = world();
     await suggestSystems(store, suggestionRunner([conduit, shop]).runner);
 
     expect(store.confirmSystems(["shop"])).toEqual(["Shop"]);
@@ -183,7 +156,7 @@ describe("confirming and tidying systems", () => {
   });
 
   it("confirms a suggested system a person edits, so a later suggestion can't replace it", async () => {
-    const { store } = await world();
+    const { store } = world();
     await suggestSystems(store, suggestionRunner([conduit, shop]).runner);
 
     store.setSystem("Shop", [], "Shoppers order goods.");
@@ -193,7 +166,7 @@ describe("confirming and tidying systems", () => {
   });
 
   it("creates a system a person names as confirmed", async () => {
-    const { store } = await world();
+    const { store } = world();
 
     store.setSystem("Shop", ["shop-web", "orders-api"]);
 
@@ -201,7 +174,7 @@ describe("confirming and tidying systems", () => {
   });
 
   it("after brain add, suggests the confirmed system a new repo calls or is called by, with no AI", async () => {
-    const { store } = await world();
+    const { store } = world();
     store.setSystem("Conduit", ["articles-api"]);
     store.setSystem("Shop", ["shop-web"]);
     store.replaceSuggestedSystems([{ name: "Maybe", summary: "", reason: "", repos: ["orders-api"] }]);
@@ -215,7 +188,7 @@ describe("confirming and tidying systems", () => {
 
 describe("systems as agents see them", () => {
   it("puts the system on the card, labelling a suggestion and hiding unreadable members", async () => {
-    const { store, deps } = await world();
+    const { store, deps } = world();
     store.replaceSuggestedSystems([{ name: "Conduit", summary: "", reason: "", repos: ["articles-api", "articles-web"] }]);
 
     const suggested = await repoCard(deps, LOCAL_CALLER, "articles-api", "concise");
@@ -230,7 +203,7 @@ describe("systems as agents see them", () => {
   });
 
   it("answers a card for a system's name with its overview, and a repo's name with its card", async () => {
-    const { store, deps } = await world();
+    const { store, deps } = world();
     store.setSystem("Conduit", ["articles-api", "articles-web"]);
 
     const system = await cardRequest(deps, LOCAL_CALLER, "conduit", "concise");
@@ -242,7 +215,7 @@ describe("systems as agents see them", () => {
   });
 
   it("assembles an overview: summary, members' product lines, links within and outside", async () => {
-    const { store, deps } = await world();
+    const { store, deps } = world();
     store.setSystem("Conduit", ["articles-api", "articles-web"], "A Medium-style blogging platform.");
     store.replaceSuggestedSystems([{ name: "Orders", summary: "", reason: "orders-api serves the orders", repos: ["orders-api"] }]);
 
@@ -261,7 +234,7 @@ describe("systems as agents see them", () => {
   });
 
   it("lists and counts only readable repos in an overview, and hides a system with none", async () => {
-    const { store } = await world();
+    const { store } = world();
     store.setSystem("Conduit", ["articles-api", "articles-web"]);
     store.setSystem("Shop", ["shop-web"]);
 
@@ -274,7 +247,7 @@ describe("systems as agents see them", () => {
   });
 
   it("lets brain_search find systems by name and summary, first, and only readable ones", async () => {
-    const { store, deps } = await world();
+    const { store, deps } = world();
     store.setSystem("Conduit", ["articles-api", "articles-web"], "A Medium-style blogging platform.");
 
     const found = await search(deps, LOCAL_CALLER, { query: "blogging platform", format: "concise" });
@@ -288,13 +261,9 @@ describe("systems as agents see them", () => {
   });
 
   it("answers brain_get with system and brain_impact with work over the protocol", async () => {
-    const { store } = await world();
+    const { store } = world();
     store.setSystem("Conduit", ["articles-api", "articles-web"]);
-    const server = createServer({ store, access: new LocalAccessPolicy(), caller: LOCAL_CALLER });
-    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-    await server.connect(serverSide);
-    const client = new Client({ name: "test", version: "0.0.0" });
-    await client.connect(clientSide);
+    const client = await connect(store);
 
     const overview = await client.callTool({ name: "brain_get", arguments: { system: "Conduit" } });
     const work = await client.callTool({ name: "brain_impact", arguments: { work: "remove articles" } });
@@ -309,7 +278,7 @@ describe("systems as agents see them", () => {
 
 describe("brain_impact with work", () => {
   it("ranks repos by matching sections (product pages first) and routes, grouped by system, with callers", async () => {
-    const { store, deps } = await world();
+    const { store, deps } = world();
     store.setSystem("Conduit", ["articles-api", "articles-web"]);
 
     const result = await workImpact(deps, LOCAL_CALLER, { work: "let readers remove articles", format: "concise" });
@@ -324,7 +293,7 @@ describe("brain_impact with work", () => {
   });
 
   it("ignores words nearly every description uses, such as \"let users\"", async () => {
-    const { deps } = await world();
+    const { deps } = world();
 
     const plain = await workImpact(deps, LOCAL_CALLER, { work: "remove articles", format: "concise" });
     const wordy = await workImpact(deps, LOCAL_CALLER, { work: "let users remove articles", format: "concise" });
@@ -333,7 +302,7 @@ describe("brain_impact with work", () => {
   });
 
   it("puts repos in no system last, and labels suggested systems", async () => {
-    const { store, deps } = await world();
+    const { store, deps } = world();
     store.replaceSuggestedSystems([{ name: "Shop", summary: "", reason: "", repos: ["orders-api", "shop-web"] }]);
 
     const result = await workImpact(deps, LOCAL_CALLER, { work: "readers and shoppers orders articles", format: "concise" });
@@ -344,7 +313,7 @@ describe("brain_impact with work", () => {
   });
 
   it("never names a repo the caller can't read, even as a caller", async () => {
-    const { store } = await world();
+    const { store } = world();
     store.setSystem("Conduit", ["articles-api", "articles-web"]);
 
     const result = await workImpact({ store, access: only("articles-api") }, LOCAL_CALLER, { work: "remove articles", format: "concise" });
@@ -354,7 +323,7 @@ describe("brain_impact with work", () => {
   });
 
   it("says when nothing matches, and wants either work or a repo", async () => {
-    const { deps } = await world();
+    const { deps } = world();
 
     const nothing = await workImpact(deps, LOCAL_CALLER, { work: "quantum teleportation", format: "concise" });
     const both = await impactRequest(deps, LOCAL_CALLER, { work: "x", repo: "articles-api", format: "concise" });

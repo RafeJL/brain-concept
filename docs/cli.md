@@ -38,7 +38,7 @@ been merged, and a fetch is enough to update it.
 | Command | Does |
 |---|---|
 | `doctor` | Checks Node, git, Claude Code, the store, the MCP registration, each repo's hook and any enrolment that is running or failed. Says how to fix anything missing. |
-| `add <repo> [<repo>...] [--name n] [--note "<focus>"] [--no-hook] [--no-ai]` | Adds repos. A repo is a local clone, a GitHub URL (`https://github.com/owner/repo`, with or without `.git`, or `git@github.com:owner/repo.git`), `owner/repo`, or another git URL. Remote ones are cloned into the brain's folder with your git credentials. Then it indexes them, has Claude Code map their links and write their wikis (three repos at a time), and installs their hooks. Each answers as soon as it's indexed. `--no-ai` indexes only. Adding a repo whose enrolment failed or stopped finishes it. |
+| `add <repo> [<repo>...] [--name n] [--ref r] [--note "<focus>"] [--no-hook] [--no-ai] [--model m]` | Adds repos. A repo is a local clone, a GitHub URL (`https://github.com/owner/repo`, with or without `.git`, or `git@github.com:owner/repo.git`), `owner/repo`, or another git URL. Remote ones are cloned into the brain's folder with your git credentials. Then it indexes them, has Claude Code map their links and write their wikis (three repos at a time), and installs their hooks. Each answers as soon as it's indexed. `--ref` tracks a branch other than `origin/HEAD`. `--no-ai` indexes only. Adding a repo whose enrolment failed or stopped finishes it. |
 | `sync [<name>] [--full] [--only links\|wiki\|facts] [--no-ai] [--model m]` | Brings repos up to their tracked branch, redoing only what changed: the links, the wiki, and facts from people checked against the code, side by side. All repos if no name is given, three at a time. `--full` redoes everything. `--only` runs one of those steps. This is what the hook runs. |
 | `note <name> ["<focus>" \| --clear \| --confirm]` | Shows or sets the note steering a repo's wiki; `--confirm` applies one an agent proposed. |
 | `wiki plan <name>` | A large repo's page plan: each page's kind, what it covers, and when it was written. |
@@ -52,11 +52,11 @@ been merged, and a fetch is enough to update it.
 
 | Command | Is |
 |---|---|
-| `search "<query>" [--repo n]... [--detailed]` | `brain_search`. |
+| `search "<query>" [--repo n]... [--detailed] [--offset n]` | `brain_search`. `--offset` gives the next page of results. |
 | `card <name> [--detailed]` | `brain_repo_card`. Given a system's name, it shows that system's overview. While a repo is being enrolled, it says how far it has got. |
 | `page <name> [<page>]` | `brain_get`: the page list, or one page (`product` for the product page). |
 | `consumers "<METHOD /path>" [--detailed] [--follow]` | `brain_find_consumers`. Takes `:id` and `{id}` style paths, or full URLs; or `"event <name>"`, `"grpc <Service/Method>"`, `"package <name>"`. `--follow` traces what handling it sets off, across repos. |
-| `impact <repo> [--path file] [--route "<METHOD /path>"]` | `brain_impact`. `--route` also takes an event, gRPC method or package. |
+| `impact <repo> [--path file] [--route "<METHOD /path>"] [--detailed]` | `brain_impact`. `--route` also takes an event, gRPC method or package. |
 | `impact --work "<description>"` | `brain_impact` with `work`: which systems, repos and endpoints a piece of work would most likely touch. |
 
 For example, `consumers "GET /api/articles/:slug"` gives:
@@ -96,7 +96,7 @@ Systems say which repos make up one product.
 | `systems suggest [--model m]` | Has Claude Code suggest systems from the repos' cards, product pages and links. Costs cents: it reads no code. Confirmed systems are left alone. |
 | `systems show <system>` | `brain_get` with `system`: the system's overview. |
 | `systems confirm <system>` or `--all` | Confirms suggested systems. |
-| `systems set <system> <repo>... [--summary "<line>"]` | Adds or moves repos into a system (creating it if needed), or changes its one-line summary. Either way the system counts as confirmed. |
+| `systems set <system> [<repo>...] [--summary "<line>"]` | Adds or moves repos into a system (creating it if needed), or changes its one-line summary. Either way the system counts as confirmed. |
 | `systems rename <system> <new>` / `systems remove <system>` | Tidies up. Removing a system leaves its repos enrolled, and removes the facts on it. |
 
 ## Facts from people

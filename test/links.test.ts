@@ -1,28 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { verifySeams } from "../src/ai/seams.js";
 import { normaliseName, parseTarget } from "../src/core/links.js";
-import { enrolRepo } from "../src/ingest/registry.js";
-import { syncRepo } from "../src/ingest/sync.js";
-import { LOCAL_CALLER, LocalAccessPolicy, type AccessPolicy } from "../src/serve/access.js";
+import { LOCAL_CALLER, type AccessPolicy } from "../src/serve/access.js";
 import { findConsumers } from "../src/serve/tools/find-consumers.js";
 import { impact } from "../src/serve/tools/impact.js";
 import { repoCard } from "../src/serve/tools/repo-card.js";
 import { search } from "../src/serve/tools/search.js";
-import { SqliteStore } from "../src/store/sqlite.js";
-import { makeRepo, mapSeams, repoFromFixture } from "./helpers.js";
+import { fixtureWorld, makeRepo } from "./helpers.js";
 
-/** Enrols, syncs and maps fixture repos under their own names, from their recorded answers. */
-async function enrolled(...names: string[]) {
-  const store = new SqliteStore(":memory:");
-  for (const name of names) {
-    await enrolRepo(store, { path: repoFromFixture(name), name });
-    await syncRepo(store, name);
-    await mapSeams(store, name);
-  }
-  return { store, deps: { store, access: new LocalAccessPolicy() } };
-}
-
-const ALL = ["ordering-events", "notify-worker", "basket-grpc", "basket-client", "ui-kit", "ui-app"];
+/** Fixture repos enrolled under their own names, synced and mapped from their recorded answers, once for the file. */
+const events = fixtureWorld(["ordering-events", "notify-worker"]);
+const grpc = fixtureWorld(["basket-grpc", "basket-client"]);
+const packages = fixtureWorld(["ui-kit", "ui-app"]);
+const all = fixtureWorld(["ordering-events", "notify-worker", "basket-grpc", "basket-client", "ui-kit", "ui-app"]);
 
 const named = (kind: string, name: string, cites: [string, number, number][], runtime = false) => ({
   kind,
@@ -109,7 +99,7 @@ describe("verifying events, gRPC methods and packages", () => {
 
 describe("events across repos", () => {
   it("finds the publisher and the handlers, the publisher's own handler marked same repo", async () => {
-    const { deps } = await enrolled("ordering-events", "notify-worker");
+    const { deps } = events();
 
     const started = await findConsumers(deps, LOCAL_CALLER, { target: "event OrderStartedIntegrationEvent", format: "concise" });
     const changed = await findConsumers(deps, LOCAL_CALLER, { target: "event orderstatuschangedintegrationevent", format: "concise" });
@@ -123,7 +113,7 @@ describe("events across repos", () => {
   });
 
   it("matches names exactly, and suggests the known names when nothing matches", async () => {
-    const { deps } = await enrolled("ordering-events", "notify-worker");
+    const { deps } = events();
 
     const result = await findConsumers(deps, LOCAL_CALLER, { target: "event OrderStarted", format: "concise" });
 
@@ -132,7 +122,7 @@ describe("events across repos", () => {
   });
 
   it("lists what a publishing file provides and who handles it", async () => {
-    const { deps } = await enrolled("ordering-events", "notify-worker");
+    const { deps } = events();
 
     const result = await impact(deps, LOCAL_CALLER, { repo: "ordering-events", path: "src/OrderingService.cs", format: "concise" });
 
@@ -142,7 +132,7 @@ describe("events across repos", () => {
   });
 
   it("never shows a handler or publisher in a repo the caller can't read", async () => {
-    const { store } = await enrolled("ordering-events", "notify-worker");
+    const { store } = events();
     const onlyOrdering: AccessPolicy = { readableRepos: async () => new Set(["ordering-events"]) };
     const deps = { store, access: onlyOrdering };
 
@@ -157,7 +147,7 @@ describe("events across repos", () => {
 
 describe("gRPC and packages across repos", () => {
   it("finds the gRPC server and its client in another language", async () => {
-    const { deps } = await enrolled("basket-grpc", "basket-client");
+    const { deps } = grpc();
 
     const result = await findConsumers(deps, LOCAL_CALLER, { target: "grpc BasketApi.Basket/GetBasket", format: "detailed" });
 
@@ -167,7 +157,7 @@ describe("gRPC and packages across repos", () => {
   });
 
   it("lists a gRPC service's methods with their callers", async () => {
-    const { deps } = await enrolled("basket-grpc", "basket-client");
+    const { deps } = grpc();
 
     const result = await impact(deps, LOCAL_CALLER, { repo: "basket-grpc", format: "concise" });
 
@@ -177,7 +167,7 @@ describe("gRPC and packages across repos", () => {
   });
 
   it("finds the package and the repo that depends on it, whatever the version", async () => {
-    const { deps } = await enrolled("ui-kit", "ui-app");
+    const { deps } = packages();
 
     const result = await findConsumers(deps, LOCAL_CALLER, { target: "package @citation/ui@2.1.0", format: "concise" });
     const radius = await impact(deps, LOCAL_CALLER, { repo: "ui-kit", route: "package @citation/ui", format: "concise" });
@@ -188,7 +178,7 @@ describe("gRPC and packages across repos", () => {
   });
 
   it("keeps HTTP and the other kinds apart", async () => {
-    const { deps } = await enrolled("basket-grpc", "basket-client");
+    const { deps } = grpc();
 
     const result = await findConsumers(deps, LOCAL_CALLER, { target: "/GetBasket", format: "concise" });
 
@@ -198,7 +188,7 @@ describe("gRPC and packages across repos", () => {
 
 describe("cards and search", () => {
   it("count every kind in the seams line and in Calls / Called by", async () => {
-    const { deps } = await enrolled(...ALL);
+    const { deps } = all();
 
     const ordering = await repoCard(deps, LOCAL_CALLER, "ordering-events", "concise");
     const worker = await repoCard(deps, LOCAL_CALLER, "notify-worker", "concise");
@@ -216,7 +206,7 @@ describe("cards and search", () => {
   }, 30_000);
 
   it("finds events by the words in their names", async () => {
-    const { deps } = await enrolled("ordering-events", "notify-worker");
+    const { deps } = events();
 
     const result = await search(deps, LOCAL_CALLER, { query: "order started", format: "concise" });
 

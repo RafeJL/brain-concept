@@ -1,6 +1,6 @@
 import { changedFiles, inWorktree, type ChangedFile } from "../core/git.js";
 import { BrainError, type PageKind, type PlannedPage, type WikiPage } from "../core/types.js";
-import { requireRepo } from "../ingest/registry.js";
+import { requireSynced } from "../ingest/registry.js";
 import type { Store } from "../store/store.js";
 import { carriedPage } from "./affected.js";
 import { checkPage, citationProblem, claimProblem, claimsOf, fileReader, type CheckedPage, type RemovedClaim } from "./check.js";
@@ -8,7 +8,7 @@ import { formatCitation, type Citation } from "../core/citations.js";
 import { inventory } from "./inventory.js";
 import { CORE_PAGES, planLine, planOfPages, planPages, replanReason, withCorePages } from "./plan.js";
 import { prompt } from "./prompts.js";
-import type { Runner } from "./runner.js";
+import { chunk, type Runner } from "./runner.js";
 
 /** Sonnet wrote pages as well as Opus at a quarter of the cost in the first trial (docs/decisions.md). */
 export const DEFAULT_MODEL = "sonnet";
@@ -222,9 +222,7 @@ export interface WikiResult {
  * uncommitted work. Malformed output leaves the wiki as it was.
  */
 export async function generateWiki(store: Store, runner: Runner, name: string, options: WikiOptions = {}): Promise<WikiResult> {
-  const repo = requireRepo(store, name);
-  const state = store.getState(name);
-  if (!state) throw new BrainError(`"${name}" has not been synced yet. Run: brain sync ${name}`);
+  const { repo, state } = requireSynced(store, name);
   const started = Date.now();
   const model = options.model ?? DEFAULT_MODEL;
   const note = repo.note?.text ?? null;
@@ -252,10 +250,8 @@ export async function generateWiki(store: Store, runner: Runner, name: string, o
    * (empty), so they're retried or keep their old versions; the other runs' pages stand.
    */
   const inBatches = async <T extends { slug: string }>(cwd: string, items: readonly T[], ask: (batch: readonly T[]) => string, counted = true): Promise<DraftPage[]> => {
-    const batches: T[][] = [];
-    for (let i = 0; i < items.length; i += BATCH_PAGES) batches.push(items.slice(i, i + BATCH_PAGES));
     const drafts = await Promise.all(
-      batches.map(async (batch) => {
+      chunk(items, BATCH_PAGES).map(async (batch) => {
         const slugs = batch.map((item) => item.slug);
         let got: DraftPage[] = [];
         try {

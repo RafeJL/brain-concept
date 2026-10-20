@@ -1,11 +1,8 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { moveAnchor } from "../src/ingest/facts.js";
 import { enrolRepo } from "../src/ingest/registry.js";
 import { syncRepo } from "../src/ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy } from "../src/serve/access.js";
-import { createServer } from "../src/serve/mcp.js";
 import { confirmFact } from "../src/serve/facts.js";
 import { getPage } from "../src/serve/tools/get-page.js";
 import { manageFacts } from "../src/serve/tools/manage-facts.js";
@@ -16,17 +13,11 @@ import { repoCard } from "../src/serve/tools/repo-card.js";
 import { search } from "../src/serve/tools/search.js";
 import { systemOverview } from "../src/serve/tools/system-overview.js";
 import { impactRequest } from "../src/serve/tools/work-impact.js";
-import { SqliteStore } from "../src/store/sqlite.js";
-import { commit, makeRepo } from "./helpers.js";
-
-const FOLLOW = ["export function follow(user, author) {", "  if (user.following.length >= 500) throw new Error('limit');", "  user.following.push(author);", "}", ""].join("\n");
+import { commit, connect, FOLLOW, followRepo, makeRepo } from "./helpers.js";
 
 /** A synced repo with a product page, in a system, as the brain holds it after a sync. */
 async function brain() {
-  const store = new SqliteStore(":memory:");
-  const dir = makeRepo({ "src/follow.ts": FOLLOW, "README.md": "# web\n" });
-  await enrolRepo(store, { path: dir, name: "web" });
-  await syncRepo(store, "web");
+  const { store, dir } = await followRepo();
   const markdown = "# Product\n\nLets readers follow the authors they like [src/follow.ts:1-3].\n\n## Business rules\n\nFollowing has no limit [src/follow.ts:2].\n";
   store.replacePages("web", [{ repo: "web", slug: "product", title: "Product", kind: "core", markdown, commit: store.getState("web")!.commit, claims: 2, removed: 0, model: "m", costUsd: 0, generatedAt: "now" }]);
   store.setSystem("Blog", ["web"], "A blogging platform.");
@@ -348,22 +339,15 @@ describe("which repos make up a product (brain_systems)", () => {
 });
 
 describe("the write tools over MCP", () => {
-  async function connect(store: SqliteStore) {
-    const server = createServer({ store, access: new LocalAccessPolicy(), caller: LOCAL_CALLER, person: "Rafe" });
-    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-    await server.connect(serverSide);
-    const client = new Client({ name: "test", version: "0.0.0" });
-    await client.connect(clientSide);
-    return client;
-  }
+  const person = { person: "Rafe" };
 
-  it("are the four that write, besides adding a repo, and each asks the person to allow every call", async () => {
+  // Which tools write is in mcp.test.ts.
+  it("each ask the person to allow every call, and take the person's words", async () => {
     const { store } = await brain();
-    const { tools } = await (await connect(store)).listTools();
+    const { tools } = await (await connect(store, person)).listTools();
     const writes = tools.filter((t) => t.annotations?.readOnlyHint !== true);
     const recording = writes.filter((t) => t.name !== "brain_add_repo");
 
-    expect(recording.map((t) => t.name)).toEqual(["brain_record_fact", "brain_set_note", "brain_facts", "brain_systems"]);
     expect(tools.find((t) => t.name === "brain_review")?._meta).toBeUndefined();
     expect(writes.every((t) => JSON.stringify(t._meta) === JSON.stringify({ "anthropic/requiresUserInteraction": true }))).toBe(true);
     expect(recording.every((t) => "confirmed_with" in (t.inputSchema.properties ?? {}))).toBe(true);
@@ -371,7 +355,7 @@ describe("the write tools over MCP", () => {
 
   it("record a fact confirmed with the person's words, and proposed without them", async () => {
     const { store } = await brain();
-    const client = await connect(store);
+    const client = await connect(store, person);
     const fact = { system: "Blog", kind: "decision", text: "We won't add paid tiers.", quote: "no paid tiers" };
 
     const proposed = await client.callTool({ name: "brain_record_fact", arguments: fact });

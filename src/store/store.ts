@@ -143,6 +143,8 @@ export interface Store {
 
   /** Every system with its member repos, by name. Callers filter members to the readable set. */
   systems(): SystemRecord[];
+  /** The system with this name, ignoring case. */
+  system(name: string): SystemRecord | undefined;
   /** Swaps every suggested system for these, in one step. Confirmed systems are untouched. */
   replaceSuggestedSystems(systems: readonly Pick<SystemRecord, "name" | "summary" | "reason" | "repos">[]): void;
   /** Confirms the named systems, or every suggested one when null. Returns the names confirmed. */

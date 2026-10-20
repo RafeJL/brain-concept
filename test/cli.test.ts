@@ -125,4 +125,19 @@ describe("brain facts and brain gaps", () => {
     expect(after).toBe("No facts on api yet.\n");
     expect(gaps).toContain('1×  "refund policy"  (brain_search, last');
   }, 30_000);
+
+  it("re-anchors a fact as the person's own, even where Claude Code found its anchors", () => {
+    const dbPath = join(tempDir(), "brain.db");
+    brain(dbPath, "add", repoFromFixture("articles-api"), "--name", "api", "--no-ai", "--no-hook");
+    brain(dbPath, "facts", "add", "api", "--kind", "rule", "--text", "Only an article's author can delete it.");
+    const store = new SqliteStore(dbPath);
+    store.updateFact(1, { anchors: [{ path: "src/articles.ts", start: 1, end: 1 }], anchorCommit: store.getState("api")!.commit, anchorsFound: true });
+    store.close();
+
+    const edited = brain(dbPath, "facts", "edit", "1", "--anchor", "src/articles.ts:2");
+
+    expect(edited).toContain("enforced at src/articles.ts:2 ·");
+    expect(edited).not.toContain("found by Claude Code");
+    expect(() => execFileSync(process.execPath, [BRAIN, "facts", "edit", "1", "--anchor", "nowhere"], { encoding: "utf8", env: { ...process.env, BRAIN_DB: dbPath }, stdio: "pipe" })).toThrow(/Can't read: nowhere\./);
+  }, 30_000);
 });

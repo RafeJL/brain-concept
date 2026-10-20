@@ -1,4 +1,4 @@
-import type { Citation } from "../core/citations.js";
+import { formatCitation } from "../core/citations.js";
 import { HUMAN_TIER, type FactCheck, type FactRecord, type Verdict } from "../core/facts.js";
 import type { FactFilter, Store } from "../store/store.js";
 import { systemOf, visibleSystems } from "./systems.js";
@@ -32,17 +32,13 @@ export function factLine(fact: FactRecord): string {
     fact.kind,
     who,
     ...(fact.ticket ? [`ticket ${fact.ticket}`] : []),
-    ...(fact.anchors.length ? [`enforced at ${fact.anchors.map(at).join(", ")}${fact.anchorsFound ? " (found by Claude Code)" : ""}`] : []),
+    ...(fact.anchors.length ? [`enforced at ${fact.anchors.map(formatCitation).join(", ")}${fact.anchorsFound ? " (found by Claude Code)" : ""}`] : []),
     ...(fact.staleSince ? [`stale: that code changed at @${fact.staleSince.slice(0, 7)}, so re-confirm before relying on it`] : []),
     ...codeCheck(fact),
     ...(fact.replaces ? [`${fact.status === "proposed" ? "would replace" : "replaces"} fact #${fact.replaces}`] : []),
     `fact #${fact.id}`,
   ];
   return `${fact.text} (${parts.join(" · ")})`;
-}
-
-function at(cite: Citation): string {
-  return `${cite.path}:${cite.start === cite.end ? cite.start : `${cite.start}-${cite.end}`}`;
 }
 
 /**
@@ -55,7 +51,7 @@ function codeCheck(fact: FactRecord): string[] {
   if (checks.length === 0) return [];
   if (fact.repo && checks.length === 1) {
     const [check] = checks as [FactCheck];
-    const cite = check.cites[0] && (fact.anchorsFound ? "" : ` at ${at(check.cites[0])}`);
+    const cite = check.cites[0] && (fact.anchorsFound ? "" : ` at ${formatCitation(check.cites[0])}`);
     const said: Record<Verdict, string> = {
       agrees: `code agrees${cite}`,
       contradicts: `code contradicts it${cite}: ${check.summary}`,
@@ -65,7 +61,7 @@ function codeCheck(fact: FactRecord): string[] {
     return [`${said[check.verdict]} (checked @${check.commit.slice(0, 7)})`];
   }
   const by = (verdict: Verdict) => checks.filter((c) => c.verdict === verdict);
-  const where = (c: FactCheck) => `${c.repo}${c.cites[0] ? ` (${at(c.cites[0])})` : ""}`;
+  const where = (c: FactCheck) => `${c.repo}${c.cites[0] ? ` (${formatCitation(c.cites[0])})` : ""}`;
   return [
     [
       ...(by("agrees").length ? [`code agrees in ${by("agrees").map(where).join(", ")}`] : []),

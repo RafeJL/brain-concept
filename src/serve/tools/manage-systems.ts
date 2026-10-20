@@ -51,14 +51,14 @@ export async function manageSystems(deps: ToolDeps, caller: Caller, input: Syste
       const unknown = repos.filter((r) => !readable.includes(r));
       if (unknown.length) return { ok: false, text: `No readable repo named ${unknown.map((r) => `"${r}"`).join(", ")}. Repos you can read: ${readable.join(", ")}.` };
       // A system the caller can't see keeps its name to itself: making one with that name fails as a clash would.
-      if (!system && deps.store.systems().some((s) => s.name.toLowerCase() === name.toLowerCase())) return { ok: false, text: `"${name}" can't be used as a system name. ${known}` };
+      if (!system && deps.store.system(name)) return { ok: false, text: `"${name}" can't be used as a system name. ${known}` };
       const moved = repos.flatMap((r) => {
         const from = visible.find((s) => s.repos.includes(r) && s.name !== system?.name);
         return from ? [`${r} (from ${from.name})`] : [];
       });
       deps.store.setSystem(system?.name ?? name, repos, summary);
       // Read back by name: a new system with no repos yet has no readable member to be visible by.
-      const after = deps.store.systems().find((s) => s.name.toLowerCase() === (system?.name ?? name).toLowerCase())!;
+      const after = deps.store.system(system?.name ?? name)!;
       return {
         ok: true,
         data: after,
@@ -69,7 +69,7 @@ export async function manageSystems(deps: ToolDeps, caller: Caller, input: Syste
       const to = input.to?.trim();
       if (!system) return { ok: false, text: `No system named "${name}". ${known}` };
       if (!to) return { ok: false, text: "Give the new name (to)." };
-      if (deps.store.systems().some((s) => s.name.toLowerCase() === to.toLowerCase() && s.name !== system.name)) return { ok: false, text: `"${to}" can't be used: another system has that name.` };
+      if ((deps.store.system(to)?.name ?? system.name) !== system.name) return { ok: false, text: `"${to}" can't be used: another system has that name.` };
       deps.store.renameSystem(system.name, to);
       return { ok: true, data: { from: system.name, to }, text: `Renamed ${system.name} to ${to}. Facts on it moved with it.` };
     }

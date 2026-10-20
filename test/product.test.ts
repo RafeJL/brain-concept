@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { generateWiki } from "../src/ai/generate.js";
-import type { RunRequest, Runner } from "../src/ai/runner.js";
 import { firstSentence } from "../src/core/sections.js";
 import { enrolRepo } from "../src/ingest/registry.js";
 import { syncRepo } from "../src/ingest/sync.js";
@@ -8,21 +7,13 @@ import { LOCAL_CALLER, LocalAccessPolicy } from "../src/serve/access.js";
 import { getPage } from "../src/serve/tools/get-page.js";
 import { repoCard } from "../src/serve/tools/repo-card.js";
 import { SqliteStore } from "../src/store/sqlite.js";
-import { repoFromFixture } from "./helpers.js";
+import { recordedRunner, repoFromFixture } from "./helpers.js";
 
 type Page = { slug: string; title: string; markdown: string };
 
 /** Answers each run with the next list of pages (the last repeats), and remembers the requests. */
 function pagesRunner(...answers: Page[][]) {
-  const requests: RunRequest[] = [];
-  const runner: Runner = {
-    async run<T>(request: RunRequest) {
-      requests.push(request);
-      const pages = answers[Math.min(requests.length, answers.length) - 1]!;
-      return { output: { pages } as T, costUsd: 0.1, durationMs: 1000, model: "claude-sonnet-5" };
-    },
-  };
-  return { runner, requests };
+  return recordedRunner((_request, n) => ({ pages: answers[Math.min(n, answers.length) - 1]! }));
 }
 
 // Cited lines are in test/fixtures/repos/articles-api.

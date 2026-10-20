@@ -1,6 +1,6 @@
 import type { NamedFamily } from "../../core/links.js";
 import { FAMILIES, type SeamCoverage } from "../../core/seams.js";
-import type { Enrolment, Freshness, LanguageShare, PageKind } from "../../core/types.js";
+import { PAGE_KINDS, type Enrolment, type Freshness, type LanguageShare, type PageKind } from "../../core/types.js";
 import { liveStatus } from "../../ingest/enrol.js";
 import type { Caller } from "../access.js";
 import { coverageLine, coverageOf, type MapCoverage } from "../coverage.js";
@@ -42,11 +42,6 @@ export interface RepoCard {
 const CONCISE_LANGUAGES = 5;
 
 /**
- * What a repo is and what's around it: freshness, languages, the repos it talks to, and where
- * its wiki is (which says what it is and how to build and test it). Backs `brain_repo_card` and
- * `brain card`.
- */
-/**
  * `brain_repo_card` and `brain card`: a repo's card, or, when the name is a system's rather than a
  * repo's ("RealWorld"), that system's overview. Agents are told to call the card with any name
  * they're asked about, and people name products as often as repos.
@@ -67,6 +62,11 @@ export async function cardRequest(deps: ToolDeps, caller: Caller, name: string, 
   return repoCard(deps, caller, name, format);
 }
 
+/**
+ * What a repo is and what's around it: freshness, languages, the repos it talks to, and where
+ * its wiki is (which says what it is and how to build and test it). Backs `brain_repo_card` and
+ * `brain card`.
+ */
 export async function repoCard(deps: ToolDeps, caller: Caller, name: string, format: Format): Promise<ToolResult<RepoCard>> {
   const found = await requireSyncedRepo(deps, caller, name);
   if (!found.ok) return found;
@@ -190,7 +190,7 @@ function wikiLine(card: RepoCard): string {
   const older = wiki.commit === freshness.commit ? "" : ` · written at @${wiki.commit.slice(0, 7)}, older than the index`;
   if (wiki.pages.length <= LISTED_PAGES) return `Wiki: ${count(wiki.pages.length, "page")} (${wiki.pages.join(", ")}) · read with brain_get${older}`;
   // A large wiki by kind: "4 core, 8 areas, 3 flows, data model, integrations".
-  const kinds = (["core", "area", "flow", "data-model", "integrations"] as const).flatMap((kind) => {
+  const kinds = PAGE_KINDS.flatMap((kind) => {
     const n = wiki.kinds.filter((k) => k === kind).length;
     if (n === 0) return [];
     if (kind === "data-model" || kind === "integrations") return [kind === "data-model" ? "data model" : "integrations"];

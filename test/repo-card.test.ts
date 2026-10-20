@@ -4,7 +4,7 @@ import { syncRepo } from "../src/ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy, type AccessPolicy } from "../src/serve/access.js";
 import { repoCard } from "../src/serve/tools/repo-card.js";
 import { SqliteStore } from "../src/store/sqlite.js";
-import { commit, makeRepo, mapSeams, repoFromFixture } from "./helpers.js";
+import { commit, fixtureWorld, makeRepo } from "./helpers.js";
 
 const local = new LocalAccessPolicy();
 
@@ -71,21 +71,15 @@ describe("repo card", () => {
   });
 });
 
-/** Enrols, syncs and maps fixture repos under their own names. */
-async function enrolled(...names: string[]) {
-  const store = new SqliteStore(":memory:");
-  for (const name of names) {
-    await enrolRepo(store, { path: repoFromFixture(name), name });
-    await syncRepo(store, name);
-    await mapSeams(store, name);
-  }
-  return store;
-}
+/** Fixture repos enrolled under their own names, synced and mapped, once for the file. */
+const shop = fixtureWorld(["orders-api", "shop-web"]);
+const status = fixtureWorld(["status-api", "status-checks"]);
+/** Two copies of an API: each one's tests call its own GET /api/orders/{id}, not the other's. */
+const copies = fixtureWorld(["orders-api", ["orders-copy", "orders-api"]]);
 
 describe("repo card neighbours", () => {
   it("names the repos it calls and the repos that call it, not counting its own tests", async () => {
-    const store = await enrolled("orders-api", "shop-web");
-    const deps = { store, access: local };
+    const { deps } = shop();
 
     const api = await repoCard(deps, LOCAL_CALLER, "orders-api", "concise");
     const web = await repoCard(deps, LOCAL_CALLER, "shop-web", "concise");
@@ -97,7 +91,7 @@ describe("repo card neighbours", () => {
   });
 
   it("doesn't link repos just because both use the root path", async () => {
-    const store = await enrolled("status-api", "status-checks");
+    const { store } = status();
 
     const result = await repoCard({ store, access: local }, LOCAL_CALLER, "status-checks", "concise");
 
@@ -106,11 +100,7 @@ describe("repo card neighbours", () => {
   });
 
   it("doesn't link a repo's calls to its own routes with another repo serving the same path", async () => {
-    // Two copies of an API: each one's tests call its own GET /api/orders/{id}, not the other's.
-    const store = await enrolled("orders-api");
-    await enrolRepo(store, { path: repoFromFixture("orders-api"), name: "orders-copy" });
-    await syncRepo(store, "orders-copy");
-    await mapSeams(store, "orders-copy", "orders-api");
+    const { store } = copies();
 
     const result = await repoCard({ store, access: local }, LOCAL_CALLER, "orders-copy", "concise");
 
@@ -118,7 +108,7 @@ describe("repo card neighbours", () => {
   });
 
   it("never names a repo the caller can't read", async () => {
-    const store = await enrolled("orders-api", "shop-web");
+    const { store } = shop();
     const onlyApi: AccessPolicy = { readableRepos: async () => new Set(["orders-api"]) };
 
     const result = await repoCard({ store, access: onlyApi }, LOCAL_CALLER, "orders-api", "concise");

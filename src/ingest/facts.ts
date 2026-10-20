@@ -24,6 +24,24 @@ export async function anchorProblems(repoPath: string, commit: string, anchors: 
 }
 
 /**
+ * Anchors a person gave, read and checked against the repo at `commit`: their citations, or one
+ * sentence saying why they can't be stored.
+ */
+export async function checkAnchors(repoPath: string, commit: string, anchors: readonly string[]): Promise<{ cites: Citation[] } | { error: string }> {
+  const unreadable = anchors.filter((a) => !parseAnchor(a));
+  if (unreadable.length) return { error: `Anchors are file:lines, e.g. src/follow.ts:12-20. Can't read: ${unreadable.join(", ")}.` };
+  const cites = anchors.map((a) => parseAnchor(a)!);
+  const problems = await anchorProblems(repoPath, commit, cites);
+  if (problems.length) return { error: `The anchors don't hold at @${commit.slice(0, 7)}: ${problems.join("; ")}.` };
+  return { cites };
+}
+
+/** The change that sets a person's anchors on a fact: no longer stale, and no longer Claude Code's. */
+export function personAnchors(cites: Citation[], commit: string): Pick<FactRecord, "anchors" | "anchorCommit" | "staleSince" | "anchorsFound"> {
+  return { anchors: cites, anchorCommit: commit, staleSince: null, anchorsFound: false };
+}
+
+/**
  * Where an anchor's lines are after a change: moved by the lines added or removed above it, or
  * null when the change touches them.
  */

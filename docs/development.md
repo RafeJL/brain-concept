@@ -11,7 +11,7 @@ npm ci
 npm run check
 ```
 
-`npm run check` runs the typecheck and the full test suite (about a minute). Each test builds its
+`npm run check` runs the typecheck and the full test suite (a few minutes). Each test builds its
 own throwaway git repos from `test/fixtures/repos/`. Wiki and seam tests use recorded Claude Code
 answers (`test/fixtures/wiki/`, `test/fixtures/seams/`), so they never call the AI, but the
 verification runs for real against the fixture files. Keep cited line numbers in those
@@ -46,27 +46,16 @@ Rules for changing it (and for agents working here) are in [CLAUDE.md](../CLAUDE
 
 ## How a sync works
 
-`brain sync <name>`, which `brain add` and the hook also run, does three things:
-1. **Index:** reads the committed tree at the tracked ref with git (never the working copy) and
-   records changed files. There is no AI in this step, and `--no-ai` stops here.
-2. **Routes and calls:** one Claude Code run lists every HTTP route served and call made, with
-   cited lines.
-   - Each one is verified before storing: the cited lines exist, and its method and every fixed
-     path segment appear in them.
-   - Failures are asked for once more with the reasons, then dropped and reported.
-   - After the first run, only changed files (and files whose paths they help build) are redone.
-3. **Wiki:** one Claude Code run writes or updates the pages.
-   - The citation checker removes unsupported claims.
-   - A page with under half its claims kept is written once more. If it fails again, the last
-     good version is kept.
-   - Pages that cite nothing changed are re-checked and carried forward with no AI.
-   - A page every wiki should have but this one lacks (`src/ai/prompts/pages.md`; the product
-     page, for wikis written before it existed) is written in a run of its own, leaving the
-     others alone.
+`brain sync <name>`, which `brain add` and the hook also run, first indexes the committed tree at
+the tracked ref with git (no AI; `--no-ai` stops there). Then three steps run side by side: links
+(survey, screen, map, the separate links run, traces), the wiki (four pages to a run on a large
+repo), and fact checks. What each step does and redoes on an update is in
+[architecture.md](architecture.md#freshness-on-merge) and its "Seams" section.
 
-`brain systems suggest` is the one AI run outside a sync. It reads no code: Claude Code gets a
-small file with each repo's card facts, the opening of its product page and its links, and the
-suggestions are checked (`src/ai/systems.ts`) before they are stored as `suggested`.
+`brain systems suggest` and `brain facts check` run Claude Code outside a sync. Suggesting
+systems reads no code: Claude Code gets a small file with each repo's card facts, the opening of
+its product page and its links, and the suggestions are checked (`src/ai/systems.ts`) before they
+are stored as `suggested`.
 
 Claude Code runs headless (`src/ai/runner.ts`), in a temporary git worktree at the indexed
 commit, with `--safe-mode --strict-mcp-config` and only Read, Grep and Glob. It loads no MCP
@@ -93,22 +82,18 @@ Repos the brain cloned from GitHub (in `%USERPROFILE%\.brain\repos`) have no one
 the MCP server fetches them in the background when a session starts, at most once an hour. Their
 hooks then sync them as above.
 
-## How adding a repo from Claude Code works
+## Testing enrolment
 
-`brain_add_repo` (`src/serve/tools/add-repo.ts`) works out the source and name, records the
-enrolment, and starts `brain add <source> --name <name>` as a detached process
-(`enrolInBackground`, `src/ingest/enrol.ts`). That process is the ordinary CLI `add`: it clones a
-GitHub source, enrols, syncs under the per-repo lock, installs the hook, and records each step in
-the `enrolments` table as it goes (`trackEnrolment`). The tool answers at once; the card and the
-read tools read the row. The tests run the real CLI in the background with `--no-ai`, and clone
-from local bare repos through git's `url.<base>.insteadOf` (set with `GIT_CONFIG_COUNT`), so they
-never reach the network.
+How adding a repo works is in [architecture.md](architecture.md#adding-a-repo-from-claude-code-b7).
+Its tests run the real CLI in the background with `--no-ai`, and clone from local bare repos
+through git's `url.<base>.insteadOf` (set with `GIT_CONFIG_COUNT`), so they never reach the
+network.
 
 ## Design docs
 
 - [architecture.md](architecture.md): what is being built. Treat it as the spec.
-- [decisions.md](decisions.md): every dated decision, with the evidence. The parser-era ones are
-  marked superseded.
+- [decisions.md](decisions.md): the dated decisions that stand. Superseded ones, and the long
+  evidence behind some that stand, are in [decisions-archive.md](decisions-archive.md).
 - [research.md](research.md): what others built, as researched in September 2026.
 
 ## Where it's going

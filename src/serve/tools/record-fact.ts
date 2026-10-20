@@ -1,6 +1,6 @@
 import type { Citation } from "../../core/citations.js";
 import { FACT_KINDS, HUMAN_TIER, type FactKind, type FactRecord } from "../../core/facts.js";
-import { anchorProblems, parseAnchor } from "../../ingest/facts.js";
+import { checkAnchors } from "../../ingest/facts.js";
 import type { SectionHit } from "../../store/store.js";
 import type { Caller } from "../access.js";
 import { factLine, readableChecks, visibleFacts } from "../facts.js";
@@ -139,12 +139,10 @@ async function resolveTarget(deps: ToolDeps, caller: Caller, input: RecordInput)
   }
   const found = await requireSyncedRepo(deps, caller, input.repo!);
   if (!found.ok) return found;
-  const unreadable = (input.anchors ?? []).filter((a) => !parseAnchor(a));
-  if (unreadable.length) return { ok: false, text: `Anchors are file:lines, e.g. src/follow.ts:12-20. Can't read: ${unreadable.join(", ")}.` };
-  const anchors = (input.anchors ?? []).map((a) => parseAnchor(a)!);
   const { commit } = found.state;
-  const problems = await anchorProblems(found.repo.path, commit, anchors);
-  if (problems.length) return { ok: false, text: `Nothing recorded. The anchors don't hold at @${commit.slice(0, 7)}: ${problems.join("; ")}.` };
+  const checked = await checkAnchors(found.repo.path, commit, input.anchors ?? []);
+  if ("error" in checked) return { ok: false, text: `Nothing recorded. ${checked.error}` };
   const name = found.repo.name;
+  const anchors = checked.cites;
   return { ok: true, repo: name, system: null, members: [name], anchors, anchorCommit: anchors.length ? commit : null, label: name, readable };
 }

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { chainProblem, updateTraces } from "../src/ai/traces.js";
-import type { RunRequest, RunResult, Runner } from "../src/ai/runner.js";
 import { normalisePath } from "../src/core/http.js";
 import { normaliseName } from "../src/core/links.js";
 import type { Seam, SeamKind } from "../src/core/seams.js";
@@ -10,7 +9,7 @@ import { LOCAL_CALLER, LocalAccessPolicy, type AccessPolicy } from "../src/serve
 import { findConsumers } from "../src/serve/tools/find-consumers.js";
 import { tableKey } from "../src/serve/trace.js";
 import { SqliteStore } from "../src/store/sqlite.js";
-import { commit, makeRepo } from "./helpers.js";
+import { commit, makeRepo, recordedRunner, sharedStore } from "./helpers.js";
 
 const ROUTES = [
   "router.post('/api/orders', placeOrder);",
@@ -34,8 +33,7 @@ function seam(repo: string, kind: SeamKind, name: string, path: string, line: nu
 }
 
 /** A web app calling an orders API that saves, publishes, and is read by a job; a basket handling the event. */
-async function shop() {
-  const store = new SqliteStore(":memory:");
+async function buildShop(store: SqliteStore, until: "test" | "file") {
   const dirs: Record<string, string> = {};
   const files: Record<string, Record<string, string>> = {
     web: { "src/app.js": APP, "src/api.js": API },
@@ -43,7 +41,7 @@ async function shop() {
     basket: { "src/handler.ts": HANDLER },
   };
   for (const [name, f] of Object.entries(files)) {
-    dirs[name] = makeRepo(f);
+    dirs[name] = makeRepo(f, until);
     await enrolRepo(store, { path: dirs[name], name });
     await syncRepo(store, name);
   }
@@ -59,7 +57,7 @@ async function shop() {
     ],
   });
   store.replaceSeams("basket", { commit: at("basket"), paths: null, seams: [seam("basket", "event-subscribe", "OrderStarted", "src/handler.ts", 1, at("basket"))] });
-  return { store, dirs, deps: { store, access: new LocalAccessPolicy() } };
+  return dirs;
 }
 
 const step = (file: string, start: number, end = start, calls?: string) => ({ file, start, end, ...(calls ? { calls } : {}) });
@@ -85,21 +83,22 @@ function answersFor(prompt: string): unknown[] {
 }
 
 function traceRunner(answer: (prompt: string) => unknown[] = answersFor) {
-  const requests: RunRequest[] = [];
-  const runner: Runner = {
-    async run<T>(request: RunRequest): Promise<RunResult<T>> {
-      requests.push(request);
-      return { output: { traces: answer(request.prompt) } as T, costUsd: 0.1, durationMs: 1, model: "m" };
-    },
-  };
-  return { runner, requests };
+  return recordedRunner((request) => ({ traces: answer(request.prompt) }));
 }
 
-async function traced() {
-  const env = await shop();
-  for (const repo of ["web", "orders", "basket"]) await updateTraces(env.store, traceRunner().runner, repo);
-  return env;
+/** Traces every repo with answersFor. */
+async function trace(store: SqliteStore) {
+  for (const repo of ["web", "orders", "basket"]) await updateTraces(store, traceRunner().runner, repo);
 }
+
+/** The shop, built once for the file; each test gets its own copy of the store. */
+const shop = sharedStore((store) => buildShop(store, "file"));
+/** The shop with every repo traced. */
+const traced = sharedStore(async (store) => {
+  const dirs = await buildShop(store, "file");
+  await trace(store);
+  return dirs;
+});
 
 describe("a chain from an entry point", () => {
   const lines: Record<string, string[]> = { "a.ts": ["handle(req) {", "  save(req);", "}"], "b.ts": ["function save(x) {", "  db.insert('orders', x);", "  publish('Saved');", "}"] };
@@ -137,7 +136,7 @@ describe("a chain from an entry point", () => {
 
 describe("tracing each repo's entry points", () => {
   it("asks for every entry point with the exit points, finds jobs and UI actions, and keeps the chains that hold", async () => {
-    const { store } = await shop();
+    const { store } = shop();
     const { runner, requests } = traceRunner();
 
     const result = await updateTraces(store, runner, "orders");
@@ -155,7 +154,7 @@ describe("tracing each repo's entry points", () => {
   });
 
   it("drops a chain that doesn't hold, asks once more for an entry point with none left, and counts exits nothing reaches", async () => {
-    const { store } = await shop();
+    const { store } = shop();
     const bad = () => [{ entry: "E1", leads: [{ exit: "X1", steps: [step("src/db.ts", 1, 2)] }] }];
     const { runner, requests } = traceRunner(bad);
 
@@ -176,7 +175,7 @@ describe("tracing each repo's entry points", () => {
   });
 
   it("takes a found job's line from where its code name is, refuses a description, and finds what a first answer missed on a second look", async () => {
-    const { store } = await shop();
+    const { store } = shop();
     let call = 0;
     const { runner, requests } = traceRunner((prompt) => {
       call++;
@@ -202,14 +201,17 @@ describe("tracing each repo's entry points", () => {
   });
 
   it("runs nothing for a repo that meets no other service, and nothing again when no code changed", async () => {
-    const { store } = await traced();
+    const { store } = traced();
     const { runner, requests } = traceRunner();
     expect((await updateTraces(store, runner, "orders")).mode).toBe("none");
     expect(requests).toHaveLength(0);
   });
 
   it("moves chains past lines added around them with no AI run, and follows again only the entry points whose cited lines changed", async () => {
-    const { store, dirs } = await traced();
+    // It commits to the orders repo, so it builds its own shop, which is slow when every file runs at once.
+    const store = new SqliteStore(":memory:");
+    const dirs = await buildShop(store, "test");
+    await trace(store);
     commit(dirs.orders!, { "src/routes.ts": `// orders\n${ROUTES}` });
     await syncRepo(store, "orders");
     const shifted = traceRunner();
@@ -239,12 +241,12 @@ describe("tracing each repo's entry points", () => {
     expect(changed.requests[0]!.prompt).toContain("- E1: route POST /api/orders (src/routes.ts:2)");
     expect(changed.requests[0]!.prompt).not.toContain("anywhere in the repository");
     expect(store.traceLinks("orders").filter((l) => l.entryLabel === "GraceJob")).toHaveLength(2);
-  });
+  }, 60_000);
 });
 
 describe("following a flow", () => {
   it("goes from the server through what it publishes to the handler, and through a table it writes to the job that reads it", async () => {
-    const { deps } = await traced();
+    const { deps } = traced();
 
     const text = (await findConsumers(deps, LOCAL_CALLER, { target: "POST /api/orders", format: "concise", follow: true })).text;
 
@@ -260,7 +262,7 @@ describe("following a flow", () => {
   });
 
   it("starts from an event's handlers, says when an entry point isn't mapped, and only counts repos the caller can't read", async () => {
-    const { store } = await traced();
+    const { store } = traced();
     store.replaceTraceLinks("basket", null, []);
     const deps = { store, access: new LocalAccessPolicy() };
     expect((await findConsumers(deps, LOCAL_CALLER, { target: "event OrderStarted", format: "concise", follow: true })).text).toContain(
@@ -274,7 +276,7 @@ describe("following a flow", () => {
   });
 
   it("shows a loop as a loop, and folds wide steps in concise answers but not detailed ones", async () => {
-    const { store, deps } = await traced();
+    const { store, deps } = traced();
     // The basket's handler publishes the event it handles: a loop.
     const at = store.getState("basket")!.commit;
     store.replaceSeams("basket", { commit: at, paths: null, seams: [seam("basket", "event-subscribe", "OrderStarted", "src/handler.ts", 1, at), seam("basket", "event-publish", "OrderStarted", "src/handler.ts", 2, at)] });
@@ -300,7 +302,7 @@ describe("following a flow", () => {
   });
 
   it("carries a table write on only to jobs that poll it, matching the table whatever its schema, quotes or case", async () => {
-    const { store, deps } = await traced();
+    const { store, deps } = traced();
     const at = store.getState("orders")!.commit;
     // A route that reads the same table is set off by its own callers, not by the write.
     store.replaceTraceLinks("orders", ["http-route GET /api/orders"], [
@@ -317,7 +319,7 @@ describe("following a flow", () => {
   });
 
   it("ends a chain at a call named only at run time, saying where it goes can't be followed, not that it reaches nothing", async () => {
-    const env = await shop();
+    const env = shop();
     const at = env.store.getState("basket")!.commit;
     const cacheCall = { ...seam("basket", "http-call", "GET config:CacheUrl", "src/handler.ts", 2, at), key: null };
     env.store.replaceSeams("basket", { commit: at, paths: null, seams: [seam("basket", "event-subscribe", "OrderStarted", "src/handler.ts", 1, at), cacheCall] });
@@ -333,7 +335,7 @@ describe("following a flow", () => {
   });
 
   it("explains that packages aren't traced", async () => {
-    const { deps } = await traced();
+    const { deps } = traced();
     expect((await findConsumers(deps, LOCAL_CALLER, { target: "package left-pad", format: "concise", follow: true })).text).not.toContain("What handling");
   });
 });

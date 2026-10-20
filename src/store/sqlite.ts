@@ -199,7 +199,7 @@ export class SqliteStore implements Store {
 
   seams(filter: SeamFilter): Seam[] {
     if (filter.repos.length === 0) return [];
-    const where = [`repo IN (${filter.repos.map(() => "?").join(", ")})`];
+    const where = [`repo IN (${marks(filter.repos)})`];
     const params: string[] = [...filter.repos];
     if (filter.kind) {
       where.push("kind = ?");
@@ -415,10 +415,14 @@ export class SqliteStore implements Store {
       summary: String(row.summary),
       reason: String(row.reason),
       status: String(row.status) as SystemRecord["status"],
-      suggestedAt: row.suggested_at === null ? null : String(row.suggested_at),
-      confirmedAt: row.confirmed_at === null ? null : String(row.confirmed_at),
+      suggestedAt: optional(row.suggested_at),
+      confirmedAt: optional(row.confirmed_at),
       repos: members.get(Number(row.id)) ?? [],
     }));
+  }
+
+  system(name: string): SystemRecord | undefined {
+    return this.systems().find((s) => s.name.toLowerCase() === name.toLowerCase());
   }
 
   replaceSuggestedSystems(systems: readonly Pick<SystemRecord, "name" | "summary" | "reason" | "repos">[]): void {
@@ -436,13 +440,13 @@ export class SqliteStore implements Store {
   }
 
   confirmSystems(names: readonly string[] | null): string[] {
-    const confirm = this.db.prepare("UPDATE systems SET status = 'confirmed', confirmed_at = ? WHERE id = ? AND status = 'suggested'");
-    const candidates = this.systemRows().filter((row) => row.status === "suggested" && (!names || names.some((n) => n.toLowerCase() === String(row.name).toLowerCase())));
+    const confirm = this.db.prepare("UPDATE systems SET status = 'confirmed', confirmed_at = ? WHERE name = ? AND status = 'suggested'");
+    const candidates = this.systems().filter((s) => s.status === "suggested" && (!names || names.some((n) => n.toLowerCase() === s.name.toLowerCase())));
     const now = new Date().toISOString();
     this.transaction(() => {
-      for (const row of candidates) confirm.run(now, Number(row.id));
+      for (const system of candidates) confirm.run(now, system.name);
     });
-    return candidates.map((row) => String(row.name));
+    return candidates.map((s) => s.name);
   }
 
   setSystem(name: string, repos: readonly string[], summary?: string): void {
@@ -539,7 +543,7 @@ export class SqliteStore implements Store {
     if (rows.length === 0) return [];
     const ids = rows.map((row) => Number(row.id));
     const checks = new Map<number, FactCheck[]>();
-    const found = this.db.prepare(`SELECT * FROM fact_checks WHERE fact IN (${ids.map(() => "?").join(", ")}) ORDER BY repo`).all(...ids) as Row[];
+    const found = this.db.prepare(`SELECT * FROM fact_checks WHERE fact IN (${marks(ids)}) ORDER BY repo`).all(...ids) as Row[];
     for (const row of found) {
       const check: FactCheck = {
         fact: Number(row.fact),
@@ -610,10 +614,6 @@ export class SqliteStore implements Store {
     return [...groups.values()].sort((a, b) => b.times - a.times || b.lastAsked.localeCompare(a.lastAsked)).slice(0, limit);
   }
 
-  private systemRows(): Row[] {
-    return this.db.prepare("SELECT * FROM systems ORDER BY name").all() as Row[];
-  }
-
   private systemId(name: string): number | undefined {
     const row = this.db.prepare("SELECT id FROM systems WHERE name = ?").get(name) as Row | undefined;
     return row && Number(row.id);
@@ -624,11 +624,20 @@ export class SqliteStore implements Store {
   }
 }
 
+/** One `?` per item, for an `IN (…)` list. */
+function marks(items: readonly unknown[]): string {
+  return items.map(() => "?").join(", ");
+}
+
+/** A nullable text column. */
+function optional(value: unknown): string | null {
+  return value === null ? null : String(value);
+}
+
 const FACT_SELECT = "SELECT facts.*, systems.name AS system_name FROM facts LEFT JOIN systems ON systems.id = facts.system";
 
 /** Facts on the filter's repos or systems, leaving out retired ones unless asked. */
 function factWhere(filter: FactFilter): { where: string; params: string[] } {
-  const marks = (items: readonly string[]) => items.map(() => "?").join(", ");
   const targets = [
     ...(filter.repos.length ? [`facts.repo IN (${marks(filter.repos)})`] : []),
     ...(filter.systems.length ? [`systems.name IN (${marks(filter.systems)})`] : []),
@@ -638,7 +647,6 @@ function factWhere(filter: FactFilter): { where: string; params: string[] } {
 }
 
 function toFact(row: Row): Omit<FactRecord, "checks"> {
-  const optional = (value: unknown) => (value === null ? null : String(value));
   return {
     id: Number(row.id),
     repo: optional(row.repo),
@@ -664,8 +672,7 @@ function toFact(row: Row): Omit<FactRecord, "checks"> {
 /** Rows of one kind (0 sections, 1 seams) matching the search in the given repos. */
 function searchWhere(filter: SearchFilter, kind: 0 | 1): { where: string; params: string[] } {
   if (filter.repos.length === 0) return { where: "0", params: [] };
-  const repos = filter.repos.map(() => "?").join(", ");
-  return { where: `search MATCH ? AND search.rowid % 2 = ${kind} AND search.repo IN (${repos})`, params: [filter.match, ...filter.repos] };
+  return { where: `search MATCH ? AND search.rowid % 2 = ${kind} AND search.repo IN (${marks(filter.repos)})`, params: [filter.match, ...filter.repos] };
 }
 
 function toSeam(row: Row): Seam {
@@ -675,7 +682,7 @@ function toSeam(row: Row): Seam {
     kind: String(row.kind) as Seam["kind"],
     method: String(row.method),
     rawPath: String(row.raw_path),
-    key: row.route_key === null ? null : String(row.route_key),
+    key: optional(row.route_key),
     startLine: Number(row.start_line),
     endLine: Number(row.end_line),
     cites: JSON.parse(String(row.cites)) as Seam["cites"],
@@ -685,7 +692,6 @@ function toSeam(row: Row): Seam {
 }
 
 function toEnrolment(row: Row): Enrolment {
-  const optional = (value: unknown) => (value === null ? null : String(value));
   return {
     repo: String(row.repo),
     source: String(row.source),
@@ -707,7 +713,7 @@ function toRepo(row: Row): RepoRecord {
     name: String(row.name),
     path: String(row.path),
     ref: String(row.ref),
-    remote: row.remote === null ? null : String(row.remote),
+    remote: optional(row.remote),
     enrolledAt: String(row.enrolled_at),
     note: row.note === null ? null : (JSON.parse(String(row.note)) as RepoNote),
     proposedNote: row.proposed_note === null ? null : (JSON.parse(String(row.proposed_note)) as RepoNote),

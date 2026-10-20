@@ -4,17 +4,11 @@ import type { NewFact } from "../src/core/facts.js";
 import { enrolRepo } from "../src/ingest/registry.js";
 import { syncRepo } from "../src/ingest/sync.js";
 import { factLine, readableChecks } from "../src/serve/facts.js";
-import { SqliteStore } from "../src/store/sqlite.js";
-import { commit, makeRepo, recordedRunner } from "./helpers.js";
-
-const FOLLOW = ["export function follow(user, author) {", "  if (user.following.length >= 500) throw new Error('limit');", "  user.following.push(author);", "}", ""].join("\n");
+import { commit, FOLLOW, followRepo, makeRepo, recordedRunner } from "./helpers.js";
 
 /** A synced repo, as the brain holds it, with facts added straight to the store. */
 async function brain() {
-  const store = new SqliteStore(":memory:");
-  const dir = makeRepo({ "src/follow.ts": FOLLOW, "README.md": "# web\n" });
-  await enrolRepo(store, { path: dir, name: "web" });
-  await syncRepo(store, "web");
+  const { store, dir } = await followRepo();
   const add = (fact: Partial<NewFact> & { text: string }) =>
     store.addFact({
       repo: "web",

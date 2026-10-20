@@ -31,12 +31,12 @@ Harness skills (Claude Code, Codex) ──tool calls──▶ MCP server ─┐
                                                       Store  (every fact tagged repo @ commit)
                                                         ▲ writes
 GitHub repos ──on merge──────────────────────────▶ Ingest pipeline ──pages, seams──▶ Claude Code (headless)
-Curated content repo ──PR merged─────────────────▶ (registry, index, AI runs, checks, gardener)
+                                                   (registry, index, AI runs, checks)
 ```
 
 Agents mostly read. Code facts come only from merges to main in enrolled repos; an agent writes
 only what a person agrees to (facts, notes, systems) and adds a repo only when the person allows it
-(see "Safety"). Hosted, curated content also arrives as merged PRs to the curated content repo.
+(see "Safety").
 
 ## Three kinds of fact
 
@@ -45,7 +45,7 @@ Every fact records how it was made, and every answer carries that label.
 | Tier | Built by | Holds | Agent should |
 |---|---|---|---|
 | **index** | git only: the committed tree at the tracked ref. No LLM. | File inventory, languages, freshness | Rely on it |
-| **human-reviewed** | People: a fact a person stated and agreed to in the conversation with their agent, or with `brain facts` (B3a, B5); hosted, also curated content merged through a PR | Business rules, terms, purposes, decisions and answers, on a repo or a system | Treat as the team's stated intent; check the code when one matters, and re-confirm a stale one |
+| **human-reviewed** | People: a fact a person stated and agreed to in the conversation with their agent, or with `brain facts` (B3a, B5) | Business rules, terms, purposes, decisions and answers, on a repo or a system | Treat as the team's stated intent; check the code when one matters, and re-confirm a stale one |
 | **llm-generated** | Claude Code (headless, isolated, read-only) from the code at the indexed commit, with a citation on every claim | Wiki pages (W1), including a product page (B2a); routes and calls in any language (W4), and events, gRPC methods and shared packages (B2b), from which the seam graph and cross-repo links are built; suggested systems (B2a); checks of facts from people against the code (B3b) | Every citation is checked automatically (W2, W4); use as a map, and confirm at the citation before relying on a claim |
 
 Why: generated context files lowered agent success in a controlled study, and public
@@ -60,8 +60,8 @@ Two halves share only the store:
 
 - **Ingest (writes):** registry → trigger → git index → Claude Code (seams, wiki pages) →
   deterministic checks (seam verification, citation checker).
-  The gardener runs on a schedule and drafts PRs to owners.
-- **Store:** seam graph, symbol maps, repo cards, curated context, wiki pages, systems, search index.
+- **Store:** seam graph with each piece's coverage, traces, wiki pages, facts from people,
+  systems, enrolments, search index.
   Every row belongs to one repo at one commit. The repo is the unit of work, of permission and
   of deletion.
 - **Serve (reads):** MCP server → query engine → access filter (inside the query) → response
@@ -143,7 +143,7 @@ and systems when asked, so they can't go stale.
 ## Wikis that fit the repo (B4a)
 
 A planner needs the architecture, the flows, the data model and the integrations without
-grepping, and five fixed pages can't hold that for a repo of twenty projects.
+grepping, and a few fixed pages can't hold that for a repo of twenty projects.
 
 - **Small or large, decided without AI.** `src/ai/inventory.ts` counts the indexed files: a repo
   with 200 or more source files outside tests and vendored folders, or four or more projects
@@ -208,26 +208,21 @@ serves and calls an endpoint, but not which calls or events a handler goes on to
 
 ## MCP tools
 
-A few broad tools: six read, four record what a person says, and one adds a repo. Short answers by default, `format: "detailed"` on request,
-paginated lists, pointers rather than pasted code. No free-text "ask" tool.
-
-| Tool | Answers | Harness stage | Status |
-|---|---|---|---|
-| `brain_find_consumers` | Who produces or consumes an endpoint, event, gRPC method or package, across repos | Contract review, technical planning | Built |
-| `brain_impact` | What depends on a route, published event, gRPC method, package, symbol or file, in the repo and across repos; or, given a description of work, which systems, repos and endpoints it would most likely touch | Product brief, technical planning, scope drift, maintainability review | Built for everything a repo or file provides, and work descriptions; symbols in phase 3b |
-| `brain_repo_card` | What a repo is: what it is for (product line), its system, freshness, languages, neighbours, seam counts, where its wiki is | Product brief, technical planning | Built |
-| `brain_search` | Facts from people, systems, then ranked wiki sections and endpoints for keywords, across every readable repo | Any, when you don't know which repo holds the answer | Built; logs searches that find nothing as gaps |
-| `brain_get` | One item in full (page, system overview, glossary entry, ADR, symbol map) with citations | Product brief, feature planning, development | Built for wiki pages and system overviews; the product page and overviews open with facts from people |
-| `brain_record_fact` | Records a fact a person stated; confirmed with their words agreeing, proposed without | Product brief (the loop back from the PO) | Built (B3a; B5 confirms in the conversation) |
-| `brain_set_note` | Sets the note that steers a repo's wiki | Product brief, technical planning | Built (B4a, B5) |
-| `brain_review` | What's waiting for a person: proposed or stale facts, suggested systems, proposed notes; and gaps | Product brief | Built (B5) |
-| `brain_facts` | Confirms, edits or retires a fact | Product brief | Built (B5) |
-| `brain_systems` | Confirms, sets or renames a system | Product brief | Built (B5) |
-| `brain_add_repo` | Adds a repo (a GitHub URL, owner/repo or a local folder) in the background; its card then shows how far it has got | Any, when the brain lacks a repo | Built (B7) |
+Eleven tools: six read, four record what a person says, and one adds a repo. What each answers
+is in [how-it-works.md](how-it-works.md#what-agents-can-ask). The rules for the set:
+- **Few broad tools.** A new need is an action or parameter on an existing tool where it can be
+  (`brain_impact` takes `work`). Every description sits in every session's context, and agents
+  choose worse from long lists.
+- **Reads and writes apart.** A write tool prompts on every call, so a read inside one would
+  prompt too and fail headless.
+- **Short answers.** Concise by default, `format: "detailed"` on request, paginated lists,
+  pointers rather than pasted code.
+- **Frozen names.** Tool and parameter names are frozen once the harness names them in skills
+  (H1). Inputs are strict: an unknown parameter is refused (B8).
+- **No free-text "ask" tool.**
 
 Everything a person does with the brain is a tool call, adding a repo included; only setup and
-tidying (sync, remove, hooks, doctor, set-ref) is in the terminal. Tool and parameter names are
-frozen once the harness names them in skills (H1).
+tidying (sync, remove, hooks, doctor, set-ref) is in the terminal.
 
 ### Adding a repo from Claude Code (B7)
 
@@ -294,7 +289,8 @@ systems a piece of work touches, without reading code or technical pages.
   matching route, scaled by the square of the share of the description's words the repo matches
   at all, groups them by system, and adds the repos that call the matching routes. Repos under
   half the best score are only named as weaker matches. No AI
-  runs at query time; the calling agent does the reasoning. It keeps the tool set at five.
+  runs at query time; the calling agent does the reasoning. It is a parameter, not a tool of its
+  own.
 
 ## Seams
 
@@ -304,7 +300,7 @@ one `seams` table, each in its existing columns. HTTP is mapped in one kind of C
 HTTP coverage fell (decisions, 2026-10-12).
 
 A full map (`src/ai/seams.ts`) splits the work itself, because one run stops after a sample of a
-large repo (decisions, 2026-10-14):
+large repo ([decisions, 2026-10-14, B6b](decisions.md#2026-10-14-link-maps-that-say-what-they-covered-b6b)):
 1. **Survey** (`src/ai/link-survey.ts`, `prompts/survey-links.md`): route templates, base classes
    whose public methods every derived class serves, settings files. Checked against its cites and
    kept on `repo_state.link_survey`.
@@ -353,9 +349,10 @@ pieces not mapped are named.
 | Shared packages | `package-publish` | `package-use` | `package` | the package name | the name, lower-cased, without a version |
 
 A name only known at run time is stored with no key, like a run-time URL: counted and located,
-never matched. The same rules apply to every family: a use its own repo provides (tests calling
-their own API, a service handling its own event) links only within that repo and is marked
-"same repo". Shared databases are not linked (`decisions.md`, 2026-10-08).
+never matched. The same rules apply to every family: a use its own repo provides (a client
+calling its own API, a service handling its own event) links only within that repo and is marked
+"same repo". Tests aren't mapped, so their calls never count as uses. Shared databases are not
+linked (`decisions.md`, 2026-10-12).
 
 ## Local POC vs hosted
 
@@ -367,7 +364,6 @@ their own API, a service handling its own event) links only within that repo and
 | MCP transport | stdio | Streamable HTTP behind Entra ID |
 | Source code | Existing local clones, or the brain's own clones of GitHub repos | Shallow clones cached per repo |
 | Permissions | Local policy: every enrolled repo | GitHub App + caller identity per request |
-| Curated content | Local folder | GitHub repo, changed through PRs |
 
 ## Scaling
 
@@ -385,8 +381,7 @@ their own API, a service handling its own event) links only within that repo and
   `requiresUserInteraction`, so Claude Code asks the person to allow every call, showing what is
   stored or which repo is added: an agent can't pass that alone, and a headless run can't write
   or start an enrolment. Agents are told to record only what the person said,
-  never repo text or tool output. (Until B5 an MCP elicitation dialog confirmed facts; the desktop
-  app declined it unseen, so it went.)
+  never repo text or tool output.
 - Repo text, tickets and PR bodies are untrusted; tool output is data, never instructions.
 - AI runs are read-only (Read, Grep, Glob), load no MCP servers, settings or skills, and store
   only pointers to the lines they cite.
@@ -398,3 +393,8 @@ their own API, a service handling its own event) links only within that repo and
 - Code embeddings (only if evals show a gain, and fused with keyword search).
 - A human UI.
 - A graph database.
+- Symbol maps, and `brain_impact` on a symbol. `brain_get` reads wiki pages and system
+  overviews only, not glossary entries, ADRs or symbol maps.
+- Curated content: a repo of human-owned context changed through PRs, with a gardener drafting
+  PRs to owners. Facts from people cover it locally; hosted, they may export to such a repo
+  (`brain facts export` gives the shape).

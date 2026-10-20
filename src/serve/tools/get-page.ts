@@ -5,7 +5,7 @@ import { enrolmentLines, readableEnrolment, unfinished } from "../enrolment.js";
 import { factBlock, factsAbout } from "../facts.js";
 import { describeFreshness, freshnessOf } from "../freshness.js";
 import { linkSummary, neighbours } from "../neighbours.js";
-import { count, requireSyncedRepo, TIER, wikiCommit, type ToolDeps, type ToolResult } from "./common.js";
+import { clip, count, requireSyncedRepo, TIER, wikiCommit, type ToolDeps, type ToolResult } from "./common.js";
 import { systemOverview } from "./system-overview.js";
 
 export interface PageInput {
@@ -65,7 +65,7 @@ export async function getPage(deps: ToolDeps, caller: Caller, input: PageInput):
     // Grouped by kind, with what each page covers, so a twenty-page wiki reads as a map.
     const row = (p: WikiPage) => {
       const about = firstSentence(p.markdown);
-      return `  ${p.slug.padEnd(24)} ${p.title}${about ? `: ${clip(about)}` : ""}${keptNote(p) ? ` (${keptNote(p)})` : ""}`;
+      return `  ${p.slug.padEnd(24)} ${p.title}${about ? `: ${clip(about, ABOUT_CHARS)}` : ""}${keptNote(p) ? ` (${keptNote(p)})` : ""}`;
     };
     const groups = KINDS.flatMap(([kind, heading]) => {
       const of = pages.filter((p) => p.kind === kind);
@@ -123,10 +123,6 @@ export async function getPage(deps: ToolDeps, caller: Caller, input: PageInput):
     if (page === first) freshness ??= shown.freshness;
   }
   return { ok: true, data: { repo: repo.name, pages, page: first, freshness }, text: texts.join("\n\n---\n\n") };
-}
-
-function clip(text: string): string {
-  return text.length <= ABOUT_CHARS ? text : `${text.slice(0, ABOUT_CHARS - 1).trimEnd()}…`;
 }
 
 /** The enrolled repos this one talks to, from the checked link map. */

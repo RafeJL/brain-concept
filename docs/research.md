@@ -61,6 +61,8 @@ marked as such.
 
 ## Software factories (for the harness, not the brain)
 
+This section concerns the harness repo (`citation-harness-library`); none of it is built here.
+
 Components others run that the harness lacks, in suggested order: run telemetry (merge rate,
 first-push CI pass, cost per merged PR), hard caps on fix loops (Stripe: 1–2 CI rounds), scoped
 credentials and injection defences, accept/reject tracking on review findings (Uber uReview),

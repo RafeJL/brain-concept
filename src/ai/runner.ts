@@ -121,3 +121,10 @@ export const claudeRunner: Runner = {
     });
   },
 };
+
+/** `items` in runs of at most `size`, for asking Claude Code about a few at a time. */
+export function chunk<T>(items: readonly T[], size: number): T[][] {
+  const runs: T[][] = [];
+  for (let i = 0; i < items.length; i += size) runs.push(items.slice(i, i + size));
+  return runs;
+}

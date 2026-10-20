@@ -2,8 +2,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Enrolment } from "../src/core/types.js";
 import { estimateEnrolment, fetchClones, liveStatus, parseRemote, resolveSource, trackEnrolment } from "../src/ingest/enrol.js";
@@ -11,12 +10,11 @@ import type { HookCommand } from "../src/ingest/hooks.js";
 import { enrolRepo } from "../src/ingest/registry.js";
 import { syncRepo } from "../src/ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy, type AccessPolicy } from "../src/serve/access.js";
-import { createServer } from "../src/serve/mcp.js";
 import { getPage } from "../src/serve/tools/get-page.js";
 import { cardRequest } from "../src/serve/tools/repo-card.js";
 import { search } from "../src/serve/tools/search.js";
 import { SqliteStore } from "../src/store/sqlite.js";
-import { commit, git, repoFromFixture, tempDir, waitFor } from "./helpers.js";
+import { commit, connect, git, repoFromFixture, tempDir, waitFor } from "./helpers.js";
 
 const BRAIN = fileURLToPath(new URL("../bin/brain.mjs", import.meta.url));
 const local = new LocalAccessPolicy();
@@ -211,15 +209,6 @@ function fileBrain() {
   return { dir, store, command };
 }
 
-async function connect(store: SqliteStore, command: HookCommand): Promise<Client> {
-  const server = createServer({ store, access: local, caller: LOCAL_CALLER, command });
-  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-  await server.connect(serverSide);
-  const client = new Client({ name: "test", version: "0.0.0" });
-  await client.connect(clientSide);
-  return client;
-}
-
 const textOf = (result: Awaited<ReturnType<Client["callTool"]>>) => (result.content as { text: string }[])[0]!.text;
 
 /**
@@ -243,7 +232,7 @@ function fakeGitHub(remotes: string): () => void {
 describe("brain_add_repo", () => {
   it("starts enrolling a local repo in the background and answers at once; the card shows it going, then ready", async () => {
     const { store, command } = fileBrain();
-    const client = await connect(store, command);
+    const client = await connect(store, { command });
 
     const started = await client.callTool({ name: "brain_add_repo", arguments: { source: repoFromFixture("articles-api"), name: "api" } });
     const during = await client.callTool({ name: "brain_repo_card", arguments: { repo: "api" } });
@@ -268,10 +257,10 @@ describe("brain_add_repo", () => {
     execFileSync("git", ["clone", "--quiet", "--bare", repoFromFixture("articles-api"), join(remotes, "acme", "articles-api.git")]);
     const restore = fakeGitHub(remotes);
     try {
-      const client = await connect(store, command);
+      const client = await connect(store, { command });
 
       const cloned = await client.callTool({ name: "brain_add_repo", arguments: { source: "acme/articles-api" } });
-      const missing = await client.callTool({ name: "brain_add_repo", arguments: { source: "https://github.com/acme/missing" } });
+      await client.callTool({ name: "brain_add_repo", arguments: { source: "https://github.com/acme/missing" } });
       expect(textOf(cloned)).toContain("Enrolling articles-api in the background, cloning it first from https://github.com/acme/articles-api.git");
       expect(textOf(cloned)).toContain("How long it takes depends on its size, known once it's cloned");
 
@@ -295,7 +284,7 @@ describe("brain_add_repo", () => {
     const { store, command } = fileBrain();
     const path = repoFromFixture("articles-api");
     await enrolRepo(store, { path, name: "api" });
-    const client = await connect(store, command);
+    const client = await connect(store, { command });
 
     const again = await client.callTool({ name: "brain_add_repo", arguments: { source: path, name: "api" } });
     expect(textOf(again)).toContain("Trying again to enrol api in the background");
@@ -310,7 +299,7 @@ describe("brain_add_repo", () => {
   it("says when a repo is already being enrolled, and refuses a source that is neither a folder nor a repo", async () => {
     const { store, command } = fileBrain();
     store.saveEnrolment(enrolment("web", { step: "writing the wiki (1 of 6 pages)" }));
-    const client = await connect(store, command);
+    const client = await connect(store, { command });
 
     const busy = await client.callTool({ name: "brain_add_repo", arguments: { source: "acme/web" } });
     const nowhere = await client.callTool({ name: "brain_add_repo", arguments: { source: "C:\\no\\such\\folder" } });

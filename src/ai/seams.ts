@@ -5,7 +5,7 @@ import { detectLanguage } from "../core/languages.js";
 import { normaliseName, withoutVersion, type NamedFamily } from "../core/links.js";
 import { familyOf, type LinkSurvey, type PieceOutcome, type Seam, type SeamCite, type SeamKind, type SeamPiece } from "../core/seams.js";
 import { BrainError } from "../core/types.js";
-import { requireRepo } from "../ingest/registry.js";
+import { requireSynced } from "../ingest/registry.js";
 import type { Store } from "../store/store.js";
 import { citationProblem, fileReader, loose, methodShown, spanText } from "./check.js";
 import { DEFAULT_MODEL } from "./generate.js";
@@ -162,9 +162,7 @@ const SPEC = /(^|\/)[^/]*(openapi|swagger)[^/]*\.(json|ya?ml)$/i;
  * map only changed files are screened and mapped again, plus any file whose seams cite one.
  */
 export async function updateSeams(store: Store, runner: Runner, name: string, options: SeamOptions = {}): Promise<SeamsResult> {
-  const repo = requireRepo(store, name);
-  const state = store.getState(name);
-  if (!state) throw new BrainError(`"${name}" has not been synced yet. Run: brain sync ${name}`);
+  const { repo, state } = requireSynced(store, name);
   const model = options.model ?? DEFAULT_MODEL;
   const commit = state.commit;
 

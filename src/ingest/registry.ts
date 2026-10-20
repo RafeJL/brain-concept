@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { defaultRef, remoteUrl, repoRoot, resolveCommit } from "../core/git.js";
-import { BrainError, type RepoNote, type RepoRecord } from "../core/types.js";
+import { BrainError, type RepoNote, type RepoRecord, type RepoState } from "../core/types.js";
 import type { Store } from "../store/store.js";
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -49,6 +49,14 @@ export function requireRepo(store: Store, name: string): RepoRecord {
   const repo = store.getRepo(name);
   if (!repo) throw new BrainError(`No repo named "${name}" is enrolled.`);
   return repo;
+}
+
+/** An enrolled repo and the commit it was indexed at, for a step that needs it synced first. */
+export function requireSynced(store: Store, name: string): { repo: RepoRecord; state: RepoState } {
+  const repo = requireRepo(store, name);
+  const state = store.getState(name);
+  if (!state) throw new BrainError(`"${name}" has not been synced yet. Run: brain sync ${name}`);
+  return { repo, state };
 }
 
 /**

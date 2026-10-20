@@ -8,7 +8,7 @@ numbers in these files: keep existing lines where they are.
 |---|---|
 | `articles-api` | An Express backend serving `GET` and `DELETE /articles/:slug` |
 | `articles-web` | A frontend calling that API through a client with a base URL, plus one run-time URL |
-| `orders-api` | An ASP.NET API: a controller, a minimal API, an OpenAPI spec and its own tests calling it |
+| `orders-api` | An ASP.NET API: a controller, a minimal API, an OpenAPI spec and an admin client calling its own API |
 | `shop-web` | A TS frontend calling `orders-api`, plus one run-time URL |
 | `mixed-languages` | TypeScript, C#, Markdown and an unknown file type, for language detection |
 | `status-api` | Serves `/` and `/status` |

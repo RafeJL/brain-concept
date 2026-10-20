@@ -5,14 +5,14 @@ import type { Seam } from "../core/seams.js";
 import { ENTRY_KINDS, EXIT_KINDS, foundRef, seamRef, type TraceLink, type TraceStep } from "../core/traces.js";
 import { BrainError } from "../core/types.js";
 import { moveAnchor } from "../ingest/facts.js";
-import { requireRepo } from "../ingest/registry.js";
+import { requireSynced } from "../ingest/registry.js";
 import type { Store } from "../store/store.js";
 import { citationProblem, fileReader, loose, spanText } from "./check.js";
 import { DEFAULT_MODEL } from "./generate.js";
 import { detectLanguage } from "../core/languages.js";
 import { isSource, isTestPath } from "./inventory.js";
 import { prompt } from "./prompts.js";
-import type { Runner } from "./runner.js";
+import { chunk, type Runner } from "./runner.js";
 
 /**
  * Entry points one run follows at most. Each is a chain through several files, read closely;
@@ -108,6 +108,16 @@ function labelOf(seam: Seam): string {
   return seam.kind.startsWith("http-") ? `${seam.method} ${seam.rawPath}` : seam.rawPath;
 }
 
+/** An entry point to ask about, numbered E1, E2… in the order given. */
+function toEntry(seam: Seam, i: number): Entry {
+  return { id: `E${i + 1}`, ref: seamRef(seam), kind: seam.kind as Entry["kind"], label: labelOf(seam), path: seam.path, line: seam.startLine };
+}
+
+/** A job or UI action: an entry point Claude Code found by reading code, not one from the link map. */
+function isFound(kind: TraceLink["entryKind"]): boolean {
+  return kind === "job" || kind === "ui";
+}
+
 /**
  * Has Claude Code follow each entry point of a repo (the routes it serves, the events it handles,
  * the gRPC methods it serves, and the jobs and UI actions it finds) through the code to what it
@@ -118,9 +128,7 @@ function labelOf(seam: Seam): string {
  * again; chains whose files only moved around them are moved through the diff, with no AI run.
  */
 export async function updateTraces(store: Store, runner: Runner, name: string, options: { model?: string; full?: boolean; cwd?: string } = {}): Promise<TracesResult> {
-  const repo = requireRepo(store, name);
-  const state = store.getState(name);
-  if (!state) throw new BrainError(`"${name}" has not been synced yet. Run: brain sync ${name}`);
+  const { repo, state } = requireSynced(store, name);
   const started = Date.now();
   const seams = store.seams({ repos: [name], includeUnresolved: true }).filter((s) => !isTestPath(s.path));
   // A route a class inherits is handled by its base class's code: tracing each of hundreds of
@@ -149,7 +157,7 @@ export async function updateTraces(store: Store, runner: Runner, name: string, o
     const byEntry = groupBy(previous, (l) => l.entry);
     for (const [entry, links] of byEntry) {
       const first = links[0]!;
-      const seamKind = first.entryKind !== "job" && first.entryKind !== "ui";
+      const seamKind = !isFound(first.entryKind);
       if (seamKind && !entrySeams.some((s) => seamRef(s) === entry)) {
         gone.add(entry);
         continue;
@@ -177,9 +185,7 @@ export async function updateTraces(store: Store, runner: Runner, name: string, o
     for (const c of all ?? []) if (c.status === "A" && isSource({ path: c.path, language: detectLanguage(c.path) })) look.add(c.path);
     discoverIn = [...look].sort();
   }
-  const asked: Entry[] = entrySeams
-    .filter((s) => full || due.has(seamRef(s)))
-    .map((s, i) => ({ id: `E${i + 1}`, ref: seamRef(s), kind: s.kind as Entry["kind"], label: labelOf(s), path: s.path, line: s.startLine }));
+  const asked = entrySeams.filter((s) => full || due.has(seamRef(s))).map(toEntry);
   if (asked.length === 0 && (discoverIn?.length ?? 1) === 0) {
     store.replaceTraceLinks(name, [...gone, ...keep.map((l) => l.entry)], keep);
     return { repo: name, commit: state.commit, mode: "none", followed: 0, kept: 0, dropped: [], untriggered: untriggered(store.traceLinks(name), exitRefs), costUsd: 0, durationMs: Date.now() - started };
@@ -213,9 +219,7 @@ export async function updateTraces(store: Store, runner: Runner, name: string, o
           ? `Also list any job (a timer, background worker, scheduled task or start-up task) or UI action (a page, component or command a person triggers that leads to an exit point) in these changed files, each as found: {kind, name, file, line} with what it reaches:\n${files.slice(0, 200).map((f) => `- ${f}`).join("\n")}`
           : "";
 
-    const batches: Entry[][] = [];
-    for (let i = 0; i < asked.length; i += BATCH_ENTRIES) batches.push(asked.slice(i, i + BATCH_ENTRIES));
-    if (batches.length === 0) batches.push([]);
+    const batches = asked.length ? chunk(asked, BATCH_ENTRIES) : [[]];
     const answers = await Promise.all(
       batches.map(async (batch, i) => {
         try {
@@ -286,7 +290,7 @@ export async function updateTraces(store: Store, runner: Runner, name: string, o
     const worthAsking = (ref: string) => full || reachedBefore.has(ref) || exitSeams.some((s) => seamRef(s) === ref && askedFiles.has(s.path));
     const missing = [...exitIds].filter(([, ref]) => !reachedNow.has(ref) && worthAsking(ref));
     if (missing.length) {
-      const everyEntry: Entry[] = entrySeams.map((s, i) => ({ id: `E${i + 1}`, ref: seamRef(s), kind: s.kind as Entry["kind"], label: labelOf(s), path: s.path, line: s.startLine }));
+      const everyEntry = entrySeams.map(toEntry);
       const lookFor = [
         "These exit points weren't reached by any chain. For each, find what leads to it: one of the entry points above (answer with its id), or a job or UI action (answer as found: {kind, name, file, line}). Leave out any that nothing in this repository leads to.",
         ...missing.map(([id, ref]) => `- ${id}: ${ref.replace(/^\S+ /, `${kindWord(ref)} `)}`),
@@ -318,9 +322,9 @@ export async function updateTraces(store: Store, runner: Runner, name: string, o
         ...gone,
         ...keep.map((l) => l.entry),
         ...found,
-        ...previous.filter((l) => (l.entryKind === "job" || l.entryKind === "ui") && discoverIn!.includes(l.entryPath)).map((l) => l.entry),
+        ...previous.filter((l) => isFound(l.entryKind) && discoverIn!.includes(l.entryPath)).map((l) => l.entry),
       ];
-  const stillKept = keep.filter((l) => !(l.entryKind === "job" || l.entryKind === "ui") || !discoverIn!.includes(l.entryPath));
+  const stillKept = keep.filter((l) => !isFound(l.entryKind) || !discoverIn!.includes(l.entryPath));
   // The second look can add chains to an entry point kept or already answered.
   const replacing = replaced && [...new Set([...replaced, ...links.map((l) => l.entry)])];
   store.replaceTraceLinks(name, replacing, settled([...stillKept, ...links]));

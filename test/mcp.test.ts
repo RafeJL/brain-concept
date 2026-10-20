@@ -1,21 +1,10 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { enrolRepo } from "../src/ingest/registry.js";
 import { syncRepo } from "../src/ingest/sync.js";
 import { LOCAL_CALLER, LocalAccessPolicy, type AccessPolicy } from "../src/serve/access.js";
-import { createServer, INSTRUCTIONS, serverInstructions } from "../src/serve/mcp.js";
+import { INSTRUCTIONS, serverInstructions } from "../src/serve/mcp.js";
 import { SqliteStore } from "../src/store/sqlite.js";
-import { makeRepo } from "./helpers.js";
-
-async function connect(store: SqliteStore): Promise<Client> {
-  const server = createServer({ store, access: new LocalAccessPolicy(), caller: LOCAL_CALLER });
-  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-  await server.connect(serverSide);
-  const client = new Client({ name: "test", version: "0.0.0" });
-  await client.connect(clientSide);
-  return client;
-}
+import { connect, makeRepo } from "./helpers.js";
 
 describe("MCP server", () => {
   it("lists the read-only tools, then the four that record what a person says, then adding a repo", async () => {
@@ -46,18 +35,13 @@ describe("MCP server", () => {
     expect(add.description).toMatch(/takes time and money/);
   });
 
-  it("tells agents to offer adding a repo the brain lacks, and not to plan from one being enrolled", async () => {
-    const client = await connect(new SqliteStore(":memory:"));
-
-    expect(client.getInstructions()).toContain("offer to add it with brain_add_repo");
-    expect(client.getInstructions()).toContain("While a repo is being enrolled, don't plan from it");
-    expect(client.getInstructions()).toContain("brain_repo_card finds them at once");
-  });
-
-  it("tells the client when to use the brain", async () => {
+  it("tells the client when to use the brain, to offer adding a repo it lacks, and not to plan from one being enrolled", async () => {
     const client = await connect(new SqliteStore(":memory:"));
 
     expect(client.getInstructions()).toContain("ask the brain first");
+    expect(client.getInstructions()).toContain("offer to add it with brain_add_repo");
+    expect(client.getInstructions()).toContain("While a repo is being enrolled, don't plan from it");
+    expect(client.getInstructions()).toContain("brain_repo_card finds them at once");
   });
 
   it("returns a repo card over the protocol", async () => {

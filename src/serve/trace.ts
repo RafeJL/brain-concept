@@ -1,4 +1,5 @@
 import { loose } from "../ai/check.js";
+import { formatCitation } from "../core/citations.js";
 import { seamRef, type TraceLink, type TraceStep } from "../core/traces.js";
 import { familyOf, FAMILIES, type Seam } from "../core/seams.js";
 import type { WikiPage } from "../core/types.js";
@@ -66,10 +67,10 @@ export function traceFrom(store: Store, readable: readonly string[], starts: rea
       if (failed?.target.type === "unmapped") return { ...node, outcome: { type: "unmapped", reason: failed.target.reason } };
       const inherited = seams.get(repo)?.find((s) => s.derived && seamRef(s) === entry);
       const base = inherited?.cites[0];
-      return base ? { ...node, outcome: { type: "unmapped", reason: `inherited from a base class, so its handling is the base method at ${base.path}:${lineRange(base.start, base.end)}` } } : node;
+      return base ? { ...node, outcome: { type: "unmapped", reason: `inherited from a base class, so its handling is the base method at ${formatCitation(base)}` } } : node;
     }
     const ends = chains.find((l) => l.target.type === "none");
-    if (ends) return { ...node, outcome: { type: "ends", pointer: stepPointer(ends.steps[0]!) } };
+    if (ends) return { ...node, outcome: { type: "ends", pointer: formatCitation(ends.steps[0]!) } };
 
     const reached: Reached[] = [];
     for (const chain of chains) {
@@ -142,15 +143,11 @@ function exitWords(ref: string): string {
   return kind === "event-publish" ? `publishes ${what}` : kind === "grpc-call" ? `calls gRPC ${what}` : `calls ${what}`;
 }
 
-function stepPointer(step: TraceStep): string {
-  return `${step.path}:${lineRange(step.start, step.end)}`;
-}
-
 /** "via CreateOrderAsync → Handle (CreateOrderCommandHandler.cs:32)": the names linking the steps, and where it ends. */
 function howOf(steps: readonly TraceStep[]): string {
   const names = steps.flatMap((s) => (s.calls ? [s.calls] : []));
   const last = steps.at(-1)!;
-  return `${names.length ? `via ${names.join(" → ")} ` : ""}(${stepPointer(last)})`;
+  return `${names.length ? `via ${names.join(" → ")} ` : ""}(${formatCitation(last)})`;
 }
 
 /**

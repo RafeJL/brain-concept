@@ -7,8 +7,6 @@ import type { Seam, SeamKind } from "./seams.js";
  * component a person triggers).
  */
 export type EntryKind = "http-route" | "event-subscribe" | "grpc-serve" | "job" | "ui";
-/** Where handling leaves the repo: a call it makes, an event it publishes, a gRPC call. */
-export type ExitKind = "http-call" | "event-publish" | "grpc-call";
 
 export const ENTRY_KINDS: readonly SeamKind[] = ["http-route", "event-subscribe", "grpc-serve"];
 export const EXIT_KINDS: readonly SeamKind[] = ["http-call", "event-publish", "grpc-call"];

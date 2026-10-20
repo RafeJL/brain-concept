@@ -1,4 +1,4 @@
-import { anchorProblems, parseAnchor } from "../../ingest/facts.js";
+import { checkAnchors, personAnchors } from "../../ingest/facts.js";
 import type { FactChange } from "../../store/store.js";
 import type { Caller } from "../access.js";
 import { confirmFact, factLine, readableChecks } from "../facts.js";
@@ -64,12 +64,9 @@ export async function manageFacts(deps: ToolDeps, caller: Caller, input: FactsIn
         const repo = fact.repo ? deps.store.getRepo(fact.repo) : undefined;
         const state = fact.repo ? deps.store.getState(fact.repo) : undefined;
         if (!repo || !state) return { ok: false, text: "Anchors point at lines in a repo: this fact is on a system." };
-        const unreadable = input.anchors.filter((a) => !parseAnchor(a));
-        if (unreadable.length) return { ok: false, text: `Anchors are file:lines, e.g. src/follow.ts:12-20. Can't read: ${unreadable.join(", ")}.` };
-        const cites = input.anchors.map((a) => parseAnchor(a)!);
-        const problems = await anchorProblems(repo.path, state.commit, cites);
-        if (problems.length) return { ok: false, text: `Nothing changed. The anchors don't hold at @${state.commit.slice(0, 7)}: ${problems.join("; ")}.` };
-        Object.assign(change, { anchors: cites, anchorCommit: state.commit, staleSince: null, anchorsFound: false });
+        const checked = await checkAnchors(repo.path, state.commit, input.anchors);
+        if ("error" in checked) return { ok: false, text: `Nothing changed. ${checked.error}` };
+        Object.assign(change, personAnchors(checked.cites, state.commit));
       }
       let after = "";
       if (text && text !== fact.text) {

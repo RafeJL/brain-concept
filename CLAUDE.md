@@ -8,7 +8,8 @@ calls it; nothing is ever moved out of the harness into here.
 
 - `docs/architecture.md`: what we are building. Treat it as the spec.
 - `docs/decisions.md`: dated decisions. Add an entry when you make one, rather than silently
-  changing course.
+  changing course. When one is superseded, mark it and move it to `docs/decisions-archive.md`,
+  leaving a one-line pointer; never delete one.
 - `docs/research.md`: why the design is the way it is.
 - `plans/` (local, untracked): the master plan and a plan per phase. Update the current phase
   plan as work progresses.
@@ -61,7 +62,7 @@ calls it; nothing is ever moved out of the harness into here.
   names no code, only its citations do.
 - **Updates** (without `--full`) redo only what a change affects: wiki pages citing changed files
   (`src/ai/affected.ts`, retried once, last passing version kept) and seams declared in changed
-  files or built from them (`updateSeams`). `brain sync` indexes then runs both; hooks run it
+  files or built from them (`updateSeams`). `brain sync` indexes, then runs its three steps (links, wiki, fact checks) side by side; hooks run it
   through `runQueued` (`src/core/queue.ts`), one run per repo at a time. `syncRepo` itself never
   calls the AI.
 - Neighbours and system overviews are never stored; they come from the seam graph, product pages

@@ -2,7 +2,7 @@ import { cleanPath } from "../core/citations.js";
 import type { FactCheck, FactRecord, Verdict } from "../core/facts.js";
 import { changedFiles, inWorktree } from "../core/git.js";
 import { BrainError } from "../core/types.js";
-import { requireRepo } from "../ingest/registry.js";
+import { requireSynced } from "../ingest/registry.js";
 import type { Store } from "../store/store.js";
 import { claimProblem, fileReader } from "./check.js";
 import { DEFAULT_MODEL } from "./generate.js";
@@ -67,9 +67,7 @@ export interface FactChecksResult {
  * fact says or whether it is confirmed.
  */
 export async function checkFacts(store: Store, runner: Runner, name: string, options: { model?: string; full?: boolean; cwd?: string } = {}): Promise<FactChecksResult> {
-  const repo = requireRepo(store, name);
-  const state = store.getState(name);
-  if (!state) throw new BrainError(`"${name}" has not been synced yet. Run: brain sync ${name}`);
+  const { repo, state } = requireSynced(store, name);
   const system = store.systems().find((s) => s.repos.includes(name));
   const facts = store.facts({ repos: [name], systems: system ? [system.name] : [] });
 

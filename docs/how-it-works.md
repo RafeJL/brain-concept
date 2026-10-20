@@ -29,33 +29,10 @@ allowed. A headless run (`claude -p`) has no one to allow it, so it can't write.
 
 ## Adding a repo
 
-Adding a repo (`brain_add_repo`, or `brain add` in a terminal) does four things:
-1. **Clone.** A GitHub repo is cloned with plain `git clone` and your own credentials, into
-   `%USERPROFILE%\.brain\repos\<name>`. A local folder is used where it is.
-2. **Index.** The brain reads the committed code on the main branch with git. Your uncommitted
-   work is never read.
-3. **Map and write.** Claude Code maps the repo's links and writes its wiki. These run side by side.
-4. **Hook.** A git hook keeps the repo up to date from then on.
-
-From Claude Code, this runs in a process of its own, so the call answers at once and the work
-carries on after the session ends. It logs to `%USERPROFILE%\.brain\hooks.log`, like the hooks.
-
-**Status.** Each step is recorded in the store as it happens: cloning, indexing, mapping links,
-tracing, writing the wiki (k of n pages for a large repo), installing the hook. The repo's card
-shows it, and so does any read tool that reaches the repo before it's indexed. MCP has no progress
-bar between calls, so you find out by asking.
-
-**Estimates.** The brain counts the repo's files (once it's cloned) and goes by how long earlier
-enrolments of a similar size took. Until there are some, it uses rough figures by size, measured on
-the trial repos, and says they're rough.
-
-**When it fails.** The card says which step failed and why, for example what git said about a
-clone. Adding the repo again redoes only what's missing. A run whose process ended without finishing
-shows as stopped.
-
-**Clones nobody pulls.** You never pull in the brain's own clones. So when a Claude Code session
-starts, the brain fetches them in the background, at most once an hour, and their hooks do the rest.
-The fetch never prompts for credentials.
+Ask Claude Code to add one (`brain_add_repo`), or run `brain add`: the
+[README](../README.md#add-repos) has the steps and how to tell when it's ready. It runs in the
+background and the repo's card shows how far it has got;
+[architecture.md](architecture.md#adding-a-repo-from-claude-code-b7) has how it works.
 
 ## How far to trust an answer
 
@@ -116,9 +93,9 @@ reasoning.
 
 ### For technical plans
 
-A **small repo** (most services and libraries) gets five to seven pages in one run: overview,
-build and test, API, its most important module, the product page, and data-model and integrations
-pages when it has them.
+A **small repo** (most services and libraries) gets six to eight pages in one run: overview,
+build and test, conventions, API, the product page, its most important module, and data-model and
+integrations pages when it has them.
 
 A **large repo** has 200 or more source files outside tests, or four or more projects, such as
 eShop's twenty. It gets a wiki that fits it. First, a free count of its folders, projects and entry
@@ -165,23 +142,12 @@ with its full path. No language needs any setup.
 
 ### How a repo's links are mapped
 
-One AI run can't cover a large repo: it stops after a sample, a different one each time. So the
-brain splits the work itself:
-1. **Survey.** One run finds what applies everywhere: convention route templates
-   (`api/{controller}/{action}`), base classes whose methods every derived class serves, and where
-   settings such as base URLs live. Each is checked against the lines it cites.
-2. **Screen.** A fast model reads every file of the repo's own code (tests, vendored and generated
-   code left out; long files in parts), with its text in the prompt so none can be skipped, and
-   flags those that declare routes, make calls or send messages.
-3. **Map.** Flagged files go to the mapping runs a few at a time, again with their text in the
-   prompt, and each run answers for every file it was given.
-4. **Work out inherited routes.** Routes a class gets from its base class are worked out by the
-   brain from the survey, citing the class, the base method and the template, and checked like
-   the rest.
-
-Each piece's outcome is kept, so the map knows what it covered. A file no run answered for is
-"not mapped", and answers say so: "no caller found" there is unknown, not none. `brain_repo_card`
-shows how complete a repo's map is. Sync after that screens and maps only changed files.
+One AI run stops after a sample of a large repo, so the brain splits the work: a survey of what
+applies everywhere, a fast model screening every file of the repo's own code, mapping runs for the
+flagged files a few at a time, and inherited routes worked out from the survey. A file no run
+answered for is "not mapped", and answers say so: "no caller found" there is unknown, not none.
+`brain_repo_card` shows how complete a map is. The steps are in
+[architecture.md](architecture.md#seams).
 
 ### Following a flow
 

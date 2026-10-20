@@ -5,7 +5,7 @@ import type { FactFilter, SectionHit } from "../../store/store.js";
 import type { Caller } from "../access.js";
 import { factLine, readableChecks, visibleFacts } from "../facts.js";
 import { visibleSystems } from "../systems.js";
-import { builtFrom, count, indexedAt, NO_REPOS, PAGE_SIZE, pointer, readableRepos, TIER, withoutWiki, type Format, type ToolDeps, type ToolResult } from "./common.js";
+import { builtFrom, count, indexedAt, PAGE_SIZE, pointer, scopeOf, TIER, withoutWiki, type Format, type ToolDeps, type ToolResult } from "./common.js";
 
 export interface SearchInput {
   query: string;
@@ -66,10 +66,9 @@ export function matchExpression(query: string, all = false): string | null {
 export async function search(deps: ToolDeps, caller: Caller, input: SearchInput): Promise<ToolResult<SearchAnswer>> {
   const match = matchExpression(input.query);
   if (!match) return { ok: false, text: `"${input.query}" has no words to search for.` };
-  const readable = await readableRepos(deps, caller);
-  const scope = input.repos?.length ? readable.filter((name) => input.repos!.includes(name)) : readable;
-  if (readable.length === 0) return { ok: false, text: NO_REPOS };
-  if (scope.length === 0) return { ok: false, text: `None of the requested repos are enrolled or readable. Repos you can read: ${readable.join(", ")}.` };
+  const scoped = await scopeOf(deps, caller, input.repos);
+  if (!scoped.ok) return scoped;
+  const { readable, scope } = scoped;
 
   const offset = input.offset ?? 0;
   const detailed = input.format === "detailed";

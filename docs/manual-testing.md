@@ -10,8 +10,9 @@ The main parts:
   auto-sync, wiki updates, repo cards and neighbours through pushes and fetches.
 - **Part B** checks every tool against real open-source repos.
 - **Part C** checks Claude Code reaches for the brain on its own.
-- **Parts D to H** cover one phase each: facts from people, large wikis, following a flow, the
-  conversation as the only interface, and adding a repo from Claude Code.
+- **Parts D to J** cover one phase each: facts from people, large wikis, following a flow, the
+  conversation as the only interface, adding a repo from Claude Code, maps that say what they
+  covered, and planning depth.
 
 Run every `npm run brain -- …` command from the brain-concept folder, and stay on one branch
 throughout. Background syncs run whatever brain code is checked out. Start with
@@ -110,8 +111,8 @@ npm run brain -- card pg-react-web
 
 | Line | Shows |
 |---|---|
-| `Wiki: 5 pages (…) · read with brain_get` | The wiki Claude Code wrote |
-| `Seams: about 20 routes, 1 call · llm-generated` | The RealWorld routes under the global `/api` prefix, plus the Swagger endpoint; the call is a `curl` in the Makefile |
+| `Wiki: N pages (…) · read with brain_get` | The wiki Claude Code wrote: six to eight pages for a small repo |
+| `Seams: about 20 routes · llm-generated` | The RealWorld routes under the global `/api` prefix, plus the Swagger endpoint |
 | `Called by: pg-react-web (… calls)` | Neighbours, from the seam graph |
 
 **pg-react-web:**
@@ -130,9 +131,6 @@ git -C $P\aspnet-api worktree list
 **Expect:**
 - the route's callers, and `path built with …` naming the lines its `/api` prefix and controller
   route come from. Open them and check;
-  `build-run-test  19/22 claims kept · published`, with up to three `removed: … ` lines saying
-  why. Read the removed claims. Each should be a real problem (the named thing isn't in the
-  cited lines, a missing file, an over-broad span), not the checker being too strict;
 - the page list stamped `@a397d11 · up to date · llm-generated`;
 - each page's header ending `citations checked: N of M claims kept`;
 - a build page that names `build/build.csproj`, the Bullseye targets and
@@ -213,7 +211,7 @@ npm run brain -- page pg-aspnet-api api
   `--detailed`, a route nobody calls yet only appears in the "No known callers" line);
 - the API page mentioning the new `POST …/archive` route, cited to `ArticlesController.cs`.
 
-Nobody ran `sync` or `wiki`, and no parser knows this repo's framework: Claude Code found the
+Nobody ran `sync`, and no parser knows this repo's framework: Claude Code found the
 route and the brain checked it against the cited lines.
 
 ### A4. A change in one repo updates another repo's card
@@ -337,8 +335,8 @@ npm run brain -- sync
 npm run brain -- hooks install
 ```
 
-The first `sync` maps each repo's links (routes and calls in one run, events, gRPC and packages
-in another alongside it) and writes its wiki: about 30–40 minutes and $15–20 in all, most of it
+The first `sync` maps each repo's links (a survey, a fast screen of every file of its own code,
+then mapping runs for routes and calls and for events, gRPC and packages) and writes its wiki: about 30–40 minutes and $15–20 in all, most of it
 eshop (about $5–6 and 5–14 minutes for its links alone). Read any `dropped:` and `removed:` lines
 it prints. To re-check link mapping later without rewriting wikis, use
 `npm run brain -- sync <name> --full --only links`.
@@ -347,17 +345,17 @@ it prints. To re-check link mapping later without rewriting wikis, use
 |---|---|
 | `page laravel-api api` | A PHP repo's API page listing the RealWorld endpoints, each cited to `routes/api.php`, including `GET articles/{article}` and the other routes `Route::resource` declares without naming |
 | `page flask-api api` | The same for Python: blueprints in `conduit/*/views.py`, `JWT_HEADER_TYPE = 'Token'` cited to `conduit/settings.py` |
-| `card aspnet-api` | `Seams: 20 routes, 1 call · llm-generated` (the RealWorld routes under `/api`, the Swagger endpoint, a `curl` in the Makefile); `Called by: react-web (22 calls)` |
+| `card aspnet-api` | `Seams: 20 routes · llm-generated` (the RealWorld routes under `/api`, the Swagger endpoint); `Called by: react-web (22 calls)` |
 | `card react-web` | `0 routes, 22 calls`; `Calls: aspnet-api (19 endpoints) · express-api (19 endpoints) · flask-api (19 endpoints) · laravel-api (19 endpoints)`: one front end, four backends in four languages |
-| `card laravel-api` | `22 routes, 78 calls` (its tests call its own API); `Called by: react-web (22 calls)` and **not** the other backends, whose tests call the same paths but serve them too |
+| `card laravel-api` | `22 routes` and few or no calls (its tests, which call its own API, aren't mapped); `Called by: react-web (22 calls)` and **not** the other backends |
 | `card express-api` | `Called by: react-web` and **not** eshop. Both serve or call `/`, which says nothing about which service is meant |
-| `card eshop` | `Seams:` about 75–85 routes and 55–105 calls (the call count is call sites, and varies with how many test calls a run lists): the APIs, health checks, Identity's MVC routes and Blazor pages, and the clients calling them |
+| `card eshop` | `Seams:` about 75–85 routes and about 30 calls (tests aren't mapped): the APIs, health checks, Identity's MVC routes and Blazor pages, and the clients calling them |
 | `card citation-harness-library` | Its seams (likely none: it serves no HTTP) and its wiki |
-| `consumers "GET /api/articles/:slug"` | Four servers (C#, TypeScript, Python, PHP) at their declaring lines, `react-web · src/agent.js:61-62` as the caller, then Laravel's own tests marked `same repo` |
+| `consumers "GET /api/articles/:slug"` | Four servers (C#, TypeScript, Python, PHP) at their declaring lines, `react-web · src/agent.js:61-62` as the caller |
 | `consumers "GET /api/profiles/:username" --detailed` | `path built with …` on each: aspnet's `Program.cs` prefix convention, Express's `routes.ts` mount, Laravel's `RouteServiceProvider` group |
 | `consumers "DELETE /api/profiles/{username}/follow"` | A method filter: four servers; react-web's call (written `requests.del(…)`) among the callers |
 | `impact aspnet-api --path src/Conduit/Features/Articles/ArticlesController.cs` | 6 routes and 9 callers, all in `react-web · src/agent.js` |
-| `impact eshop --route "GET /api/catalog/items/{id}"` | The minimal API route in `CatalogApi.cs`, with the three client `CatalogService.cs` files and the functional tests as `same repo` callers |
+| `impact eshop --route "GET /api/catalog/items/{id}"` | The minimal API route in `CatalogApi.cs`, with the three client `CatalogService.cs` files as `same repo` callers |
 | `consumers "event OrderStartedIntegrationEvent"` | Published by `src/Ordering.API/Application/Commands/CreateOrderCommandHandler.cs`; handled by Basket.API's subscription in `src/Basket.API/Extensions/Extensions.cs`, marked `same repo` (eShop is one repo with many services) |
 | `consumers "event OrderStarted"` | No match (names match exactly), and a line naming `OrderStartedIntegrationEvent` as a known event |
 | `consumers "grpc Basket/GetBasket"` | Served in `src/Basket.API/Proto/basket.proto` (or `Grpc/BasketService.cs`), called from `src/WebApp/Services/BasketService.cs` and usually `src/ClientApp/Services/Basket/BasketService.cs` (a run can miss the second), `same repo` |

@@ -1,4 +1,4 @@
-import { matchEndpoints, type MatchQuality } from "../../core/http.js";
+import type { MatchQuality } from "../../core/http.js";
 import { parseTarget, type LinkTarget } from "../../core/links.js";
 import { familyOf, isProvider, type Seam } from "../../core/seams.js";
 import { seamRef } from "../../core/traces.js";
@@ -9,15 +9,14 @@ import {
   alsoDeclared,
   builtFrom,
   count,
-  endpointOf,
   FAMILY_LABEL,
   footer,
   groupRoutes,
-  NO_REPOS,
+  matchTarget,
   PAGE_SIZE,
   pointer,
-  readableRepos,
   ROLES,
+  scopeOf,
   TIER,
   unresolvedNote,
   type Format,
@@ -61,14 +60,12 @@ export async function findConsumers(deps: ToolDeps, caller: Caller, input: Consu
       text: `"${input.target}" is not an endpoint, event, gRPC method or package. Try "GET /api/orders/{id}", "event OrderStarted", "grpc Basket/GetBasket" or "package @citation/ui".`,
     };
   }
-  const readable = await readableRepos(deps, caller);
-  const scope = input.repos?.length ? readable.filter((name) => input.repos!.includes(name)) : readable;
-  if (readable.length === 0) return { ok: false, text: NO_REPOS };
-  if (scope.length === 0) return { ok: false, text: `None of the requested repos are enrolled or readable. Repos you can read: ${readable.join(", ")}.` };
+  const scoped = await scopeOf(deps, caller, input.repos);
+  if (!scoped.ok) return scoped;
+  const { readable, scope } = scoped;
 
   const matches = deps.store.seams({ repos: scope }).flatMap((seam) => {
-    if (familyOf(seam.kind) !== target.family) return [];
-    const match = target.family === "http" ? matchEndpoints(endpointOf(seam), target.endpoint) : seam.key === target.key ? "exact" : null;
+    const match = matchTarget(seam, target);
     return match ? [{ seam, match }] : [];
   });
   const matchOf = new Map(matches.map(({ seam, match }) => [seam, match]));

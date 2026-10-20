@@ -7,12 +7,18 @@ import { LOCAL_CALLER, LocalAccessPolicy, type AccessPolicy } from "../src/serve
 import { findConsumers } from "../src/serve/tools/find-consumers.js";
 import { impact } from "../src/serve/tools/impact.js";
 import { repoCard } from "../src/serve/tools/repo-card.js";
-import type { RunRequest, Runner } from "../src/ai/runner.js";
 import { SqliteStore } from "../src/store/sqlite.js";
-import { commit, commitFixture, makeRepo, mapSeams, recordedRunner, recordedSeams, repoFromFixture } from "./helpers.js";
+import { commit, commitFixture, fixtureWorld, makeRepo, mapSeams, recordedRunner, recordedSeams, repoFromFixture } from "./helpers.js";
 
-/** test/fixtures/repos/articles-api and articles-web, enrolled as "api" and "web", synced and mapped. */
-async function twoRepos() {
+/** test/fixtures/repos/articles-api and articles-web, enrolled as "api" and "web", synced and mapped, once for the file. */
+const twoRepos = fixtureWorld([
+  ["api", "articles-api"],
+  ["web", "articles-web"],
+]);
+const ordersAndShop = fixtureWorld(["orders-api", "shop-web"]);
+
+/** The same two repos in their own folders, for a test that commits to them. */
+async function ownRepos() {
   const store = new SqliteStore(":memory:");
   const apiDir = repoFromFixture("articles-api");
   const webDir = repoFromFixture("articles-web");
@@ -51,22 +57,13 @@ function pipeline(options: {
   links?: (prompt: string) => unknown[];
   answerFiles?: boolean;
 }) {
-  const requests: RunRequest[] = [];
-  const runner: Runner = {
-    async run<T>(request: RunRequest) {
-      requests.push(request);
-      const p = request.prompt;
-      let output: unknown;
-      if (p.startsWith("You are surveying")) output = options.survey ?? { templates: [], inherited: [], config_files: [] };
-      else if (p.startsWith("You are screening"))
-        output = { files: options.screenNothing ? [] : filesIn(p).map(({ file, from }) => ({ file, from, route: false, call: false, message: false, ...(options.flag?.(file, from) ?? {}) })) };
-      else {
-        const seams = (p.includes("mapped separately") ? options.links : options.http)?.(p) ?? [];
-        output = { seams, files: options.answerFiles === false ? [] : filesIn(p).map(({ file, from }) => ({ file, from, outcome: "none" })) };
-      }
-      return { output: output as T, costUsd: 0.05, durationMs: 1000, model: "claude-sonnet-5" };
-    },
-  };
+  const { runner, requests } = recordedRunner(({ prompt: p }) => {
+    if (p.startsWith("You are surveying")) return options.survey ?? { templates: [], inherited: [], config_files: [] };
+    if (p.startsWith("You are screening"))
+      return { files: options.screenNothing ? [] : filesIn(p).map(({ file, from }) => ({ file, from, route: false, call: false, message: false, ...(options.flag?.(file, from) ?? {}) })) };
+    const seams = (p.includes("mapped separately") ? options.links : options.http)?.(p) ?? [];
+    return { seams, files: options.answerFiles === false ? [] : filesIn(p).map(({ file, from }) => ({ file, from, outcome: "none" })) };
+  });
   return { runner, requests, maps: () => requests.filter((r) => !/^You are (surveying|screening)/.test(r.prompt)) };
 }
 
@@ -178,7 +175,7 @@ describe("where a call is", () => {
 
 describe("mapping and updating a repo's routes and calls", () => {
   it("stores what passes, tagged with repo, file, lines and commit", async () => {
-    const { store } = await twoRepos();
+    const { store } = twoRepos();
 
     const routes = store.seams({ repos: ["api"] });
 
@@ -191,7 +188,7 @@ describe("mapping and updating a repo's routes and calls", () => {
   });
 
   it("maps only changed files after a change, and drops the seams of deleted files", async () => {
-    const { store, apiDir } = await twoRepos();
+    const { store, apiDir } = await ownRepos();
 
     commitFixture(apiDir, "articles-api-v2");
     await syncRepo(store, "api");
@@ -392,7 +389,7 @@ describe("mapping and updating a repo's routes and calls", () => {
   });
 
   it("runs no AI when only Markdown changed", async () => {
-    const { store, apiDir } = await twoRepos();
+    const { store, apiDir } = await ownRepos();
     commit(apiDir, { "README.md": "# changed" });
     await syncRepo(store, "api");
     const { runner, requests } = recordedRunner({ seams: [] });
@@ -406,7 +403,7 @@ describe("mapping and updating a repo's routes and calls", () => {
   });
 
   it("shows coverage on the repo card, or that the repo hasn't been mapped", async () => {
-    const { store, deps } = await twoRepos();
+    const { store, deps } = twoRepos();
     await enrolRepo(store, { path: makeRepo({ "a.ts": "1" }), name: "new" });
     await syncRepo(store, "new");
 
@@ -426,7 +423,7 @@ describe("brain_find_consumers", () => {
   });
 
   it("finds the server and the caller across repos", async () => {
-    const { deps } = await twoRepos();
+    const { deps } = twoRepos();
 
     const result = await findConsumers(deps, LOCAL_CALLER, { target: "GET /articles/{slug}", format: "concise" });
 
@@ -438,7 +435,7 @@ describe("brain_find_consumers", () => {
   });
 
   it("matches across a base path and filters by method", async () => {
-    const { deps } = await twoRepos();
+    const { deps } = twoRepos();
 
     const withBase = await findConsumers(deps, LOCAL_CALLER, { target: "/api/articles/:slug", format: "concise" });
     const deletes = await findConsumers(deps, LOCAL_CALLER, { target: "DELETE /articles/:slug", format: "concise" });
@@ -449,7 +446,7 @@ describe("brain_find_consumers", () => {
   });
 
   it("never returns seams from repos the caller cannot read", async () => {
-    const { store } = await twoRepos();
+    const { store } = twoRepos();
     const onlyWeb: AccessPolicy = { readableRepos: async () => new Set(["web"]) };
 
     const result = await findConsumers({ store, access: onlyWeb }, LOCAL_CALLER, { target: "GET /articles/:slug", format: "concise" });
@@ -459,7 +456,7 @@ describe("brain_find_consumers", () => {
   });
 
   it("points first at run-time URLs in the repos the answer involves", async () => {
-    const { store, deps } = await twoRepos();
+    const { store, deps } = twoRepos();
     await enrolRepo(store, { path: repoFromFixture("shop-web"), name: "shop" });
     await syncRepo(store, "shop");
     await mapSeams(store, "shop", "shop-web");
@@ -470,20 +467,15 @@ describe("brain_find_consumers", () => {
   });
 
   it("lists a repo calling its own endpoint after other callers, marked same repo", async () => {
-    const store = new SqliteStore(":memory:");
-    for (const name of ["orders-api", "shop-web"]) {
-      await enrolRepo(store, { path: repoFromFixture(name), name });
-      await syncRepo(store, name);
-      await mapSeams(store, name);
-    }
+    const { deps } = ordersAndShop();
 
-    const result = await findConsumers({ store, access: new LocalAccessPolicy() }, LOCAL_CALLER, { target: "GET /api/orders/{id}", format: "concise" });
+    const result = await findConsumers(deps, LOCAL_CALLER, { target: "GET /api/orders/{id}", format: "concise" });
 
     expect(result.text).toContain("Called by\n  shop-web · src/api.ts:1 · GET /api/orders/{id}\n  orders-api · src/AdminClient.cs:1 · GET /api/orders/{id} · same repo");
   });
 
   it("says when nothing matched, and why that isn't proof", async () => {
-    const { deps } = await twoRepos();
+    const { deps } = twoRepos();
 
     const result = await findConsumers(deps, LOCAL_CALLER, { target: "GET /nothing/here", format: "concise" });
 
@@ -511,7 +503,7 @@ describe("answers that say what a map didn't cover", () => {
   });
 
   it("say when a map was made before coverage was recorded, and say nothing when it is complete", async () => {
-    const { store, deps } = await twoRepos();
+    const { store, deps } = twoRepos();
     const at = store.getState("api")!.commit;
     // An older map: seams stored with no survey or pieces.
     store.replaceSeams("api", { commit: at, paths: null, seams: [] });

@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Caller } from "./access.js";
 import { firstSentence } from "../core/sections.js";
 import { visibleSystems } from "./systems.js";
-import { readableRepos, type ToolDeps, type ToolResult } from "./tools/common.js";
+import { clip, readableRepos, type ToolDeps, type ToolResult } from "./tools/common.js";
 import { findConsumers } from "./tools/find-consumers.js";
 import { cardRequest } from "./tools/repo-card.js";
 import { search } from "./tools/search.js";
@@ -98,16 +98,15 @@ const SUMMARY_CHARS = 140;
 export async function serverInstructions(deps: ServerDeps): Promise<string> {
   const readable = await readableRepos(deps, deps.caller);
   if (readable.length === 0) return INSTRUCTIONS;
-  const clip = (text: string) => (text.length <= SUMMARY_CHARS ? text : `${text.slice(0, SUMMARY_CHARS - 1).trimEnd()}…`);
   const summary = (repo: string) => {
     const enrolment = deps.store.enrolment(repo);
     if (enrolment && liveStatus(enrolment) === "running") return " (being enrolled: not ready yet)";
     const page = deps.store.pages(repo).find((p) => p.slug === "product");
     const sentence = page && firstSentence(page.markdown);
-    return sentence ? `: ${clip(sentence)}` : "";
+    return sentence ? `: ${clip(sentence, SUMMARY_CHARS)}` : "";
   };
   const systems = visibleSystems(deps.store, readable).map(
-    (s) => `- ${s.name}${s.status === "suggested" ? " (suggested)" : ""}: ${s.repos.join(", ")}${s.summary ? `. ${clip(s.summary)}` : ""}`,
+    (s) => `- ${s.name}${s.status === "suggested" ? " (suggested)" : ""}: ${s.repos.join(", ")}${s.summary ? `. ${clip(s.summary, SUMMARY_CHARS)}` : ""}`,
   );
   const more = readable.length > CATALOGUE_REPOS ? [`- and ${readable.length - CATALOGUE_REPOS} more: call brain_repo_card with any name to check.`] : [];
   return [

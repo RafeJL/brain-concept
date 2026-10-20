@@ -15,7 +15,7 @@ import { repoCard } from "../src/serve/tools/repo-card.js";
 import { setNote } from "../src/serve/tools/set-note.js";
 import { workImpact } from "../src/serve/tools/work-impact.js";
 import { SqliteStore } from "../src/store/sqlite.js";
-import { commit, makeRepo } from "./helpers.js";
+import { commit, makeRepo, recordedRunner } from "./helpers.js";
 
 /** A repo of four projects: large enough to be planned. */
 const SHOP = {
@@ -76,19 +76,14 @@ const toPlanAnswer = (plan: readonly PlannedPage[]) => ({
  * makes a page run that includes that slug return malformed output.
  */
 function shopRunner(plan: readonly PlannedPage[] = PLAN, options: { fail?: string } = {}) {
-  const requests: RunRequest[] = [];
-  const runner: Runner = {
-    async run<T>(request: RunRequest): Promise<RunResult<T>> {
-      requests.push(request);
-      const schema = request.schema as { properties: { pages: { items: { properties: { slug: { enum?: string[] }; key_files?: unknown } } } } };
-      const item = schema.properties.pages.items.properties;
-      const result = (output: unknown) => ({ output: output as T, costUsd: 0.1, durationMs: 1000, model: "claude-sonnet-5" });
-      if (item.key_files) return result(toPlanAnswer(plan));
-      const slugs = item.slug.enum ?? plan.map((p) => p.slug);
-      if (options.fail && slugs.includes(options.fail)) throw new BrainError("malformed");
-      return result({ pages: slugs.map((slug) => ({ slug, title: slug, markdown: markdown(slug) })) });
-    },
-  };
+  const { runner, requests } = recordedRunner((request) => {
+    const schema = request.schema as { properties: { pages: { items: { properties: { slug: { enum?: string[] }; key_files?: unknown } } } } };
+    const item = schema.properties.pages.items.properties;
+    if (item.key_files) return toPlanAnswer(plan);
+    const slugs = item.slug.enum ?? plan.map((p) => p.slug);
+    if (options.fail && slugs.includes(options.fail)) throw new BrainError("malformed");
+    return { pages: slugs.map((slug) => ({ slug, title: slug, markdown: markdown(slug) })) };
+  });
   return { runner, requests, planRuns: () => requests.filter((r) => r.prompt.includes("You are planning")), pageRuns: () => requests.filter((r) => !r.prompt.includes("You are planning")) };
 }
 
@@ -300,15 +295,10 @@ describe("a small repo's wiki", () => {
     const store = new SqliteStore(":memory:");
     await enrolRepo(store, { path: makeRepo({ "README.md": "# web\n\nA web app.\n" }), name: "web" });
     await syncRepo(store, "web");
-    const requests: RunRequest[] = [];
-    const runner: Runner = {
-      async run<T>(request: RunRequest): Promise<RunResult<T>> {
-        requests.push(request);
-        const asked = (request.schema as { properties: { pages: { items: { properties: { slug: { enum?: string[] } } } } } }).properties.pages.items.properties.slug.enum ?? ["overview"];
-        const pages = asked.map((slug) => ({ slug, title: slug, markdown: `# ${slug}\n\nThe web app is described in its readme [README.md:3].` }));
-        return { output: { pages } as T, costUsd: 0.1, durationMs: 1, model: "m" };
-      },
-    };
+    const { runner, requests } = recordedRunner((request) => {
+      const asked = (request.schema as { properties: { pages: { items: { properties: { slug: { enum?: string[] } } } } } }).properties.pages.items.properties.slug.enum ?? ["overview"];
+      return { pages: asked.map((slug) => ({ slug, title: slug, markdown: `# ${slug}\n\nThe web app is described in its readme [README.md:3].` })) };
+    });
 
     await generateWiki(store, runner, "web");
 

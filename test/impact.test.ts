@@ -1,26 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { enrolRepo } from "../src/ingest/registry.js";
-import { syncRepo } from "../src/ingest/sync.js";
-import { LOCAL_CALLER, LocalAccessPolicy, type AccessPolicy } from "../src/serve/access.js";
+import { LOCAL_CALLER, type AccessPolicy } from "../src/serve/access.js";
 import { impact } from "../src/serve/tools/impact.js";
-import { SqliteStore } from "../src/store/sqlite.js";
-import { mapSeams, repoFromFixture } from "./helpers.js";
+import { fixtureWorld } from "./helpers.js";
 
 /** test/fixtures/repos/orders-api (C#) and shop-web (TS), which calls it. */
-async function setup() {
-  const store = new SqliteStore(":memory:");
-  await enrolRepo(store, { path: repoFromFixture("orders-api"), name: "orders-api" });
-  await enrolRepo(store, { path: repoFromFixture("shop-web"), name: "shop-web" });
-  for (const name of ["orders-api", "shop-web"]) {
-    await syncRepo(store, name);
-    await mapSeams(store, name);
-  }
-  return { store, deps: { store, access: new LocalAccessPolicy() } };
-}
+const setup = fixtureWorld(["orders-api", "shop-web"]);
 
 describe("brain_impact", () => {
   it("lists a file's routes with their callers across repos, most-called first", async () => {
-    const { deps } = await setup();
+    const { deps } = setup();
 
     const result = await impact(deps, LOCAL_CALLER, { repo: "orders-api", path: "src/OrdersController.cs", format: "concise" });
 
@@ -32,7 +20,7 @@ describe("brain_impact", () => {
   });
 
   it("merges an endpoint declared in code and in a spec into one entry, citing code first", async () => {
-    const { deps } = await setup();
+    const { deps } = setup();
 
     const result = await impact(deps, LOCAL_CALLER, { repo: "orders-api", route: "GET /api/orders/{id}", format: "concise" });
 
@@ -41,7 +29,7 @@ describe("brain_impact", () => {
   });
 
   it("filters to one endpoint", async () => {
-    const { deps } = await setup();
+    const { deps } = setup();
 
     const result = await impact(deps, LOCAL_CALLER, { repo: "orders-api", route: "DELETE /api/orders/{id}", format: "detailed" });
 
@@ -50,7 +38,7 @@ describe("brain_impact", () => {
   });
 
   it("points a client file at brain_find_consumers instead", async () => {
-    const { deps } = await setup();
+    const { deps } = setup();
 
     const result = await impact(deps, LOCAL_CALLER, { repo: "shop-web", path: "./src/api.ts", format: "concise" });
 
@@ -60,7 +48,7 @@ describe("brain_impact", () => {
   });
 
   it("hides unreadable repos, including their calls", async () => {
-    const { store } = await setup();
+    const { store } = setup();
     const onlyApi: AccessPolicy = { readableRepos: async () => new Set(["orders-api"]) };
 
     const hidden = await impact({ store, access: onlyApi }, LOCAL_CALLER, { repo: "shop-web", format: "concise" });

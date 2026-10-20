@@ -1,6 +1,54 @@
 # Decisions
 
-Newest last. Each entry: what was decided, why, and what would change it.
+Newest last. Each entry: what was decided, why, and what would change it. Superseded
+entries, and the long evidence behind some current ones, are in
+[decisions-archive.md](decisions-archive.md).
+
+## Current decisions
+
+One line each; superseded ones are in the [archive](decisions-archive.md).
+
+- [2026-09-29: the brain is a separate system](#2026-09-29-the-brain-is-a-separate-system)
+- [2026-09-29: MCP is the only agent interface; agents first, UI later](#2026-09-29-mcp-is-the-only-agent-interface-agents-first-ui-later)
+- [2026-09-29: per-repo permissions following GitHub](#2026-09-29-per-repo-permissions-following-github)
+- [2026-09-29: TypeScript on Node](#2026-09-29-typescript-on-node)
+- [2026-09-29: v1 scope](#2026-09-29-v1-scope)
+- [2026-09-29: facts are tagged repo @ commit, read from the committed tree](#2026-09-29-facts-are-tagged-repo--commit-read-from-the-committed-tree)
+- [2026-09-29: SQLite via `node:sqlite` for the POC](#2026-09-29-sqlite-via-nodesqlite-for-the-poc)
+- [2026-09-29: TypeScript 6, tools run through node](#2026-09-29-typescript-6-tools-run-through-node)
+- [2026-09-29: endpoints match exactly or by suffix at a segment boundary](#2026-09-29-endpoints-match-exactly-or-by-suffix-at-a-segment-boundary)
+- [2026-09-29: unresolved calls are counted, never guessed](#2026-09-29-unresolved-calls-are-counted-never-guessed)
+- [2026-09-29: numeric and GUID segments are parameters](#2026-09-29-numeric-and-guid-segments-are-parameters)
+- [2026-09-29: one entry per endpoint in answers](#2026-09-29-one-entry-per-endpoint-in-answers)
+- [2026-09-29: run-time URL notes lead with the repos in the answer](#2026-09-29-run-time-url-notes-lead-with-the-repos-in-the-answer)
+- [2026-09-29: repos track origin's default branch by default](#2026-09-29-repos-track-origins-default-branch-by-default)
+- [2026-09-29: freshness through a git reference-transaction hook](#2026-09-29-freshness-through-a-git-reference-transaction-hook)
+- [2026-09-30: neighbours are worked out when asked, not stored](#2026-09-30-neighbours-are-worked-out-when-asked-not-stored)
+- [2026-09-30: a key with no literal segment only links within its own repo](#2026-09-30-a-key-with-no-literal-segment-only-links-within-its-own-repo)
+- [2026-10-05: the wiki is AI-first; deterministic checks verify it](#2026-10-05-the-wiki-is-ai-first-deterministic-checks-verify-it)
+- [2026-10-05: Claude Code headless is the AI engine](#2026-10-05-claude-code-headless-is-the-ai-engine)
+- [2026-10-05: clean up as we go](#2026-10-05-clean-up-as-we-go)
+- [2026-10-05: every wiki citation is checked before an agent sees it](#2026-10-05-every-wiki-citation-is-checked-before-an-agent-sees-it)
+- [2026-10-06: the wiki updates itself, one affected page at a time](#2026-10-06-the-wiki-updates-itself-one-affected-page-at-a-time)
+- [2026-10-06: a resource declaration implies its CRUD routes](#2026-10-06-a-resource-declaration-implies-its-crud-routes)
+- [2026-10-06: prompts are Markdown files, not skills](#2026-10-06-prompts-are-markdown-files-not-skills)
+- [2026-10-06: routes and calls come from Claude Code; the parsers are removed](#2026-10-06-routes-and-calls-come-from-claude-code-the-parsers-are-removed)
+- [2026-10-06: dropped seams get a second pass; table headers aren't claims](#2026-10-06-dropped-seams-get-a-second-pass-table-headers-arent-claims)
+- [2026-10-07: search is keywords over wiki sections and endpoints](#2026-10-07-search-is-keywords-over-wiki-sections-and-endpoints)
+- [2026-10-07: easy to trial locally; parser-era leftovers removed](#2026-10-07-easy-to-trial-locally-parser-era-leftovers-removed)
+- [2026-10-08: the product layer (B2a): product pages, systems, impact from a description](#2026-10-08-the-product-layer-b2a-product-pages-systems-impact-from-a-description)
+- [2026-10-12: a card asked for a system's name answers with the system](#2026-10-12-a-card-asked-for-a-systems-name-answers-with-the-system)
+- [2026-10-12: links beyond HTTP: events, gRPC and shared packages](#2026-10-12-links-beyond-http-events-grpc-and-shared-packages)
+- [2026-10-12: facts from people (B3a): a write tool the person confirms, not the agent](#2026-10-12-facts-from-people-b3a-a-write-tool-the-person-confirms-not-the-agent)
+- [2026-10-13: facts from people are checked against the code (B3b)](#2026-10-13-facts-from-people-are-checked-against-the-code-b3b)
+- [2026-10-13: wikis that fit the repo, and syncs side by side (B4a)](#2026-10-13-wikis-that-fit-the-repo-and-syncs-side-by-side-b4a)
+- [2026-10-13: two checker and prompt fixes](#2026-10-13-two-checker-and-prompt-fixes)
+- [2026-10-13: following a flow across repos (B4b)](#2026-10-13-following-a-flow-across-repos-b4b)
+- [2026-10-13: everything a person does, through MCP (B5)](#2026-10-13-everything-a-person-does-through-mcp-b5)
+- [2026-10-13: adding a repo from Claude Code, and a README for setting up (B7)](#2026-10-13-adding-a-repo-from-claude-code-and-a-readme-for-setting-up-b7)
+- [2026-10-14: link maps that say what they covered (B6b)](#2026-10-14-link-maps-that-say-what-they-covered-b6b)
+- [2026-10-14: planning depth (B8)](#2026-10-14-planning-depth-b8)
+- [2026-10-15: wiki quality from planning tests](#2026-10-15-wiki-quality-from-planning-tests)
 
 ## 2026-09-29: the brain is a separate system
 
@@ -20,10 +68,16 @@ hosted, the caller's GitHub identity is checked per request. Filtering lives in 
 
 ## 2026-09-29: TypeScript on Node
 
+*The tree-sitter reason is superseded (2026-10-06: the parsers were removed); the others stand.*
+
 Matches the harness's evals tooling, has a first-class MCP SDK, and has WASM tree-sitter so
 there are no native builds on Windows.
 
 ## 2026-09-29: v1 scope
+
+*Partly superseded: symbol maps and curated product context weren't built (architecture, "Not in
+v1"); facts from people (B3a) hold what people state, and wiki pages are AI-written first
+(2026-10-05). Jira and Confluence still aren't ingested.*
 
 Seam graph, symbol maps, repo cards, curated product context and deep wiki pages. Wiki pages are
 advisory and citation-checked. Jira/Confluence are not ingested (Rovo MCP covers them).
@@ -44,20 +98,8 @@ Group policy on Citation laptops blocks native executables and `.cmd` shims unde
 and `vitest` via `node`, and `bin/` launchers load tsx relative to themselves so the CLI and the
 MCP server run from any folder. Revisit if the policy changes or when we build to JavaScript for hosting.
 
-## 2026-09-29: phase 1 stacks are OpenAPI, TS/JS and C#/ASP.NET
-
-*Superseded on 2026-10-06: Claude Code finds routes and calls; the parsers were removed.*
-
-OpenAPI/AsyncAPI specs cover the serving side of any backend that publishes one. TS/JS covers
-both sides (most frontends are the callers). C#/ASP.NET is the backend stack. Other stacks are
-added when an enrolled repo needs them, and repo cards list code languages with no extractor.
-
-## 2026-09-29: tree-sitter through `@vscode/tree-sitter-wasm`
-
-*Superseded on 2026-10-06: Claude Code finds routes and calls; the parsers were removed.*
-
-One package with the WASM runtime and grammars for TS, TSX, JS, C#, Java, Python, PHP and Go,
-built and versioned together by the VS Code team. WASM avoids native builds and group policy.
+- *Archived:* [2026-09-29: phase 1 stacks are OpenAPI, TS/JS and C#/ASP.NET](decisions-archive.md#2026-09-29-phase-1-stacks-are-openapi-tsjs-and-caspnet), superseded on 2026-10-06.
+- *Archived:* [2026-09-29: tree-sitter through `@vscode/tree-sitter-wasm`](decisions-archive.md#2026-09-29-tree-sitter-through-vscodetree-sitter-wasm), superseded on 2026-10-06.
 
 ## 2026-09-29: endpoints match exactly or by suffix at a segment boundary
 
@@ -68,17 +110,13 @@ only of parameters never suffix-matches, so `/{}` can't match everything.
 
 ## 2026-09-29: unresolved calls are counted, never guessed
 
+*The last sentence is superseded (2026-10-06): Claude Code decides what is an HTTP call.*
+
 A call to a known HTTP client whose URL is only known at run time is stored with no key. It never
 matches anything, but answers say how many exist so "no callers found" is not read as proof.
 Calls on receivers that don't look like HTTP clients are skipped rather than recorded.
 
-## 2026-09-29: extractor version forces a full re-extract
-
-*Superseded on 2026-10-06: Claude Code finds routes and calls; the parsers were removed.*
-
-`EXTRACTOR_VERSION` is stored per repo. When a plugin changes, bump it; each repo is fully
-re-extracted on its next sync instead of mixing old and new rules. This is also how phase 0
-databases gain seams.
+- *Archived:* [2026-09-29: extractor version forces a full re-extract](decisions-archive.md#2026-09-29-extractor-version-forces-a-full-re-extract), superseded on 2026-10-06.
 
 ## 2026-09-29: numeric and GUID segments are parameters
 
@@ -86,13 +124,7 @@ databases gain seams.
 purely numeric and GUID segments normalise to `{}`. Word segments stay literal, so
 `/articles/feed` still never matches `/articles/{slug}`.
 
-## 2026-09-29: conventionally routed C# controllers are skipped
-
-*Superseded on 2026-10-06: Claude Code finds routes and calls; the parsers were removed.*
-
-`[HttpGet]` with no template on the action or the class is a verb constraint on a route table
-defined elsewhere (`MapControllerRoute`). The path isn't in the file, so no route is emitted.
-Found as false `GET /` routes in eShop's Identity `AccountController`.
+- *Archived:* [2026-09-29: conventionally routed C# controllers are skipped](decisions-archive.md#2026-09-29-conventionally-routed-c-controllers-are-skipped), superseded on 2026-10-06.
 
 ## 2026-09-29: one entry per endpoint in answers
 
@@ -100,44 +132,10 @@ When a repo declares the same method and path in code and in OpenAPI specs, answ
 entry citing the code, with the specs listed as "also declared in". The store keeps every
 declaration; only the answers are merged, so callers aren't repeated per spec file.
 
-## 2026-09-29: ambiguous C# method names need a client-like receiver
-
-*Superseded on 2026-10-06: Claude Code finds routes and calls; the parsers were removed.*
-
-`GetAsync`/`PostAsync`/... also exist on caches and repositories. They count as HTTP only when
-the receiver's name contains "client" or "http", or the URL contains a "/". HttpClient-only
-extensions (`GetFromJsonAsync`, `PostAsJsonAsync`, ...) always count.
-
-## 2026-09-29: extractor tests are annotated fixture files
-
-*Superseded on 2026-10-06: Claude Code finds routes and calls; the parsers were removed.*
-
-Test inputs are real source files in their own language (`test/fixtures/extractors/`), with the
-expected seam written as a comment on its line, the convention Semgrep and tree-sitter use for
-their own tests. One runner pushes every fixture through the production `extractSource` with all
-plugins that want the file, and requires an exact match, so each fixture checks both what must be
-found and what must not. C#, TypeScript and YAML samples are no longer written inside TypeScript
-strings. Integration tests build their repos from `test/fixtures/repos/`.
-
-## 2026-09-29: TS/JS calls need a client-named receiver
-
-*Superseded on 2026-10-06: Claude Code finds routes and calls; the parsers were removed.*
-
-Running both TS plugins over whole fixture files showed `cache.get("/key", fallback)` counted as
-an HTTP call. Member calls now count only when the receiver is named like a client (`api`,
-`http`, `requests`, `axios`, `*Client`, `*Api`, ...). `fetch` and `axios(...)` always count.
-Seam counts on the RealWorld repos and eShop were unchanged.
-
-## 2026-09-29: a trailing run-time path makes the URL run-time
-
-*Superseded on 2026-10-06: Claude Code finds routes and calls; the parsers were removed.*
-
-`API + url`, `` `${API}${path}` `` and `$"{Base}/{relativePath}"` used to produce made-up keys
-like `/api/{}`. A run-time value at the end of a URL now makes the whole URL "run-time" when it
-is glued to text with no separator, or when its name says it holds a URL or path (`url`, `uri`,
-`path`, `endpoint`, `route`, `resource`, `href`, `address`), unless it sits in the query
-string. `"/orders/" + id` is still an ordinary parameter. TS template substitutions now resolve
-same-file constants, as concatenation and C# interpolation already did.
+- *Archived:* [2026-09-29: ambiguous C# method names need a client-like receiver](decisions-archive.md#2026-09-29-ambiguous-c-method-names-need-a-client-like-receiver), superseded on 2026-10-06.
+- *Archived:* [2026-09-29: extractor tests are annotated fixture files](decisions-archive.md#2026-09-29-extractor-tests-are-annotated-fixture-files), superseded on 2026-10-06.
+- *Archived:* [2026-09-29: TS/JS calls need a client-named receiver](decisions-archive.md#2026-09-29-tsjs-calls-need-a-client-named-receiver), superseded on 2026-10-06.
+- *Archived:* [2026-09-29: a trailing run-time path makes the URL run-time](decisions-archive.md#2026-09-29-a-trailing-run-time-path-makes-the-url-run-time), superseded on 2026-10-06.
 
 ## 2026-09-29: run-time URL notes lead with the repos in the answer
 
@@ -164,25 +162,8 @@ would have to share stdin) or to a `core.hooksPath` inside the repo (husky), bec
 change tracked files. SQLite waits up to 10s for a lock, so overlapping syncs queue rather than
 fail. Hosted, a GitHub webhook replaces the hook; the sync is the same.
 
-## 2026-09-30: repo cards read what a repo declares, and never run it
-
-*Superseded on 2026-10-05: the wiki's pages replaced the fact readers.*
-
-Build and test commands come from `package.json` scripts (the package manager from the nearest
-lockfile) and .NET solutions and projects. Owners come from CODEOWNERS, found the way GitHub
-finds it. "About" is the README's first real paragraph. All of it is parser-built and cited to
-file and line, and the brain never runs a command to check it works. Curated purposes (phase 4)
-will sit alongside these as human-reviewed facts rather than replace them.
-
-## 2026-09-30: facts go through the same pipeline as seams
-
-*Superseded on 2026-10-05: the fact readers and the `facts` table were removed.*
-
-Readers in `src/ingest/facts/` are pure, one file at a time, like extractor plugins. Their facts
-go in a `facts` table that cascades from `files`, so only changed blobs are re-read, each fact
-names its commit, and a deleted file takes its facts with it. `EXTRACTOR_VERSION` 4 fills them in
-for repos indexed earlier. Lockfiles are recognised by name and never read, because they can be
-many megabytes.
+- *Archived:* [2026-09-30: repo cards read what a repo declares, and never run it](decisions-archive.md#2026-09-30-repo-cards-read-what-a-repo-declares-and-never-run-it), superseded on 2026-10-05.
+- *Archived:* [2026-09-30: facts go through the same pipeline as seams](decisions-archive.md#2026-09-30-facts-go-through-the-same-pipeline-as-seams), superseded on 2026-10-05.
 
 ## 2026-09-30: neighbours are worked out when asked, not stored
 
@@ -256,6 +237,10 @@ The rules change only on evidence from real pages, with the case added to the te
 
 ## 2026-10-06: the wiki updates itself, one affected page at a time
 
+*Partly superseded: the `--wiki` flag went on 2026-10-07 (`brain sync` does everything), and
+re-planning a wiki was built in B4a (2026-10-13). The "not built" paragraph is in the
+[archive](decisions-archive.md#2026-10-06-the-wiki-updates-itself-one-affected-page-at-a-time-superseded-parts).*
+
 The git hook now runs `brain sync <repo> --wiki`: sync, then update the wiki if the repo has one.
 A page is rewritten only if a file it cites changed or was deleted, or a file was added in a
 folder it cites. Every other page is re-checked against the new commit, with no AI, and moved to
@@ -270,10 +255,6 @@ That is derived from the page's commit, so there's no stale flag to keep in step
 One run per repo at a time, across processes: a lock file next to the store. A trigger that
 arrives mid-run leaves a marker, and the running process goes round once more, so the newest
 commit is always covered without stacking runs. A lock whose process died is taken over.
-
-Not built, for lack of evidence it's needed: re-planning the page set when a repo's structure
-changes (`brain wiki --full` does it by hand), and a separate `--status` command (the page list
-marks any page kept from an older commit).
 
 ## 2026-10-06: a resource declaration implies its CRUD routes
 
@@ -306,27 +287,10 @@ them unless it's GET (a resource declaration implies its CRUD methods; `del(` is
 every fixed segment of the path appears in them. That last rule is what proves a prefix three
 files away. Failures are dropped and reported.
 
-**The deletion gate** (agreed 2026-10-05: match the parser on every test repo). Measured against
-the parsers' stored seams:
-
-| Repo | Parser | Claude Code | Missed | Dropped | Cost |
-|---|---|---|---|---|---|
-| aspnet-api (C#) | 19 routes | 20 routes, 1 call | 0 | 0 | $0.90 |
-| express-api (TS) | 20 routes, 1 call | 20 routes, 1 call | 0 | 0 | $0.49 |
-| react-web (JS) | 22 calls, 4 run-time | 22 calls | 0 | 0 | $0.09 |
-| eshop (C#, large) | 56 routes, 54 calls, 20 run-time | 77 routes, 57 calls, 2 run-time | 1 duplicate test call | 0 | $3.68 |
-| laravel-api (PHP) | none | 22 routes, 78 calls | n/a: all 19 RealWorld endpoints | 0 | $0.22 |
-| flask-api (Python) | none | 19 routes, 14 calls | n/a: all 19 RealWorld endpoints | 0 | $0.17 |
-
-- **Every extra was real:** aspnet's Swagger endpoint and a `curl` in its Makefile; eshop's
-  health checks, Identity MVC routes and Blazor pages.
-- **eshop's one miss:** a v1 call on the line beside a v2 call in one test. Its endpoint is still
-  linked from another test.
-- **Fewer run-time calls:** the AI resolves wrappers and base URLs. react-web's four "run-time"
-  calls were the superagent wrapper itself.
-- **Two fixes came from the first run:** `del(` for DELETE (react-web's three DELETEs were
-  dropped), and the prompt rule that a variable segment is a parameter, not run-time (Laravel's
-  tests went from 13 run-time calls to 0).
+**The deletion gate** (match the parsers on every test repo) passed: on six repos in four
+languages Claude Code found every parser seam but one duplicate test call, every extra was real,
+and it cost $0.09–3.68 a repo
+([archive](decisions-archive.md#2026-10-06-routes-and-calls-come-from-claude-code-the-parsers-are-removed-evidence)).
 
 **Two matching rules came from real output:**
 - A call its own repo serves (its tests, its own front end) links only within that repo. Every
@@ -386,20 +350,8 @@ answers because the wording differs from the wiki's.
 - **Permissions:** rows are filtered to the caller's repos inside the query, like every other
   tool.
 
-**Gate**, on the real store (7 repos): for each of 10 questions, a sensible section in the top 3.
-
-| Question | Top result |
-|---|---|
-| how do I run the tests | citation-harness-library · build-run-test › Test |
-| jwt authentication | react-web · redux-data-flow › localStorageMiddleware |
-| basket checkout | eshop · api › Basket (`Basket.API`, gRPC) |
-| who calls articles | flask-api · api › Articles |
-| database migrations | express-api · build-run-test › Prisma setup |
-| skill evaluation cost | citation-harness-library · api › Skill slash-command surface |
-| where are orders cancelled | eshop · api › Ordering; endpoint `PUT /api/orders/cancel` |
-| redux store setup | react-web · redux-data-flow › localStorageMiddleware |
-| favorite an article | aspnet-api · api › Favorites |
-| event bus integration events | eshop · ordering-api › Transactional outbox for integration events |
+**Gate:** on the real store (7 repos), each of 10 questions found a sensible section in the top 3
+([archive](decisions-archive.md#2026-10-07-search-is-keywords-over-wiki-sections-and-endpoints-evidence)).
 
 ## 2026-10-07: easy to trial locally; parser-era leftovers removed
 
@@ -467,42 +419,15 @@ systems a piece of work touches, without reading code.
 word ("codes", "add") in many sections and came second for "add discount codes to the basket"
 (20.9 against eshop's 24). Scaled, it falls to 5.2 and shows only as a weaker match.
 
-**Gate** (snapshot of the real store; product pages written for aspnet-api, react-web and the
-harness, $3.93 including an update of three harness pages the branch had moved past; the other
-four repos were left for budget):
-- Product pages: 35/35, 25/25 and 65/68 claims kept; the three removals were uncited bold
-  lead-ins. No backticks or code names in the text. Spot-checked rules match their citations
-  (unique username and email, author-only delete, 20 results per page).
-- `systems suggest` ($0.08–0.20): RealWorld (four APIs and react-web), eShop alone, the harness
-  alone. The first version checked "evidence" items the AI wrote, and a page existing counted as
-  support, which every repo passes; review replaced it with the link check above, computed from
-  the seam graph rather than taken from the AI. RealWorld passes it: react-web calls all four APIs.
-- `impact --work`: "save articles to read later" and "let users delete their account" give
-  aspnet-api and react-web (the other APIs, with no product page yet, as weaker matches);
-  "add discount codes to the basket" and "notify buyers when an order ships" give eshop (Basket;
-  Ordering with `PUT /api/orders/ship`); "add a cost report to skill evals" gives the harness.
-
-**Found on Rafe's first real sync** (all 7 repos, about $6.7): six product pages passed (23/23 to
-54/54 claims kept). eShop's failed twice, 12 of 34 claims kept, nearly all removed as "no
-citation" although the removed text visibly had brackets. The failed draft isn't stored, so the
-exact form is unknown; the checker now also reads several files in one bracket separated by
-commas and ranges written with an en or em dash, and a claim whose bracket still can't be read
-says so and shows it ("no citation it can read: [...]"). And because a missing page that fails
-was retried on every sync (eShop's would have cost about $3.60 each time), a failure is recorded
-(`repo_state.pages_failed_at`, migration 11) and the page waits until the code changes or
-`--full`. Work descriptions also drop words almost every one uses ("let", "users", "people"),
-which had ranked repos by their user routes for "let users save articles to read later".
-
-**The first PO-style question went unanswered by the brain.** A fresh Claude Code session asked
-"What can users do in RealWorld, and what rules apply to profiles?" answered from memory of the
-public RealWorld spec and called no brain tool. Its brain server was still `main` (no product
-pages or systems), but the deeper gap was that nothing told the agent "RealWorld" is a name the
-brain holds, and the name matches a famous public project. The server's instructions now end
-with a catalogue built when it starts: the systems and repos the caller can read (up to 40
-repos, then a pointer to `brain_repo_card`), each with its product sentence, and a line saying
-these names are the organisation's own even where one matches a public project. About 850
-tokens for the seven trial repos. Product names at Citation ("Atlas", "Lucy") will need the
-same, since they mean nothing to a model on their own.
+**Gate and first use**
+([archive](decisions-archive.md#2026-10-08-the-product-layer-b2a-product-pages-systems-impact-from-a-description-evidence)):
+product pages kept 25/25 to 65/68 claims, and suggestions and work impact named the repos a person
+would. Rafe's first real sync led to three changes: the checker reads several files in one bracket
+and ranges written with a dash; a missing page that fails waits for a code change or `--full`
+(`repo_state.pages_failed_at`, migration 11); and work descriptions drop words almost every one
+uses ("let", "users"). The first PO-style question went unanswered because nothing told the agent
+"RealWorld" is a name the brain holds, so the server's instructions now end with a catalogue of
+the systems and repos the caller can read, each with its product sentence.
 
 **What would change it:** re-tune the weights when every repo has a product page. Repos that make
 up one product but don't call each other over HTTP are left out of suggestions until B2b's
@@ -518,6 +443,10 @@ repos. `brain_repo_card` (and `brain card`) now answers a system's name with tha
 overview, saying so first; a repo's name still gives its card.
 
 ## 2026-10-12: links beyond HTTP: events, gRPC and shared packages
+
+*Mapping each family in one run over the whole repo, and its second look, are superseded by B6b
+(2026-10-14): runs now map screened pieces a dozen at a time. The two families keep separate
+runs.*
 
 Repos meet over more than HTTP. Mapping a repo now also lists events published and handled
 (RabbitMQ, Kafka, Service Bus, SNS/SQS, an event bus between services), gRPC methods served and
@@ -568,50 +497,17 @@ and the HTTP run is skipped when those are all manifests such as `requirements.t
 `brain sync <name> --only links` (or `--only wiki`) redoes one step. Checking a change to link
 mapping with `--full` had also rewritten eshop's whole wiki ($2.88), which wasn't wanted.
 
-**Gate of the two-run version** (eshop, a snapshot of the real store, `--full` seam re-map):
-84 routes and 56 calls (+2 run-time), against the stored map's 97 distinct HTTP seams: 89 match,
-3 are new, and 8 are missing (the two OpenAPI documents, and six calls whose URL is a variable
-such as `subs.DestUrl`). The other kinds came out the same as the single run: 13 events published,
-18 handled, 3 gRPC served, 6 called. 3 entries were retried and none were dropped. It cost $5.91,
-against $2.44 for the single run, so a full eshop map costs about $3.50 more. Small repos and
-updates cost cents.
-
-**Rafe's sync of the same commit** (`--full`, before the runs went side by side): 76 routes and
-105 call sites (48 distinct endpoints; the functional tests call the same ones many times), the
-same 31 events and 3 gRPC methods served, in 813s and $5.36. It found only the web app's 3 gRPC
-calls, not the mobile app's (`src/ClientApp`) as well. That is run-to-run recall, not something
-the check can catch: it proves what is kept is in the code, not that everything was listed.
-Updates re-map only changed files, so a miss stays until those files change or `--full`. Worth
-watching on real repos (B6), where one missed caller matters.
-
-**The fix for that: a second look.** Rafe's next `--only links` run missed the web app's four
-order-status handlers, a Webhooks handler and the mobile app's gRPC calls again: the run stops
-before it has looked everywhere, skipping whole files. Now a full map of the links run asks once
-more, with the list of what was found, for anything missed in each service and app, and its
-additions go through the same check; updates map a few files and don't. The prompt also says to
-list each handler and each client's calls separately. Two gated full maps then found all 18
-handlers and all 6 gRPC calls, with the second look adding nothing either time: the prompt line
-may be what fixed it, and the second look stays as cover since the misses varied between runs.
-Each full map cost $4.41–4.65. The time sync prints is now start to finish (682s and 901s here);
-it had been the sum of the runs, which go side by side.
-
-**Gate of the single-run version** (a snapshot of the real store, `--full` seam re-maps only):
-
-| Repo | Found | Dropped | Cost |
-|---|---|---|---|
-| eshop | 13 events published, 18 handled; gRPC 3 served (`Basket/GetBasket`, `UpdateBasket`, `DeleteBasket`), 6 called (WebApp, ClientApp); 63 routes, 51 calls | 15 on the first pass, all recovered on the second | $2.44 (first run $2.09) |
-| react-web | 22 calls, no other kinds | 0 | $0.27, then $0.10 |
-| aspnet-api | 19 routes, 1 call, no other kinds | 0 | $0.64 |
-
-- `consumers "event OrderStartedIntegrationEvent"`: published by Ordering.API's
-  `CreateOrderCommandHandler.cs:32-33`, handled by Basket.API (`Extensions.cs:19`), `same repo`.
-  `OrderStatusChangedToPaidIntegrationEvent` has three handlers (Catalog, WebApp, Webhooks).
-- No false links among the RealWorld repos: their cards are unchanged, and none gained a package
-  or event.
-- A citation can be up to three lines off, as for wiki claims: in the first run one Webhooks subscription was
-  located on the line above its own.
+**Gates and recall**
+([archive](decisions-archive.md#2026-10-12-links-beyond-http-events-grpc-and-shared-packages-evidence)):
+the two-run version matched the stored eShop map for about $3.50 more a full map. Runs still
+skipped whole files, differently each time, so a full map gained a second look; B6b replaced that
+with screening every piece.
 
 ## 2026-10-12: facts from people (B3a): a write tool the person confirms, not the agent
+
+*Superseded in part by B5 (2026-10-13): the confirm dialog, `propose` and `brain web` went, and a
+person now confirms in the conversation. Those parts are in the
+[archive](decisions-archive.md#2026-10-12-facts-from-people-b3a-a-write-tool-the-person-confirms-not-the-agent-superseded-parts).*
 
 What a product owner tells their agent during a brief ("follows are capped at 500") should reach
 the next agent. Rafe chose all four of the plan's recommendations: facts sit beside the AI pages,
@@ -619,18 +515,11 @@ in a sixth tool, anyone using the brain locally may confirm (owners when hosted)
 the brain couldn't answer are logged locally.
 
 - **`brain_record_fact`, the first tool that writes.** It is the exception to "agent tools are
-  read-only", so it is guarded in three ways:
-  - **MCP elicitation:** the server asks the person through the client. Claude Code shows a
-    dialog with the fact, their name (git `user.name`), and what the brain already says nearby
-    (the closest wiki sections and facts, by search, no AI). They accept, edit or decline. The
-    answer goes to the server, not through the agent, so an agent can't confirm for them.
+  read-only", so it is guarded (a third guard, a confirm dialog, went in B5):
   - **`anthropic/requiresUserInteraction`** in the tool's `_meta`: Claude Code asks permission
     on every call, even when the server's tools are allowed.
   - **Instructions and description:** record only what the person said in the conversation,
     never repo text, tool output or a web page.
-  Where no dialog is possible (a client without elicitation, a headless `claude -p` run, such as
-  a harness skill), the fact is stored as **proposed**. Agents see it labelled so, and a person
-  confirms it with `brain facts confirm`. A decline stores nothing.
 - **Beside the AI pages, never inside them.** Wikis stay regenerable, and a rewrite can't lose a
   person's fact. They come first wherever they appear: the product page opens with `## From
   people` (the repo's facts, then its system's), the card has a `Facts from people` line, search
@@ -667,18 +556,6 @@ desktop app, so the instructions now say to load them first.
 **Not in B3a:** an AI check of a fact against the code it's about (B3b), suggestions from gaps,
 and the harness's PO brief skill using the tool (H1).
 
-**Found in Rafe's first test (the desktop app's Code tab):** the permission prompt appeared and
-was allowed, but the confirm dialog came back declined both times without being shown. The app
-says it supports elicitation, then declines. So a decline that arrives within a second is now
-reported to the agent as "most likely never shown", and the agent can call again with `propose`
-to store it as proposed (no new risk: clients without the dialog already do that). A decline a
-person actually makes still stores nothing.
-
-**What would change it:** POs mostly use the desktop app, where facts can only be proposed today
-and confirmed in a terminal. They need a confirm step there before the loop is really theirs:
-`brain web` (B5) with a confirm button is the likely place. Hosted, confirmation moves to owners, and facts may export to the curated-content
-repo (`brain facts export` gives its shape).
-
 ## 2026-10-13: facts from people are checked against the code (B3b)
 
 A confirmed fact says what people agreed, not what the code does. A PO's agent should tell "the
@@ -704,17 +581,11 @@ on every sync, and lines that agree becoming anchors.
   the caller can read.
 - **Sync** gains a fourth step (`--only facts`); `brain facts check` runs it now.
 
-**Gate** (a snapshot of the real store, three facts across the five RealWorld repos, $0.36 for
-the first pass, about 10s a repo):
-- "Only an article's author can delete it" (laravel-api): agrees, citing `DeleteArticle.php` and
-  `ArticleController.php`, which became its anchors.
-- "Anyone signed in can delete any comment" (aspnet-api): contradicts: "Deleting a comment is
-  refused with Forbidden unless the signed-in user is the comment's author" (`Delete.cs:38-41`).
-- The 1000-follow cap (RealWorld): absent in four repos, but flask-api said contradicts ("no cap:
-  a user can follow any number"). Both readings are defensible, but a PO needs one: the prompt
-  now says code that simply lacks a rule is absent, and contradicts means the code actively does
-  otherwise. Re-checked, flask-api says absent and the comment rule still contradicts.
-- A second `facts check` with nothing changed ran no AI.
+**Gate**
+([archive](decisions-archive.md#2026-10-13-facts-from-people-are-checked-against-the-code-b3b-evidence)):
+three facts across the five RealWorld repos for $0.36, each verdict right on reading. One
+"contradicts" for a rule the code simply lacks led the prompt to say that is absent, and
+contradicts means the code actively does otherwise.
 
 ## 2026-10-13: wikis that fit the repo, and syncs side by side (B4a)
 
@@ -746,48 +617,12 @@ Google Code Wiki without bloat, and without making syncs slower.
 - **Speed:** a sync's links, wiki and fact checks share one worktree and run at once. `add` and
   `sync` do three repos at a time, under one cap of four Claude Code runs per command.
 
-**Gate** (a snapshot of the real store):
-- **eShop, as its next sync will run it** (it has five pages and no plan):
-  - Planned 18 pages around the five: 10 areas matching its real services and apps, place-order
-    and sign-in flows, data model and integrations.
-  - Wrote the 13 new pages in 273s for $2.78. The plan was the first run, then the batches side by
-    side. All were published, keeping 73–96% of their claims.
-  - The five old pages were kept, not rewritten.
-  - The place-order flow has 15 numbered, cited steps from checkout to stock removal, and a
-    sequence diagram that passed the check. Five spot-checked citations were all right.
-- **laravel-api, small** (`--only wiki --full`): one run with no planning, 90s for $0.45. Seven
-  pages: the five plus data-model and integrations. Its overview flowchart has six cited boxes,
-  all kept.
-- **Updates, in a scratch clone of eShop:**
-  - A comment line added above cited lines: no AI run; 18 pages carried, with their citations
-    one line lower.
-  - A new `Loyalty.API` project (csproj and three files): planned again ("a new project at
-    src/Loyalty.API"), one page written for $0.29 in 81s, and the other 18 carried.
-  - A steering note: planned again, with no pages added or dropped.
-- **Technical-plan questions** from headless Claude Code sessions, with the brain and file tools,
-  working in the eShop clone:
-  - "plan a delivery date on orders": brain_impact with work, then overview, data-model,
-    ordering and webapp;
-  - "how does checkout work end to end": the place-order-flow page;
-  - "plan 'save for later' in laravel-api": overview, data-model, brain_impact.
-
-  None read or grepped any code. Each cost $0.07–0.11, and the plans named the right services,
-  files and migrations.
-
-**Found and fixed at the gate:** pages pointed to each other in sentences of their own ("See
-the api page"), which the check removes as uncited. Page runs now put the pointer inside a cited
-sentence. And sync said "no AI run" after a planning run; it now gives the planning cost.
-
-**After the gate, the paths that hadn't run for real:**
-- **A full sync of laravel-api, all three steps at once** in one shared worktree: 100s wall
-  (fact checks 12s, links 32s, wiki 96s) against 140s in turn, and the worktree was cleaned up.
-- **`brain add` of flask-api and react-web together** into an empty store: both in 91s.
-- **A bad run, recovered:** in that add, react-web's single page run came back with only two
-  pages (one slugged `x`, one citing a made-up path alongside a real one). Until now a full run
-  took whatever it returned and marked the missing required pages as failed until the code
-  changed. A full run now asks again, on its own, for any required page it left out, as updates
-  already did. Re-run, react-web wrote six good pages ($0.22, 57s), correctly with no data-model
-  page for a frontend.
+**Gate**
+([archive](decisions-archive.md#2026-10-13-wikis-that-fit-the-repo-and-syncs-side-by-side-b4a-evidence)):
+eShop planned 18 pages and wrote its 13 new ones in 273s for $2.78, keeping 73–96% of claims; a
+small repo took one run; a line move cost no AI and a new project wrote one page; headless
+planning questions read no code. Two fixes came from it: a pointer to another page goes inside a
+cited sentence, and a full run asks again for any required page it left out.
 
 **Still open:**
 - **Core pages and new projects:** when a new project arrives, the core pages (api, overview)
@@ -841,39 +676,14 @@ asked.
 - **Tables are matched within a repo** whatever their schema, quotes or case (`ordering.orders`
   is `Orders`), and are named but not linked between repos (B2b).
 
-**Gate** (a snapshot of the real store; about $9 in all, more than the $5 estimate, because eShop
-was traced twice while the check was fixed):
-- **eShop:** 189 checked chains, 3 dropped, and no exit point left without a trigger ($2.89,
-  280s). The first run left 8 without one: the grace-period job was dropped for a line a few off,
-  and UI actions were named by description. A found job is now taken at the line naming it, names
-  must be code names, and a second look asks about any exit point nothing reaches.
-- **The order trace** (`POST /api/orders --follow`), reading each hop's cited lines:
-  - the order is saved to `orders`;
-  - the grace-period job polls it and publishes `GracePeriodConfirmed`;
-  - Ordering sets awaiting validation;
-  - Catalog confirms or rejects stock;
-  - payment succeeds or fails;
-  - the order is paid and Catalog removes stock, or it is cancelled.
-
-  That matches the place-order page a person checked. Nine hops were spot-checked against the
-  code, all right. "Started from" names the web and mobile checkouts.
-- **RealWorld:** `POST /api/articles` shows all four APIs with the tables each writes, started
-  from react-web's `Editor`. laravel-api first kept 1 chain of 22: its routes are declared in
-  `routes/api.php` and handled in controllers, and the check required the chain to start in the
-  declaring file. A chain may now start in a file the declaration names (`'AuthController@login'`).
-  23 chains after the fix.
-- **An entry point no chain holds for** was asked again on every sync ($0.22 a time on eShop). It
-  is now recorded with why, and asked again only when its code changes.
-- **A fresh session** asked what changing order creation would set off. It called
-  `brain_find_consumers` with follow, read no code, cost $0.09, and named the databases touched.
-  It started from the `OrderStarted` event rather than the endpoint, so it missed the chain behind
-  the orders table. Agents choosing where to start is a matter for H1.
-
-**From Rafe's run on the real store** (about $4 for all seven repos; the order trace and a fresh
-session matched the gate): laravel-api dropped 8 table chains, because Eloquent writes `users`
-through the `User` model, so the table's name never appears. The singular now counts too, as in
-Rails and Django. react-web listed 11 components that call nothing; a found UI action that reaches
-nothing is now skipped quietly.
+**Gate and Rafe's run**
+([archive](decisions-archive.md#2026-10-13-following-a-flow-across-repos-b4b-evidence)): eShop's
+order trace matched the place-order page a person checked, nine hops spot-checked right. Fixes
+from them: a found job is taken at the line naming it and names must be code names; a second look
+asks about exit points nothing reaches; a chain may start in a file the declaration names
+(`'AuthController@login'`); an entry point no chain holds for is recorded and asked again only
+when its code changes; a table's singular name counts (Eloquent's `User`); and a UI action that
+reaches nothing is skipped.
 
 **Still open:**
 - Chains through a mediator or service are dropped when the run skips the step that defines the
@@ -926,15 +736,10 @@ doctor, set-ref) stays in the terminal.
   - suggesting systems and checking facts (AI runs that sync already does);
   - export (H2).
 
-**Gate:**
-- 231 tests pass.
-- **Headless `claude -p`** on a copy of the real store, with `mcp__citation-brain__*` allowed:
-  - `brain_record_fact` and `brain_facts` were refused before reaching the server ("MCPTool
-    requires permission"), and no fact was written;
-  - `brain_review` and `brain_repo_card` answered.
-
-  So the technical-planning stage can read headless, and only a person can write.
-- The desktop walkthrough is manual-testing Part G (Rafe).
+**Gate**
+([archive](decisions-archive.md#2026-10-13-everything-a-person-does-through-mcp-b5-evidence)): 231
+tests passed, and a headless `claude -p` was refused both write tools before they reached the
+server, while reads answered.
 
 **What would change it:** hosted (H2), confirmed facts may go to owners for review. The export
 shape exists, and `confirmed_with` shows what each person agreed to.
@@ -1003,23 +808,10 @@ shape exists, and `confirmed_with` shows what each person agreed to.
 - **Wider than asked:** any git URL is accepted, not only GitHub (Azure DevOps, say). It costs
   nothing: the name is the last part of the path, and git does the rest.
 
-**Gate:**
-- 250 tests pass (231 before). New: source parsing (https, `.git`, browser URLs, `owner/repo`,
-  SSH); a background enrolment through the MCP tool, the card going from being enrolled to done;
-  a failed clone, with git's reason and how to retry; read tools on a repo being enrolled;
-  `brain add <GitHub URL>`, cloned from a local bare repo through git's `insteadOf`; the tool list
-  (11, `brain_add_repo` asking); estimates from history; wiki progress; fetching clones.
-- **End to end, on a copy of the real store:** a stdio MCP session against this checkout called
-  `brain_add_repo` with `gothinkster/flask-realworld-example-app` (named flask-gate). It answered
-  in 27 ms, and the session closed straight away, taking its server with it. Fresh sessions then
-  read the card every 15 seconds:
-  - `being enrolled · not ready yet`, then `mapping its links; writing the wiki`, with
-    `Wiki: being written` and `Seams: being mapped`;
-  - `tracing what each entry point leads to` once the 19 routes were in;
-  - `Enrolled just now, in 1 min for $0.49: ready.`, with 7 pages and `Called by: react-web`,
-    about 90 seconds after the call.
-  The clone came from GitHub with plain git, its hook points at the copy, and the next session
-  start fetched it. `repo remove` deleted the clone.
+**Gate**
+([archive](decisions-archive.md#2026-10-13-adding-a-repo-from-claude-code-and-a-readme-for-setting-up-b7-evidence)):
+250 tests passed, and an end-to-end `brain_add_repo` of flask-realworld answered in 27 ms and was
+ready about 90 seconds later, its card showing each step.
 
 **What would change it:**
 - Hosted (phase 6): enrolment becomes a queued job on a worker. The table stays; the detached
@@ -1027,6 +819,68 @@ shape exists, and `confirmed_with` shows what each person agreed to.
 - If Claude Code shows progress for long-running MCP tasks, the card could give way to it.
 - If people enrol many large repos at once from several sessions, a cap on Claude Code runs across
   processes (today it's per command).
+
+## 2026-10-14: link maps that say what they covered (B6b)
+
+Supersedes the one run per family over the whole repo, and its second look, from 2026-10-12
+("links beyond HTTP"). The two families keep separate runs.
+
+**Why:** the B6 trial on real Citation repos showed one run can't map a large repo. On
+atlas-webapp-webapi (466 controllers, about 2,600 routes) three maps of one commit gave 124, 13
+and 25 routes, and answers took the sample as complete ("No matching routes are declared").
+Traces said "ends here" where code calls a URL or queue named in config. Research agreed: a
+single agent found about half of a repo's endpoints (OOPS, 2026), and systems with high recall
+split the work themselves and give each worker the shared context.
+
+**What it does** (`src/ai/seams.ts`):
+1. **Survey** (`src/ai/link-survey.ts`): one run states the route templates, the base classes
+   whose public methods every derived class serves, and the settings files. Each is checked
+   against its cites and kept on `repo_state.link_survey`. An update surveys again only when a
+   file the survey rests on changed.
+2. **Screen** (`src/ai/screen.ts`): a fast model (Haiku), with no tools, reads every piece of
+   the repo's own source with its text in the prompt, about 250,000 characters a run, and flags
+   routes, calls and messages. A piece is a whole file, or 600 lines of a long one. Unanswered
+   pieces are asked again, then counted as flagged, never lost.
+3. **Map by piece:** flagged pieces go to the HTTP run and the links run a dozen at a time, their
+   text in the prompt plus Read/Grep for prefixes elsewhere, with the survey's rules. Each run
+   answers for every piece it was given. Package manifests go to the links run unscreened.
+4. **Inherited routes:** the brain finds the subclasses of each surveyed base class by repeated
+   search and fills `{controller}` into each base route, citing the class, the base method and the
+   template. They are checked like any route, stored with `derived = 1` and worked out again on
+   every map.
+5. **Coverage:** `seam_pieces` keeps each piece's outcome for both runs: unflagged, mapped, none
+   or unmapped. Migration 19 adds it, with `seams.derived` and `repo_state.link_survey`.
+   `src/serve/coverage.ts` reads it: answers say "none" only where the map is complete, and
+   otherwise name the pieces not mapped; the card has a `Link map:` line. A map made before this
+   says its coverage wasn't recorded.
+6. **Tests are left out of mapping,** with vendored and generated code, by the definition the
+   wiki's inventory uses (`src/ai/inventory.ts`). A repo's tests calling its own routes aren't
+   callers that break in production, and the number a run listed varied.
+7. **Run-time exits in traces:** a call or message named only at run time shows as a step that
+   can't be followed, not as "ends here".
+
+**Design calls, from a spike on eShop and atlas:**
+- **Screen with the text in the prompt,** not search patterns or agentic batches. Patterns from
+  the survey missed 17 of eShop's 33 route files; folder batches answered "none" for files they
+  never opened. Inline screening missed 1 of 33 route files and none of 19 message files, and
+  flagged all 59 controllers of atlas's RD.Web for $0.23.
+- **The brain works out inherited routes.** Batches listed a controller's own actions, not
+  inherited ones: 21 of 35 CRUD-derived controllers got nothing, even when told. A 6,000-line
+  controller gave 23 of about 130 actions, hence 600-line pieces.
+- **No parser per language, and no subagents inside a run:** the survey states the rules, and the
+  brain applies them.
+
+**Gate** (a copy of the real store):
+- eShop: 76 distinct routes (73 before), the same calls once tests are left out, the same events
+  and gRPC names; $2.84, 4 minutes.
+- unity: 13 of 13 routes; authorize and callback trace to the user-management API and the IdP
+  token endpoint as run-time exits.
+- audit: 12 of 12 routes; `POST /tasks/` traces to the config-named queue, the task table and the
+  watchdog job (21 chains became 55).
+- atlas: 3,734 routes (2,943 inherited over 325 controllers) and 1,413 calls, no piece unmapped;
+  $72, 72 minutes. A CRUD-derived controller's own convention routes were missed until the
+  prompt's "don't list inherited" was narrowed: a slice of five controllers then gave 74 routes,
+  `GetEmployeeList` among them.
 
 ## 2026-10-14: planning depth (B8)
 

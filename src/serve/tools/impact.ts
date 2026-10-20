@@ -1,4 +1,5 @@
-import { matchEndpoints, type MatchQuality } from "../../core/http.js";
+import { cleanPath } from "../../core/citations.js";
+import type { MatchQuality } from "../../core/http.js";
 import { parseTarget } from "../../core/links.js";
 import { familyOf, isProvider, type Seam, type SeamFamily } from "../../core/seams.js";
 import type { Caller } from "../access.js";
@@ -6,12 +7,12 @@ import { absenceNote } from "../coverage.js";
 import {
   alsoDeclared,
   count,
-  endpointOf,
   FAMILY_LABEL,
   footer,
   groupRoutes,
   lineRange,
   linkCalls,
+  matchTarget,
   PAGE_SIZE,
   pointer,
   requireSyncedRepo,
@@ -65,13 +66,8 @@ export async function impact(deps: ToolDeps, caller: Caller, input: ImpactInput)
     return { ok: false, text: `"${input.route}" is not an endpoint, event, gRPC method or package. Try "GET /api/orders/{id}" or "event OrderStarted".` };
   }
 
-  const path = input.path?.replace(/\\/g, "/").replace(/^\.?\//, "");
-  const routes = deps.store.seams({ repos: [input.repo], path }).filter((route) => {
-    if (!isProvider(route.kind)) return false;
-    if (!target) return true;
-    if (familyOf(route.kind) !== target.family) return false;
-    return target.family === "http" ? matchEndpoints(endpointOf(route), target.endpoint) !== null : route.key === target.key;
-  });
+  const path = input.path === undefined ? undefined : cleanPath(input.path);
+  const routes = deps.store.seams({ repos: [input.repo], path }).filter((route) => isProvider(route.kind) && (!target || matchTarget(route, target) !== null));
   const groups = groupRoutes(routes);
   const everything = deps.store.seams({ repos: found.readable });
   const links = linkCalls(

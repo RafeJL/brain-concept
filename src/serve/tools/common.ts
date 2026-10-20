@@ -1,4 +1,6 @@
+import { formatCitation } from "../../core/citations.js";
 import { hasLiteralSegment, matchEndpoints, type Endpoint, type MatchQuality } from "../../core/http.js";
+import type { LinkTarget } from "../../core/links.js";
 import { FAMILIES, familyOf, type Seam, type SeamFamily } from "../../core/seams.js";
 import type { Freshness, RepoRecord, RepoState, WikiPage } from "../../core/types.js";
 import { liveStatus } from "../../ingest/enrol.js";
@@ -49,8 +51,22 @@ export function withoutWiki(deps: ToolDeps, names: readonly string[]): string[] 
     });
 }
 
+/** The text cut to at most `max` characters, ending in "…" when cut. */
+export function clip(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
 /** What every tool says when there's nothing to read. */
 export const NO_REPOS = "No repos are enrolled yet. Add one with brain_add_repo (a GitHub URL, owner/repo or a local folder).";
+
+/** The repos a tool looks in: those asked for that the caller can read, or every one they can. */
+export async function scopeOf(deps: ToolDeps, caller: Caller, repos: readonly string[] | undefined): Promise<{ ok: true; readable: string[]; scope: string[] } | Failure> {
+  const readable = await readableRepos(deps, caller);
+  const scope = repos?.length ? readable.filter((name) => repos.includes(name)) : readable;
+  if (readable.length === 0) return { ok: false, text: NO_REPOS };
+  if (scope.length === 0) return { ok: false, text: `None of the requested repos are enrolled or readable. Repos you can read: ${readable.join(", ")}.` };
+  return { ok: true, readable, scope };
+}
 
 /**
  * A repo the caller may read and that has been synced. Unknown and unreadable repos get the same
@@ -89,6 +105,13 @@ export function matchSeams(a: Seam, b: Seam): MatchQuality | null {
   return a.key === b.key ? "exact" : null;
 }
 
+/** How a seam matches what the caller asked about, if it does, by the same rules as `matchSeams`. */
+export function matchTarget(seam: Seam, target: LinkTarget): MatchQuality | null {
+  if (familyOf(seam.kind) !== target.family) return null;
+  if (target.family === "http") return matchEndpoints(endpointOf(seam), target.endpoint);
+  return seam.key === target.key ? "exact" : null;
+}
+
 /** A call that reaches a route (or a subscription its event, a dependency its package…), and how well the two matched. */
 export interface SeamLink {
   call: Seam;
@@ -106,7 +129,7 @@ export interface SeamLink {
  *   calling itself, which says nothing about another repo that happens to serve the same path.
  *   Likewise an event a repo publishes and handles itself.
  */
-export function linkCalls(calls: readonly Seam[], routes: readonly Seam[], ownRoutes: readonly Seam[] = []): SeamLink[] {
+export function linkCalls(calls: readonly Seam[], routes: readonly Seam[], ownRoutes: readonly Seam[]): SeamLink[] {
   return calls.flatMap((call) => {
     const selfServed = ownRoutes.some((own) => own.repo === call.repo && matchSeams(call, own));
     return routes.flatMap((route) => {
@@ -177,7 +200,7 @@ export async function indexedAt(deps: ToolDeps, repos: readonly string[]): Promi
 
 /** The other lines a seam's path was assembled from (a prefix, a base URL), for detailed answers. */
 export function builtFrom(seam: Seam): string {
-  return seam.cites.length ? ` · path built with ${seam.cites.map((c) => `${c.path}:${lineRange(c.start, c.end)}`).join(", ")}` : "";
+  return seam.cites.length ? ` · path built with ${seam.cites.map(formatCitation).join(", ")}` : "";
 }
 
 /**
@@ -186,7 +209,7 @@ export function builtFrom(seam: Seam): string {
  * is about) are listed first; the count covers every repo searched. Empty when there are none.
  * For events and gRPC, the same for names only known at run time, on either side.
  */
-export function unresolvedNote(deps: ToolDeps, repos: readonly string[], relevant: Iterable<string> = [], family: SeamFamily = "http"): string {
+export function unresolvedNote(deps: ToolDeps, repos: readonly string[], relevant: Iterable<string>, family: SeamFamily): string {
   const kinds = family === "http" ? [FAMILIES.http.uses] : [FAMILIES[family].provides, FAMILIES[family].uses];
   const calls = deps.store.seams({ repos, includeUnresolved: true }).filter((s) => s.key === null && kinds.includes(s.kind));
   if (calls.length === 0) return "";
