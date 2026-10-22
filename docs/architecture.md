@@ -363,7 +363,7 @@ linked (`decisions.md`, 2026-10-12).
 | Trigger | `reference-transaction` git hook (fires on fetch, pull, merge) or `brain sync` | GitHub App webhook → a queue (e.g. SQS) |
 | Workers | In the CLI process | ECS tasks from the same image |
 | AI | Claude Code signed in as the developer | Claude Code in the container, through Amazon Bedrock with the task role |
-| MCP transport | stdio | Streamable HTTP behind Entra ID |
+| MCP transport | stdio | Streamable HTTP, stateless (built; a shared bearer token until Entra ID sign-in) |
 | Source code | Existing local clones, or the brain's own clones of GitHub repos | The brain's clones, on a volume mounted at the data directory (EFS) |
 | Permissions | Local policy: every enrolled repo | GitHub App + caller identity per request |
 

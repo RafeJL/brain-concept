@@ -98,16 +98,18 @@ the Platform Team owns, made from their golden template; nothing here depends on
 - **`Dockerfile`**: Node 22 (slim Debian), git, Claude Code at a pinned version
   (`CLAUDE_CODE_VERSION`; bump it on purpose, since it changes how wikis are written), the brain
   with production dependencies only (`tsx` is one: the launchers run the TypeScript directly).
-  Runs as the image's `node` user (uid 1000). The default command is `brain doctor`; `brain` and
-  `brain-mcp` are on the path. Claude Code has the brain registered for that user, so `claude` run
-  in the container can ask it.
+  Runs as the image's `node` user (uid 1000). The default command is `brain-mcp-http`, the MCP
+  server over HTTP on port 8080 (below); run `brain doctor` in its place to check the image.
+  `brain` and `brain-mcp` (stdio) are on the path too. Claude Code has the brain registered for
+  that user over stdio, so `claude` run in the container can ask it.
 - **One data directory**, `BRAIN_DATA` (default `/data`). `docker/entrypoint.sh` points `BRAIN_DB`
   at `$BRAIN_DATA/brain.db`, so the clones, locks and `hooks.log` sit beside it, and `TMPDIR` at
   `$BRAIN_DATA/tmp`, where the temporary worktrees go. Mount a volume there (EFS on ECS, with an
   access point owned by uid 1000), or the store and the clones are lost when the container
   restarts. Set `BRAIN_DB` or `TMPDIR` yourself to split them, e.g. worktrees on local disk.
 - **`.github/workflows/image.yml`**: on every pull request and push to main it runs
-  `npm run check`, builds the image and runs `brain doctor` in it. On main it also pushes to ECR as
+  `npm run check`, builds the image, runs `brain doctor` in it, then starts the HTTP server with a
+  token and checks `/healthz`, an `initialize` and a refused call without the token. On main it also pushes to ECR as
   `<sha>` and `latest`, through GitHub OIDC (`aws-actions/configure-aws-credentials`), once the
   repository variables `AWS_ROLE_ARN`, `AWS_REGION` and `ECR_REPOSITORY` are set; until then it
   builds and says why it didn't push. Citation laptops can't run containers (virtualisation is
@@ -129,10 +131,31 @@ The task role needs `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseSt
 models, and the models must be enabled in the account. The brain's runs (`--safe-mode`) load no
 settings files, so these go in the environment, not `settings.json`. The image also sets
 `DISABLE_AUTOUPDATER` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`. The other variables the image
-reads are `BRAIN_DATA`, `BRAIN_DB`, `BRAIN_REPOS` and `TMPDIR`, as above.
+reads are `BRAIN_DATA`, `BRAIN_DB`, `BRAIN_REPOS` and `TMPDIR`, as above, and `BRAIN_HTTP_*` below.
+
+**MCP over HTTP** (`src/serve/http.ts`, started by `bin/brain-mcp-http.mjs`, `npm run mcp:http`
+locally). The same eleven tools and instructions as stdio, over Streamable HTTP at `/mcp`.
+Stateless: each POST gets its own server and a plain JSON answer, with no session or SSE stream,
+so any task behind the load balancer can answer and a restart drops nothing. The instructions,
+with what the caller can read, are built for each `initialize`, so a new session sees new repos.
+`GET /healthz` answers `ok` without a token, for the load balancer's health check.
+
+| Variable | Default | |
+|---|---|---|
+| `BRAIN_HTTP_HOST` | `127.0.0.1` (the image: `0.0.0.0`) | Where it listens |
+| `BRAIN_HTTP_PORT` | `8080` | |
+| `BRAIN_HTTP_TOKEN` | none | The bearer token every `/mcp` request must carry. Required off loopback: without it the server refuses to start. Keep it in Secrets Manager. |
+| `BRAIN_HTTP_ALLOWED_HOSTS` | the local names on loopback; any otherwise | Comma-separated `Host` values to accept, e.g. the brain's domain |
+
+The token is a stand-in until Entra ID sign-in: one shared secret for the named testers, who all
+see every enrolled repo (`LocalAccessPolicy`) and can use every tool, writes included. Claude
+Code still prompts before each write, but any other client holding the token can write without
+one, so treat the token as a credential and rotate it if it leaks. Register it in Claude Code with
+`claude mcp add --transport http citation-brain https://<host>/mcp --header "Authorization: Bearer <token>"`.
 
 **What's left for hosting** (each its own phase):
-- The Streamable HTTP MCP transport, behind Entra ID sign-in; the server is stdio only today.
+- Entra ID sign-in on the HTTP transport, in place of the shared token, with the caller's name on
+  the facts they confirm.
 - Postgres (RDS) behind the `Store` interface, replacing SQLite on a volume.
 - Credentials for cloning private GitHub repos (a GitHub App), and per-caller permissions in
   `AccessPolicy`.
@@ -168,4 +191,4 @@ reads are `BRAIN_DATA`, `BRAIN_DB`, `BRAIN_REPOS` and `TMPDIR`, as above.
 | B6b | Maps that say what they covered: survey, screening, mapping in parts, inherited routes, coverage in answers, run-time exits in traces | Built |
 | B7 | Adding a repo from Claude Code (`brain_add_repo`, the eleventh tool), GitHub sources, enrolment status on the card; the README rewritten for setting up | Built |
 | B8 | Planning depth: strict tool inputs, several pages per `brain_get`, a conventions page, tests in build-run-test, steps renumbered after removals | Built |
-| 6 | Hosting on AWS ECS: the Docker image and its pipeline; then HTTP transport, Postgres, GitHub permissions | Image and pipeline written; the rest planned |
+| 6 | Hosting on AWS ECS: the Docker image and its pipeline; then HTTP transport, Postgres, GitHub permissions | Image, pipeline and HTTP transport (shared token) written; the rest planned |

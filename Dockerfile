@@ -21,23 +21,30 @@ COPY tsconfig.json ./
 COPY bin ./bin
 COPY src ./src
 COPY docker/entrypoint.sh /usr/local/bin/brain-entrypoint
-# `brain` and `brain-mcp` through node, not the .mjs shebangs: a Windows checkout gives them CRLF.
+# `brain`, `brain-mcp` and `brain-mcp-http` through node, not the .mjs shebangs: a Windows
+# checkout gives them CRLF.
 RUN chmod 755 /usr/local/bin/brain-entrypoint \
  && printf '#!/bin/sh\nexec node /app/bin/brain.mjs "$@"\n' > /usr/local/bin/brain \
  && printf '#!/bin/sh\nexec node /app/bin/brain-mcp.mjs "$@"\n' > /usr/local/bin/brain-mcp \
- && chmod 755 /usr/local/bin/brain /usr/local/bin/brain-mcp \
+ && printf '#!/bin/sh\nexec node /app/bin/brain-mcp-http.mjs "$@"\n' > /usr/local/bin/brain-mcp-http \
+ && chmod 755 /usr/local/bin/brain /usr/local/bin/brain-mcp /usr/local/bin/brain-mcp-http \
  && mkdir -p /data && chown node:node /data
 
 USER node
 # Registered for the node user, so `claude` run in the container (and brain doctor) can ask the
-# brain. Hosted agents reach it over HTTP instead, once that transport is built.
+# brain. Hosted agents reach it over HTTP instead (brain-mcp-http, port 8080, /mcp).
 RUN claude mcp add --scope user citation-brain -- node /app/bin/brain-mcp.mjs
 
 ENV BRAIN_DATA=/data \
     NODE_ENV=production \
     DISABLE_AUTOUPDATER=1 \
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+    BRAIN_HTTP_HOST=0.0.0.0 \
+    BRAIN_HTTP_PORT=8080
 VOLUME ["/data"]
+EXPOSE 8080
 
+# Serves MCP over HTTP; it refuses to start off loopback without BRAIN_HTTP_TOKEN. Run
+# `brain doctor` in place of the command to check the image.
 ENTRYPOINT ["brain-entrypoint"]
-CMD ["brain", "doctor"]
+CMD ["brain-mcp-http"]
