@@ -30,6 +30,7 @@ function brain { node C:\Repos\brain-concept\bin\brain.mjs @args }
 | The log of background work (hooks, enrolments, fetches) | `hooks.log` beside the store | follows `BRAIN_DB` |
 | One lock per repo, so only one sync of it runs at a time | `locks` beside the store | follows `BRAIN_DB` |
 | The temporary worktrees Claude Code runs in | the system temp folder | `TMPDIR` (`TEMP` on Windows) |
+| The facts each full wiki rewrite dropped, a Markdown file and a JSON copy per rewrite | `reports\<repo>` beside the store | follows `BRAIN_DB` |
 
 In the Docker image all of these sit under one data directory, `BRAIN_DATA` (default `/data`);
 see [development.md](development.md#docker-and-aws).
