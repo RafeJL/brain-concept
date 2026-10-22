@@ -113,7 +113,8 @@ the Platform Team owns, made from their golden template; nothing here depends on
   builds and says why it didn't push. Citation laptops can't run containers (virtualisation is
   off), so that pull-request run is where the image is tested.
 
-**Claude through Bedrock.** In the container Claude Code reaches Claude through Amazon Bedrock,
+**Claude through Bedrock** (proposed, still to agree with the Platform Team). In the container
+Claude Code reaches Claude through Amazon Bedrock,
 with the ECS task role's credentials (the AWS SDK's default chain), not a sign-in. Set on the task:
 
 | Variable | Value |
@@ -140,8 +141,11 @@ reads are `BRAIN_DATA`, `BRAIN_DB`, `BRAIN_REPOS` and `TMPDIR`, as above.
   enrolments are judged alive by their process id. On a volume that outlives the container, a new
   container can reuse an old id, so a lock left by a crash could block a repo's syncs. Record which
   container wrote them, or clear them on start once only one task uses the volume.
-- The Terraform, in the Platform-owned `<project>-terraform` repo, and the OU and account it goes
-  in; non-prod first.
+- The Terraform, in the Platform-owned `<project>-terraform` repo (raised as a service request
+  with the Platform Team), and the OU and account it goes in; non-prod first.
+- Through IT: an Entra app registration for sign-in, and a domain (Cloudflare, with the
+  Platform Team's WAF rules; Route 53 for any records). GitHub read access through the people
+  who run GitHub at Citation.
 
 ## Design docs
 

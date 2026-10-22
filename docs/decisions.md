@@ -961,10 +961,12 @@ follows in place of the Azure plan:
 - **Terraform in a separate repo**, `<project>-terraform`, made from the Platform Team's golden
   template, using their modules and owned by them. Nothing in this repo depends on it.
 - **Non-prod first.** The OU and account are still to be decided.
-- **Claude through Bedrock.** Claude Code in the container uses Amazon Bedrock with the task
-  role (`CLAUDE_CODE_USE_BEDROCK`), so no person's Claude sign-in is in the image.
 
 **Design calls:**
+- **Claude through Bedrock (proposed, not yet agreed).** The kick-off didn't cover how the
+  hosted brain reaches Claude. The proposal is Amazon Bedrock with the ECS task role
+  (`CLAUDE_CODE_USE_BEDROCK`), so no person's Claude sign-in is in the image; confirm it, and
+  that the models are enabled in the account, with the Platform Team.
 - **One data directory** (`BRAIN_DATA`, `/data` in the image) for the store, the clones, the locks
   and the temporary worktrees, so one volume (EFS) keeps them across restarts. Set in the image's
   entrypoint through the existing `BRAIN_DB` and `TMPDIR`, so the code is unchanged.
