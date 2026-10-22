@@ -29,6 +29,7 @@ function brain { node C:\Repos\brain-concept\bin\brain.mjs @args }
 | Repos the brain cloned from GitHub | `repos` beside the store: `%USERPROFILE%\.brain\repos` | `BRAIN_REPOS` |
 | The log of background work (hooks, enrolments, fetches) | `hooks.log` beside the store | follows `BRAIN_DB` |
 | One lock per repo, so only one sync of it runs at a time | `locks` beside the store | follows `BRAIN_DB` |
+| The facts each full wiki rewrite dropped, a Markdown file and a JSON copy per rewrite | `reports\<repo>` beside the store | follows `BRAIN_DB` |
 
 A repo tracks what `origin/HEAD` points at (usually `origin/main`). So it describes what has
 been merged, and a fetch is enough to update it.

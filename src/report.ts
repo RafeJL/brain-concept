@@ -1,3 +1,6 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { DROPPED_KINDS, type DroppedKind } from "./ai/dropped.js";
 import type { FactChecksResult } from "./ai/fact-checks.js";
 import type { PlanReport, WikiResult } from "./ai/generate.js";
 import type { SeamsResult } from "./ai/seams.js";
@@ -8,7 +11,8 @@ import { familyOf } from "./core/seams.js";
 import type { SyncResult } from "./ingest/sync.js";
 import { count } from "./serve/tools/common.js";
 
-// What the CLI prints after each step of a sync: what changed, what was dropped and what it cost.
+// What the CLI prints after each step of a sync: what changed, what was dropped and what it cost;
+// and the dropped-facts report, which is too long to print.
 
 /** "$0.12 · 34s": what a run cost and how long it took. */
 function spent(result: { costUsd: number; durationMs: number }): string {
@@ -49,7 +53,8 @@ export function printSeams(result: SeamsResult): void {
   printSome(result.unmapped, 3, (piece) => `    not mapped (no run answered for it): ${formatCitation(piece)}`);
 }
 
-export function printWiki(wiki: WikiResult): void {
+/** `droppedReport` is where the full list of dropped facts was written, if it was. */
+export function printWiki(wiki: WikiResult, droppedReport: string | null = null): void {
   const at = `@${wiki.commit.slice(0, 7)}`;
   if (wiki.plan) console.log(`${wiki.repo}: ${planText(wiki.plan)}`);
   if (wiki.reports.length === 0) {
@@ -70,10 +75,72 @@ export function printWiki(wiki: WikiResult): void {
   }
   if (wiki.carried.length) console.log(`  unchanged, moved to ${at}: ${wiki.carried.join(", ")}`);
   if (wiki.dropped.length) {
-    console.log(`  ${wiki.dropped.length} facts the previous wiki cited are no longer cited, though the code still shows them:`);
-    printSome(wiki.dropped, 5, (fact) => `    ${fact.slug}: "${fact.claim.slice(0, 90)}…" [${fact.cites[0]}]`);
+    const tally = DROPPED_KINDS.map((kind) => [wiki.dropped.filter((f) => f.kind === kind).length, DROPPED_WORDS[kind]] as const)
+      .filter(([n]) => n > 0)
+      .map(([n, words]) => `${n} ${words}`);
+    console.log(`  facts the previous wiki cited and this one doesn't: ${tally.join(", ")}`);
+    if (droppedReport) console.log(`    full list: ${droppedReport}`);
   }
   console.log(`Read them with: brain page ${wiki.repo}`);
+}
+
+const DROPPED_WORDS: Record<DroppedKind, string> = {
+  lost: "lost",
+  "page-renamed": "on renamed pages",
+  "page-removed": "on removed pages",
+  restated: "restated elsewhere",
+  "code-changed": "code changed",
+};
+
+/** What each kind means, as the report's headings say it. */
+const DROPPED_MEANING: Record<DroppedKind, string> = {
+  lost: "Lost: the page is still there, and no new claim says it",
+  "page-renamed": "On renamed pages: the page is gone, and a page new to the wiki citing half or more of its files doesn't say it",
+  "page-removed": "On removed pages: the page is gone, and no page new to the wiki cites half of its files",
+  restated: "Restated elsewhere: a new claim names the same code (or most of its words), citing other lines",
+  "code-changed": "Code changed: its cited lines changed since, so the code moved on, not the wiki",
+};
+
+/**
+ * Writes every fact a full rewrite dropped to a Markdown file for a person to read, real losses
+ * first, with a JSON copy beside it for counting across runs. Returns the Markdown file's path.
+ */
+export function writeDroppedReport(wiki: WikiResult, dir: string): string {
+  const written = new Date().toISOString();
+  const base = join(dir, wiki.repo, `dropped-${wiki.commit.slice(0, 7)}-${written.slice(0, 19).replace(/:/g, "")}`);
+  const counts = Object.fromEntries(DROPPED_KINDS.map((kind) => [kind, wiki.dropped.filter((f) => f.kind === kind).length]));
+  const out = [
+    `# Facts a full rewrite dropped: ${wiki.repo} @${wiki.commit.slice(0, 7)}`,
+    "",
+    `Written ${written}. Claims of the previous wiki that no page of the new one cites, by why. ` +
+      "Sorted without AI, by citations and names: read them to judge which losses matter.",
+    "",
+    "| Kind | Facts |",
+    "|---|---|",
+    ...DROPPED_KINDS.map((kind) => `| ${DROPPED_WORDS[kind]} | ${counts[kind]} |`),
+  ];
+  for (const kind of DROPPED_KINDS) {
+    const facts = wiki.dropped.filter((f) => f.kind === kind);
+    if (facts.length === 0) continue;
+    out.push("", `## ${DROPPED_MEANING[kind]} (${facts.length})`);
+    for (const slug of [...new Set(facts.map((f) => f.slug))]) {
+      out.push("", `### ${slug}`, "");
+      for (const fact of facts.filter((f) => f.slug === slug)) {
+        const moved = fact.moved.length && fact.moved.join("; ") !== fact.cites.join("; ") ? `, now ${fact.moved.join("; ")}` : "";
+        out.push(`- cited ${fact.cites.join("; ")}${moved}`, `  > ${fact.claim}`);
+        if (fact.match?.claim) out.push(`  - said on ${fact.match.slug}:`, `    > ${fact.match.claim}`);
+        else if (fact.match) out.push(`  - its page carried on as ${fact.match.slug}`);
+      }
+    }
+  }
+  out.push("", "## Claims the check removed from the new pages", "", "| Page | Claims | Removed | Published |", "|---|---|---|---|");
+  for (const report of wiki.reports) out.push(`| ${report.slug} | ${report.claims} | ${report.removed.length} | ${report.published ? "yes" : "no"} |`);
+
+  mkdirSync(dirname(base), { recursive: true });
+  writeFileSync(`${base}.md`, `${out.join("\n")}\n`);
+  const pages = wiki.reports.map((r) => ({ slug: r.slug, claims: r.claims, removed: r.removed.length, published: r.published }));
+  writeFileSync(`${base}.json`, `${JSON.stringify({ repo: wiki.repo, commit: wiki.commit, written, counts, dropped: wiki.dropped, pages }, null, 2)}\n`);
+  return `${base}.md`;
 }
 
 /** "planned again (a new project at src/Payments.API): +1 page (payments)", or why no plan passed. */

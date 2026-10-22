@@ -17,6 +17,11 @@ export function hooksLogPath(dbPath = resolveDbPath()): string {
   return join(dirname(dbPath), "hooks.log");
 }
 
+/** Where reports too long for the console go (the facts a full rewrite dropped), a folder per repo. */
+export function reportsDir(dbPath = resolveDbPath()): string {
+  return join(dirname(dbPath), "reports");
+}
+
 /** Where repos added from GitHub are cloned: BRAIN_REPOS, or `repos` beside the store. */
 export function clonesDir(dbPath = resolveDbPath()): string {
   return process.env.BRAIN_REPOS ?? join(dirname(dbPath), "repos");

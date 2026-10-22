@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -9,6 +10,7 @@ import { getPage } from "../src/serve/tools/get-page.js";
 import { repoCard } from "../src/serve/tools/repo-card.js";
 import { SqliteStore } from "../src/store/sqlite.js";
 import { generateWiki } from "../src/ai/generate.js";
+import { writeDroppedReport } from "../src/report.js";
 import { claudeArgs, parseClaudeResult, type RunRequest, type Runner } from "../src/ai/runner.js";
 import { commit, git, repoFromFixture } from "./helpers.js";
 
@@ -181,10 +183,10 @@ describe("brain wiki", () => {
       const wiki = await generateWiki(store, fakeRunner(rewrite(overview, api)).runner, "api", { full: true });
 
       expect(first.dropped).toEqual([]);
-      expect(wiki.dropped).toEqual([{ slug: "api", claim: `- ${DELETE}`, cites: ["src/articles.ts:4"] }]);
+      expect(wiki.dropped).toEqual([{ slug: "api", claim: `- ${DELETE}`, cites: ["src/articles.ts:4"], kind: "lost", moved: ["src/articles.ts:4"] }]);
     });
 
-    it("doesn't list one the code no longer shows", async () => {
+    it("says the code changed for one whose cited lines changed since", async () => {
       const { store, dir } = await setup();
       await generateWiki(store, fakeRunner().runner, "api");
       commit(dir, { "src/articles.ts": readFileSync(join(dir, "src/articles.ts"), "utf8").replace("router.delete", "router.purge") });
@@ -192,7 +194,98 @@ describe("brain wiki", () => {
 
       const wiki = await generateWiki(store, fakeRunner(rewrite(overview, api)).runner, "api", { full: true });
 
+      expect(wiki.dropped).toEqual([{ slug: "api", claim: `- ${DELETE}`, cites: ["src/articles.ts:4"], kind: "code-changed", moved: [] }]);
+    });
+
+    it("moves an older page's citations with the lines added above them before comparing", async () => {
+      const { store, dir } = await setup();
+      await generateWiki(store, fakeRunner().runner, "api");
+      commit(dir, { "src/articles.ts": `// Articles.\n${readFileSync(join(dir, "src/articles.ts"), "utf8")}` });
+      await syncRepo(store, "api");
+      // The same facts, a line further down; the overview no longer cites the code.
+      const shifted = rewrite(
+        { slug: "overview", title: "Overview", markdown: "# Overview\n\n`articles-api` is an Express API serving articles [README.md:1]." },
+        { slug: "api", title: "API", markdown: `# API\n\n- \`GET /articles/:slug\` returns one article; auth is optional [src/articles.ts:4].\n- ${DELETE.replace(":4]", ":5]")}` },
+      );
+
+      const wiki = await generateWiki(store, fakeRunner(shifted).runner, "api", { full: true });
+
       expect(wiki.dropped).toEqual([]);
+    });
+
+    it("tells one restated with other lines from one lost, and shows the claim that restates it", async () => {
+      const { store } = await setup();
+      await generateWiki(store, fakeRunner().runner, "api");
+      const routes = { slug: "routes", title: "Routes", markdown: "# Routes\n\n- `DELETE /articles/:slug` is declared on the router [src/articles.ts:1]." };
+
+      const wiki = await generateWiki(store, fakeRunner(rewrite(overview, api, routes)).runner, "api", { full: true });
+
+      expect(wiki.dropped).toEqual([
+        {
+          slug: "api",
+          claim: `- ${DELETE}`,
+          cites: ["src/articles.ts:4"],
+          kind: "restated",
+          moved: ["src/articles.ts:4"],
+          match: { slug: "routes", claim: "- `DELETE /articles/:slug` is declared on the router [src/articles.ts:1]." },
+        },
+      ]);
+    });
+
+    it("tells a claim without names restated in most of its words from one sharing a word", async () => {
+      const { store } = await setup();
+      await generateWiki(store, fakeRunner().runner, "api");
+      // Nothing else cites README.md:3, where the old product page's claim is.
+      const elsewhere = (product: string) =>
+        rewrite(
+          overview,
+          { slug: "build-run-test", title: "Build, run and test", markdown: "# Build, run and test\n\nThe repository declares no build or test scripts [README.md:1]." },
+          { slug: "conventions", title: "Conventions", markdown: "# Conventions\n\nThe repository documents no coding conventions [README.md:1]." },
+          { slug: "product", title: "Product", markdown: `# Product\n\n${product} [README.md:1].` },
+        );
+
+      const restated = await generateWiki(store, fakeRunner(elsewhere("Readers can look up articles and remove them")).runner, "api", { full: true });
+      await generateWiki(store, fakeRunner().runner, "api", { full: true });
+      const gone = await generateWiki(store, fakeRunner(elsewhere("Readers browse the catalogue")).runner, "api", { full: true });
+
+      expect(restated.dropped.filter((f) => f.slug === "product").map((f) => [f.kind, f.match?.slug])).toEqual([["restated", "product"]]);
+      expect(gone.dropped.filter((f) => f.slug === "product").map((f) => f.kind)).toEqual(["lost"]);
+    });
+
+    it("tells a fact on a renamed page from one on a removed page", async () => {
+      const { store } = await setup();
+      const access = { slug: "access", title: "Access", markdown: "# Access\n\n- Removing an article needs `auth.required` [src/articles.ts:4]." };
+      const permissions = { slug: "permissions", title: "Permissions", markdown: "# Permissions\n\n- `GET /articles/:slug` lets anyone read [src/articles.ts:3]." };
+      const onAccess = (wiki: { dropped: { slug: string }[] }) => wiki.dropped.filter((f) => f.slug === "access");
+
+      await generateWiki(store, fakeRunner(rewrite(access)).runner, "api", { full: true });
+      const renamed = await generateWiki(store, fakeRunner(rewrite(overview, api, permissions)).runner, "api", { full: true });
+      await generateWiki(store, fakeRunner(rewrite(access)).runner, "api", { full: true });
+      const removed = await generateWiki(store, fakeRunner(rewrite(overview, api)).runner, "api", { full: true });
+
+      expect(onAccess(renamed)).toEqual([expect.objectContaining({ kind: "page-renamed", match: { slug: "permissions" } })]);
+      expect(onAccess(removed)).toEqual([expect.objectContaining({ kind: "page-removed" })]);
+      expect(removed.dropped.find((f) => f.slug === "api")?.kind).toBe("lost");
+    });
+
+    it("writes the full list to a file, real losses first, with a JSON copy", async () => {
+      const { store } = await setup();
+      const access = { slug: "access", title: "Access", markdown: "# Access\n\n- Removing an article needs `auth.required` [src/articles.ts:4]." };
+      await generateWiki(store, fakeRunner(rewrite(access)).runner, "api", { full: true });
+      const wiki = await generateWiki(store, fakeRunner(rewrite(overview, api)).runner, "api", { full: true });
+      const dir = mkdtempSync(join(tmpdir(), "brain-reports-"));
+
+      const path = writeDroppedReport(wiki, dir);
+      const text = readFileSync(path, "utf8");
+      const json = JSON.parse(readFileSync(path.replace(/\.md$/, ".json"), "utf8"));
+
+      expect(path.startsWith(join(dir, "api", `dropped-${wiki.commit.slice(0, 7)}-`))).toBe(true);
+      expect(text.indexOf("## Lost")).toBeGreaterThan(0);
+      expect(text.indexOf("## Lost")).toBeLessThan(text.indexOf("## On removed pages"));
+      expect(text).toContain(`  > - ${DELETE}`);
+      expect(text).toContain("| api | 1 | 0 | yes |");
+      expect(json.counts).toMatchObject({ lost: 1, "page-removed": 1, restated: 0 });
+      expect(json.dropped).toHaveLength(2);
     });
 
     it("doesn't list one the new wiki cites on another page", async () => {
