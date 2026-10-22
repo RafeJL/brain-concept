@@ -597,8 +597,13 @@ Use a copy of your store (`$env:BRAIN_DB`). The sync step runs Claude Code: cent
    framework, the shared fixtures and how tests are named, citing a test file.
 5. **No gaps in numbering.** Read a flow page after a sync that removed a step: the numbers run
    1, 2, 3 with no gap, and no heading is left with nothing under it.
-6. **A full rewrite lists what it dropped.** After `brain sync <repo> --only wiki --full`, any fact
-   the old wiki cited that the new one doesn't, and the code still shows, is listed under the pages.
+6. **A full rewrite reports what it dropped.** After `brain sync <repo> --only wiki --full`, a line
+   under the pages counts the facts the old wiki cited that the new one doesn't, by kind (`3 lost,
+   1 on renamed pages, 12 restated elsewhere, …`), then `full list:` and a path under
+   `%USERPROFILE%\.brain\reports\<repo>\`. The Markdown file lists lost facts first, each with its
+   old citation (and the moved one, if the lines shifted), and for a restated one the new claim
+   that says it. A `.json` file with the same name sits beside it. Check a few "restated" entries:
+   the new claim should say the same thing.
 7. **Routes with a prefix declared elsewhere.** In a FastAPI repo (a router created with
    `APIRouter(prefix="/tasks")` and routes like `@router.post("/")`), `page <repo> api` keeps
    `POST /tasks/`; `sync` doesn't report it as removed.

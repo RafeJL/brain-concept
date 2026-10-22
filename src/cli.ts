@@ -2,7 +2,7 @@ import { existsSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { clonesDir, locksDir, localPerson, resolveDbPath } from "./config.js";
+import { clonesDir, locksDir, localPerson, reportsDir, resolveDbPath } from "./config.js";
 import type { FactKind, FactRecord } from "./core/facts.js";
 import { checkAnchors, personAnchors } from "./ingest/facts.js";
 import { confirmFact, factLine, factsAbout, visibleFacts } from "./serve/facts.js";
@@ -47,7 +47,7 @@ import { DEFAULT_MODEL, generateWiki } from "./ai/generate.js";
 import { claudeRunner, limitRunner } from "./ai/runner.js";
 import { updateSeams } from "./ai/seams.js";
 import { updateTraces } from "./ai/traces.js";
-import { printChecks, printSeams, printSuggestion, printSync, printTraces, printWiki } from "./report.js";
+import { printChecks, printSeams, printSuggestion, printSync, printTraces, printWiki, writeDroppedReport } from "./report.js";
 import type { Store } from "./store/store.js";
 
 const HELP = `brain: organisation-wide context for coding agents
@@ -322,7 +322,8 @@ async function syncAndRefresh(store: Store, name: string, options: { model?: str
         "writing the wiki",
         async (cwd) => {
           const onPages = (done: number, total: number) => progress?.part("wiki", `writing the wiki (${done} of ${count(total, "page")})`);
-          printWiki(spent(await generateWiki(store, runner, name, { model: options.model, full, cwd, onPages })));
+          const wiki = spent(await generateWiki(store, runner, name, { model: options.model, full, cwd, onPages }));
+          printWiki(wiki, wiki.dropped.length ? writeDroppedReport(wiki, reportsDir()) : null);
         },
       ],
       facts: [

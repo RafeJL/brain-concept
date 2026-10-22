@@ -289,10 +289,20 @@ export function claimProblem(text: string, cites: readonly Citation[], root: str
     spans.push(spanText(lines!, cite));
   }
 
-  for (const [, term] of withoutCitations(text).matchAll(/`([^`]+)`/g)) {
-    if (!supported(term!.trim(), cites, root, spans, linesOf)) return `\`${term}\` isn't in the cited lines`;
+  for (const term of namesIn(text)) {
+    if (!supported(term, cites, root, spans, linesOf)) return `\`${term}\` isn't in the cited lines`;
   }
   return null;
+}
+
+/** The names a claim gives in backticks, leaving out its citations. */
+export function namesIn(text: string): string[] {
+  return [...withoutCitations(text).matchAll(/`([^`]+)`/g)].map(([, term]) => term!.trim());
+}
+
+/** A text's distinctive words: four letters or more, and not too common to say what it is about. */
+export function distinctiveWords(text: string): string[] {
+  return (text.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []).filter((w) => w.length >= 4 && !GENERIC.has(w.toLowerCase()));
 }
 
 /** Words too common in diagram labels to show a box is about the cited lines. */
@@ -311,7 +321,7 @@ function elementProblem(label: string, cites: readonly Citation[], root: string,
     if (problem) return problem;
     spans.push(spanText(lines!, cite));
   }
-  const words = (label.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []).filter((w) => w.length >= 4 && !GENERIC.has(w.toLowerCase()));
+  const words = distinctiveWords(label);
   if (words.length === 0 || words.some((word) => supported(word, cites, root, spans, linesOf))) return null;
   return `none of "${label.trim()}" is in the cited lines`;
 }

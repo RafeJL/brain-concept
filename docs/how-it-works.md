@@ -122,8 +122,10 @@ diagrams unless they ask, since the text says the same.
 - **Cited lines change:** only the pages citing them are rewritten. A rewrite that fails the check
   twice keeps the last good version, which then says it's "kept from @…".
 - **A new project or area:** the plan is made again, adding pages only for what's new.
-- **A full rewrite** (`--full`) lists the facts the previous wiki cited that the new one doesn't,
-  if the code still shows them, so we can see whether rewrites lose facts.
+- **A full rewrite** (`--full`) reports the facts the previous wiki cited that the new one doesn't,
+  so we can see whether rewrites lose facts. Each is sorted, without AI, into lost, on a renamed
+  page, on a removed page, restated elsewhere (the same names, other lines) or code changed. The
+  full list goes to a file under `reports` beside the store.
 - **A steering note:** a person sets one (`brain note <repo> "Ordering matters most"`, or an agent
   with `brain_set_note` once they agree). It re-plans the wiki at the next sync, and each page
   follows it when it's next rewritten. It can't switch off a check.

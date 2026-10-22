@@ -49,6 +49,7 @@ One line each; superseded ones are in the [archive](decisions-archive.md).
 - [2026-10-14: link maps that say what they covered (B6b)](#2026-10-14-link-maps-that-say-what-they-covered-b6b)
 - [2026-10-14: planning depth (B8)](#2026-10-14-planning-depth-b8)
 - [2026-10-15: wiki quality from planning tests](#2026-10-15-wiki-quality-from-planning-tests)
+- [2026-10-21: dropped facts are sorted by why, and written to a file](#2026-10-21-dropped-facts-are-sorted-by-why-and-written-to-a-file)
 
 ## 2026-09-29: the brain is a separate system
 
@@ -947,3 +948,32 @@ dropped a cited fact (an OIDC check) that the page before it had.
 
 **What would change it:** if the reports show real facts lost often, build a way to put them back;
 if the file-wide route check lets wrong routes through, read only the lines that declare a prefix.
+
+## 2026-10-21: dropped facts are sorted by why, and written to a file
+
+The first resyncs with the dropped-facts report counted 30 (unity), 140 (audit) and 71 (eShop)
+facts, too many to judge from the five the console showed. The count also mixed things that aren't
+losses. An old page at an older commit was compared without moving its citations, so a fact
+cited a line further down looked dropped. A fact the new wiki states citing other lines looked
+dropped. And a page that was renamed or removed looked like a page that lost a line.
+
+**What it does:**
+- **Old citations move first.** Each old page's citations move from its commit to the new one
+  with the lines around them, as carried pages and fact anchors do, before they are compared.
+- **Each dropped fact gets a kind,** first match wins: code changed (its cited lines changed);
+  restated (a new claim gives every name it gives in backticks, or, with none, two thirds of its
+  distinctive words); then, by its page: lost (the page is still there), on a renamed page (a page
+  new to the wiki cites half or more of its files) or on a removed page.
+- **The full list goes to a file:** `reports/<repo>/dropped-<commit>-<time>.md` beside the store,
+  lost first, with the new claim beside each restated one, and a `.json` copy. The console prints
+  the counts by kind and the path. The file also has each new page's claims and removals.
+
+**Design calls:**
+- **No AI.** The kinds are cheap, repeatable across runs and tested; a person reading the list is
+  the judge of which losses matter. Cost: restated-by-names can pair two claims about the same
+  code that say different things. The file shows both claims so the reader can tell.
+- **Report only,** as before. Nothing is stored or put back.
+
+**What would change it:** if reading the lists shows "restated" often wrong, tighten it (require
+the same file, or more than names); if renamed pages are missed or misnamed, change the share.
+Whether to put facts back is decided on the lists, with the citation-support measure beside them.
