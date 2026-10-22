@@ -29,6 +29,10 @@ function brain { node C:\Repos\brain-concept\bin\brain.mjs @args }
 | Repos the brain cloned from GitHub | `repos` beside the store: `%USERPROFILE%\.brain\repos` | `BRAIN_REPOS` |
 | The log of background work (hooks, enrolments, fetches) | `hooks.log` beside the store | follows `BRAIN_DB` |
 | One lock per repo, so only one sync of it runs at a time | `locks` beside the store | follows `BRAIN_DB` |
+| The temporary worktrees Claude Code runs in | the system temp folder | `TMPDIR` (`TEMP` on Windows) |
+
+In the Docker image all of these sit under one data directory, `BRAIN_DATA` (default `/data`);
+see [development.md](development.md#docker-and-aws).
 
 A repo tracks what `origin/HEAD` points at (usually `origin/main`). So it describes what has
 been merged, and a fetch is enough to update it.

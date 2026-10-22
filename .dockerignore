@@ -1,0 +1,12 @@
+node_modules
+.git
+.github
+.claude
+coverage
+dist
+plans
+test
+docs
+*.db
+*.db-journal
+.brain

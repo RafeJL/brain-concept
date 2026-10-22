@@ -89,6 +89,60 @@ Its tests run the real CLI in the background with `--no-ai`, and clone from loca
 through git's `url.<base>.insteadOf` (set with `GIT_CONFIG_COUNT`), so they never reach the
 network.
 
+## Docker and AWS
+
+Hosting is on AWS ECS, running the image this repo builds (`decisions.md`, 2026-10-22). The
+infrastructure (ECR, the cluster, EFS, the role GitHub assumes) is Terraform in a separate repo
+the Platform Team owns, made from their golden template; nothing here depends on it yet.
+
+- **`Dockerfile`**: Node 22 (slim Debian), git, Claude Code at a pinned version
+  (`CLAUDE_CODE_VERSION`; bump it on purpose, since it changes how wikis are written), the brain
+  with production dependencies only (`tsx` is one: the launchers run the TypeScript directly).
+  Runs as the image's `node` user (uid 1000). The default command is `brain doctor`; `brain` and
+  `brain-mcp` are on the path. Claude Code has the brain registered for that user, so `claude` run
+  in the container can ask it.
+- **One data directory**, `BRAIN_DATA` (default `/data`). `docker/entrypoint.sh` points `BRAIN_DB`
+  at `$BRAIN_DATA/brain.db`, so the clones, locks and `hooks.log` sit beside it, and `TMPDIR` at
+  `$BRAIN_DATA/tmp`, where the temporary worktrees go. Mount a volume there (EFS on ECS, with an
+  access point owned by uid 1000), or the store and the clones are lost when the container
+  restarts. Set `BRAIN_DB` or `TMPDIR` yourself to split them, e.g. worktrees on local disk.
+- **`.github/workflows/image.yml`**: on every pull request and push to main it runs
+  `npm run check`, builds the image and runs `brain doctor` in it. On main it also pushes to ECR as
+  `<sha>` and `latest`, through GitHub OIDC (`aws-actions/configure-aws-credentials`), once the
+  repository variables `AWS_ROLE_ARN`, `AWS_REGION` and `ECR_REPOSITORY` are set; until then it
+  builds and says why it didn't push. Citation laptops can't run containers (virtualisation is
+  off), so that pull-request run is where the image is tested.
+
+**Claude through Bedrock.** In the container Claude Code reaches Claude through Amazon Bedrock,
+with the ECS task role's credentials (the AWS SDK's default chain), not a sign-in. Set on the task:
+
+| Variable | Value |
+|---|---|
+| `CLAUDE_CODE_USE_BEDROCK` | `1` |
+| `AWS_REGION` | the Bedrock region, e.g. `eu-west-2`; Claude Code doesn't read it from AWS config |
+| `ANTHROPIC_DEFAULT_SONNET_MODEL` | the Bedrock model or inference-profile ID that `sonnet` (the brain's default `--model`) means |
+| `ANTHROPIC_DEFAULT_HAIKU_MODEL` | the ID for Claude Code's small background model, if the account's default isn't enabled |
+| `ANTHROPIC_MODEL` | optional; only for `claude` run by hand, since the brain always passes `--model` |
+
+The task role needs `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` on those
+models, and the models must be enabled in the account. The brain's runs (`--safe-mode`) load no
+settings files, so these go in the environment, not `settings.json`. The image also sets
+`DISABLE_AUTOUPDATER` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`. The other variables the image
+reads are `BRAIN_DATA`, `BRAIN_DB`, `BRAIN_REPOS` and `TMPDIR`, as above.
+
+**What's left for hosting** (each its own phase):
+- The Streamable HTTP MCP transport, behind Entra ID sign-in; the server is stdio only today.
+- Postgres (RDS) behind the `Store` interface, replacing SQLite on a volume.
+- Credentials for cloning private GitHub repos (a GitHub App), and per-caller permissions in
+  `AccessPolicy`.
+- Freshness without local hooks: a GitHub webhook that queues a sync.
+- Locks and enrolments that survive a restart. Sync locks (`src/core/queue.ts`) and running
+  enrolments are judged alive by their process id. On a volume that outlives the container, a new
+  container can reuse an old id, so a lock left by a crash could block a repo's syncs. Record which
+  container wrote them, or clear them on start once only one task uses the volume.
+- The Terraform, in the Platform-owned `<project>-terraform` repo, and the OU and account it goes
+  in; non-prod first.
+
 ## Design docs
 
 - [architecture.md](architecture.md): what is being built. Treat it as the spec.
@@ -110,4 +164,4 @@ network.
 | B6b | Maps that say what they covered: survey, screening, mapping in parts, inherited routes, coverage in answers, run-time exits in traces | Built |
 | B7 | Adding a repo from Claude Code (`brain_add_repo`, the eleventh tool), GitHub sources, enrolment status on the card; the README rewritten for setting up | Built |
 | B8 | Planning depth: strict tool inputs, several pages per `brain_get`, a conventions page, tests in build-run-test, steps renumbered after removals | Built |
-| 6 | Hosting: Azure, cloud containers for the runs, GitHub permissions | Planned |
+| 6 | Hosting on AWS ECS: the Docker image and its pipeline; then HTTP transport, Postgres, GitHub permissions | Image and pipeline written; the rest planned |

@@ -1,0 +1,80 @@
+# Checks, builds and smoke-tests the brain's image on every pull request and push to main, and
+# on main pushes it to ECR. The AWS side (the OIDC role, the ECR repository) comes from the
+# Platform Team's infra repo; until it exists the variables are unset and the push is skipped,
+# so the build still runs. See docs/development.md.
+#
+# Repository variables (Settings → Secrets and variables → Actions → Variables):
+#   AWS_ROLE_ARN        role this workflow assumes through GitHub's OIDC provider
+#   AWS_REGION          e.g. eu-west-2
+#   ECR_REPOSITORY      the repository's name in ECR, e.g. brain-concept
+name: image
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # for OIDC
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      PUSH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.AWS_ROLE_ARN != '' && vars.AWS_REGION != '' && vars.ECR_REPOSITORY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: brain-concept:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test (brain doctor in the container)
+        run: docker run --rm brain-concept:ci
+
+      - name: Configure AWS credentials
+        if: env.PUSH == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to ECR
+        if: env.PUSH == 'true'
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push
+        if: env.PUSH == 'true'
+        env:
+          IMAGE: ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}
+        run: |
+          docker tag brain-concept:ci "$IMAGE:${{ github.sha }}"
+          docker tag brain-concept:ci "$IMAGE:latest"
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
+
+      - name: Say why it wasn't pushed
+        if: env.PUSH != 'true' && github.ref == 'refs/heads/main'
+        run: |
+          echo "::notice::Not pushed to ECR: set the AWS_ROLE_ARN, AWS_REGION and ECR_REPOSITORY repository variables once the infra repo grants the role."
