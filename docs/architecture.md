@@ -15,7 +15,7 @@ Rendered version with diagrams: https://claude.ai/artifact/HNRKf4rtHYs25psQwSMNm
 | Interface | MCP. Agents first; a human deep-wiki UI can come later on the same store. |
 | Access | Per repo, following the caller's GitHub permissions. |
 | Stack | TypeScript on Node. |
-| Runs | Local POC first, then hosted on Azure. |
+| Runs | Local POC first, then hosted on AWS ECS. |
 | Freshness | Rebuilt on every merge to main (git hook locally, webhook hosted). |
 | Scale | Unknown and growing number of repos, mixed languages and frameworks. |
 
@@ -358,11 +358,13 @@ linked (`decisions.md`, 2026-10-12).
 
 | Part | Local POC | Hosted |
 |---|---|---|
-| Store | SQLite (`node:sqlite`) | Azure Database for PostgreSQL |
-| Trigger | `reference-transaction` git hook (fires on fetch, pull, merge) or `brain sync` | GitHub App webhook → Azure Service Bus |
-| Workers | In the CLI process | Azure Container Apps jobs |
+| Runs on | The developer's machine | AWS ECS, the Docker image this repo builds and pushes to ECR; infrastructure in Terraform in the Platform-owned `<project>-terraform` repo; non-prod first |
+| Store | SQLite (`node:sqlite`) | PostgreSQL on Amazon RDS |
+| Trigger | `reference-transaction` git hook (fires on fetch, pull, merge) or `brain sync` | GitHub App webhook → a queue (e.g. SQS) |
+| Workers | In the CLI process | ECS tasks from the same image |
+| AI | Claude Code signed in as the developer | Claude Code in the container, through Amazon Bedrock with the task role |
 | MCP transport | stdio | Streamable HTTP behind Entra ID |
-| Source code | Existing local clones, or the brain's own clones of GitHub repos | Shallow clones cached per repo |
+| Source code | Existing local clones, or the brain's own clones of GitHub repos | The brain's clones, on a volume mounted at the data directory (EFS) |
 | Permissions | Local policy: every enrolled repo | GitHub App + caller identity per request |
 
 ## Scaling

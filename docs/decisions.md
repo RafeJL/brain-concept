@@ -50,6 +50,7 @@ One line each; superseded ones are in the [archive](decisions-archive.md).
 - [2026-10-14: planning depth (B8)](#2026-10-14-planning-depth-b8)
 - [2026-10-15: wiki quality from planning tests](#2026-10-15-wiki-quality-from-planning-tests)
 - [2026-10-21: dropped facts are sorted by why, and written to a file](#2026-10-21-dropped-facts-are-sorted-by-why-and-written-to-a-file)
+- [2026-10-22: hosted on AWS ECS from a Docker image; Terraform in a Platform-owned repo](#2026-10-22-hosted-on-aws-ecs-from-a-docker-image-terraform-in-a-platform-owned-repo)
 
 ## 2026-09-29: the brain is a separate system
 
@@ -977,3 +978,39 @@ dropped. And a page that was renamed or removed looked like a page that lost a l
 **What would change it:** if reading the lists shows "restated" often wrong, tighten it (require
 the same file, or more than names); if renamed pages are missed or misnamed, change the share.
 Whether to put facts back is decided on the lists, with the citation-support measure beside them.
+
+## 2026-10-22: hosted on AWS ECS from a Docker image; Terraform in a Platform-owned repo
+
+The brain is moving from a local proof of concept to hosting for a Project MAX team trial. At the
+Platform Team kick-off on 2026-10-21, Nathan Abbatiello (AWS Lead) set the standard, which this
+follows in place of the Azure plan:
+
+- **ECS, not EC2.** The brain runs as ECS tasks from one Docker image, built by this repo's
+  pipeline and pushed to ECR (`.github/workflows/image.yml`, through GitHub OIDC; the role ARN,
+  region and repository are repository variables).
+- **Terraform in a separate repo**, `<project>-terraform`, made from the Platform Team's golden
+  template, using their modules and owned by them. Nothing in this repo depends on it.
+- **Non-prod first.** The OU and account are still to be decided.
+
+**Design calls:**
+- **Claude through Bedrock (proposed, not yet agreed).** The kick-off didn't cover how the
+  hosted brain reaches Claude. The proposal is Amazon Bedrock with the ECS task role
+  (`CLAUDE_CODE_USE_BEDROCK`), so no person's Claude sign-in is in the image; confirm it, and
+  that the models are enabled in the account, with the Platform Team.
+- **One data directory** (`BRAIN_DATA`, `/data` in the image) for the store, the clones, the locks
+  and the temporary worktrees, so one volume (EFS) keeps them across restarts. Set in the image's
+  entrypoint through the existing `BRAIN_DB` and `TMPDIR`, so the code is unchanged.
+- **`tsx` is a runtime dependency**, not a dev one: the launchers run the TypeScript directly, and
+  the image installs production dependencies only. No build step is added.
+- **Claude Code is pinned** in the image, because its version changes how wikis are written.
+- **The pipeline pushes only when configured**: until the infra repo grants the role, a push to
+  main builds and smoke-tests the image and says why it didn't push.
+
+Not in this step: the Streamable HTTP transport behind Entra ID, Postgres on RDS, GitHub App
+credentials and per-caller permissions, a webhook in place of the local hooks, and sync locks
+and enrolment rows that a restarted container can't mistake for live (they are judged by
+process id, which a new container may reuse).
+
+**What would change it:** the Platform Team's modules or account set-up needing a different shape
+(EC2, a different registry), or EFS proving too slow for worktrees, which can then go on the
+task's local disk by setting `TMPDIR`.
