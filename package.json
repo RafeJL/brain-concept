@@ -9,11 +9,13 @@
   },
   "bin": {
     "brain": "bin/brain.mjs",
-    "brain-mcp": "bin/brain-mcp.mjs"
+    "brain-mcp": "bin/brain-mcp.mjs",
+    "brain-mcp-http": "bin/brain-mcp-http.mjs"
   },
   "scripts": {
     "brain": "node bin/brain.mjs",
     "mcp": "node bin/brain-mcp.mjs",
+    "mcp:http": "node bin/brain-mcp-http.mjs",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
     "test": "node node_modules/vitest/vitest.mjs run",
     "check": "npm run typecheck && npm test"

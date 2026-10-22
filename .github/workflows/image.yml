@@ -50,7 +50,22 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Smoke test (brain doctor in the container)
-        run: docker run --rm brain-concept:ci
+        run: docker run --rm brain-concept:ci brain doctor
+
+      - name: Smoke test (MCP over HTTP)
+        run: |
+          docker run -d --name brain -p 8080:8080 -e BRAIN_HTTP_TOKEN=ci-token brain-concept:ci
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/healthz && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8080/mcp \
+            -H 'authorization: Bearer ci-token' \
+            -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
+            | grep -q citation-brain
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8080/mcp)" = 401
+
+      - name: Container logs
+        if: always()
+        run: docker logs brain || true
 
       - name: Configure AWS credentials
         if: env.PUSH == 'true'

@@ -27,6 +27,26 @@ export function clonesDir(dbPath = resolveDbPath()): string {
   return process.env.BRAIN_REPOS ?? join(dirname(dbPath), "repos");
 }
 
+/** How the HTTP MCP server listens, from BRAIN_HTTP_* (see docs/development.md, "Docker and AWS"). */
+export interface HttpConfig {
+  host: string;
+  port: number;
+  token?: string;
+  allowedHosts?: string[];
+}
+
+export function httpConfig(env: NodeJS.ProcessEnv = process.env): HttpConfig {
+  const port = Number(env.BRAIN_HTTP_PORT ?? 8080);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error(`BRAIN_HTTP_PORT isn't a port: ${env.BRAIN_HTTP_PORT}`);
+  const hosts = env.BRAIN_HTTP_ALLOWED_HOSTS?.split(",").map((h) => h.trim()).filter(Boolean);
+  return {
+    host: env.BRAIN_HTTP_HOST ?? "127.0.0.1",
+    port,
+    token: env.BRAIN_HTTP_TOKEN || undefined,
+    allowedHosts: hosts?.length ? hosts : undefined,
+  };
+}
+
 /**
  * The person using the brain on this machine, for the name on facts they confirm: their git
  * user.name, or their login name. Hosted, it comes from the caller's identity instead.

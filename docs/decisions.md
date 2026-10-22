@@ -51,6 +51,7 @@ One line each; superseded ones are in the [archive](decisions-archive.md).
 - [2026-10-15: wiki quality from planning tests](#2026-10-15-wiki-quality-from-planning-tests)
 - [2026-10-21: dropped facts are sorted by why, and written to a file](#2026-10-21-dropped-facts-are-sorted-by-why-and-written-to-a-file)
 - [2026-10-22: hosted on AWS ECS from a Docker image; Terraform in a Platform-owned repo](#2026-10-22-hosted-on-aws-ecs-from-a-docker-image-terraform-in-a-platform-owned-repo)
+- [2026-10-22: MCP over HTTP, stateless, behind a shared token until Entra](#2026-10-22-mcp-over-http-stateless-behind-a-shared-token-until-entra)
 
 ## 2026-09-29: the brain is a separate system
 
@@ -1014,3 +1015,32 @@ process id, which a new container may reuse).
 **What would change it:** the Platform Team's modules or account set-up needing a different shape
 (EC2, a different registry), or EFS proving too slow for worktrees, which can then go on the
 task's local disk by setting `TMPDIR`.
+
+## 2026-10-22: MCP over HTTP, stateless, behind a shared token until Entra
+
+Hosted agents reach the brain over Streamable HTTP at `/mcp` (`src/serve/http.ts`,
+`brain-mcp-http`, the image's default command). The tools, their names and the instructions are
+the same as over stdio; `createServer` is shared.
+
+- **Stateless.** Each POST gets a new server and transport and a plain JSON answer: no session id,
+  no SSE stream. The brain sends no notifications, so nothing is lost, and any ECS task can answer
+  any request, so a deploy or restart doesn't break a session. GET and DELETE on `/mcp` answer 405.
+- **Instructions per `initialize`.** Only that answer carries them, so only it builds the list of
+  what the caller can read, as a new stdio session does at start.
+- **A shared bearer token** (`BRAIN_HTTP_TOKEN`) until the Entra app registration exists (asked of
+  IT). The server refuses to listen off loopback without one. Every caller with it sees every
+  enrolled repo, as stage 1 planned: enrol only repos all the testers can read.
+- **Every authenticated caller gets all eleven tools, writes included.** The brain is meant to be
+  taught by everyone who uses it, not curated by one owner, so writes aren't held back or
+  downgraded to proposals over HTTP. The words in `confirmed_with` and Claude Code's prompt still
+  apply as before, but the prompt is the client's to show: a caller that isn't Claude Code (a
+  script with the token) can write confirmed facts and start enrolments without one. So the token
+  is the gate: keep it in Secrets Manager, give it only to the testers, and rotate it if it
+  leaks. With a shared token, facts are credited to "the person using the brain"; Entra gives
+  each caller their own name.
+- **Host checking** (`BRAIN_HTTP_ALLOWED_HOSTS`) against DNS rebinding, on by default on loopback.
+- **`GET /healthz`** answers without a token, for the load balancer.
+
+**What would change it:** a need for server-to-client messages (progress, elicitation), which
+needs sessions and sticky routing; or Entra, which replaces the token and gives the caller's
+identity to `AccessPolicy` and the name on confirmed facts.
